@@ -42,6 +42,11 @@ pub fn load_from_path(path: &Path) -> Result<AppConfig, ConfigError> {
         Ok(contents) => load_from_contents(path, &contents),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => seed_defaults(path),
         Err(source) => {
+            // The path exists but cannot be read (permissions, a parent that is
+            // not a directory, ...). This is deliberately non-fatal: fall back
+            // to in-memory defaults rather than refusing to start. Only a
+            // *missing* file that cannot be seeded is fatal (see the module
+            // doc).
             eprintln!(
                 "quickai: [config] cannot read {}: {source}. using in-memory defaults",
                 path.display()

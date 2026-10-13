@@ -211,22 +211,54 @@ fn load_missing_file_in_missing_parent_dir_creates_dir() {
     assert_eq!(config.chat.model, DEFAULT_CHAT_MODEL);
 }
 
+/// A *missing* config file whose defaults cannot be seeded is the one fatal
+/// case: `seed_defaults` fails and `load_from_path` surfaces `SeedFailed`.
+///
+/// Reaching it needs a path that `read_to_string` reports as `NotFound` while
+/// the seed write still fails. That combination requires a different
+/// filesystem mechanism per platform, so this test has a Windows and a Unix
+/// variant — the loader's *contract* is platform-independent (see
+/// `load_directory_path_returns_in_memory_defaults`).
+#[cfg(windows)]
 #[test]
 fn load_seed_failure_returns_seed_failed() {
-    // Point the config path at a location whose parent is a regular file:
-    // `create_dir_all` then fails on every platform, forcing the seed write to
-    // error and surfacing `SeedFailed`.
+    // A parent component that is a regular file: Windows reports the probe as
+    // `NotFound` (ERROR_PATH_NOT_FOUND), so the loader seeds — and the seed's
+    // `create_dir_all` then fails over the file, surfacing `SeedFailed`.
     let dir = fresh_temp_dir();
     let blocker = dir.join("blocker-file");
     std::fs::write(&blocker, "im a file not a dir").unwrap();
     let forbidden_path = blocker.join("config.toml");
 
     match load_from_path(&forbidden_path) {
-        Err(ConfigError::SeedFailed { path, .. }) => {
-            assert_eq!(path, forbidden_path);
-        }
+        Err(ConfigError::SeedFailed { path, .. }) => assert_eq!(path, forbidden_path),
         Err(other) => panic!("unexpected error: {other:?}"),
         Ok(_) => panic!("expected SeedFailed but got Ok"),
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn load_seed_failure_returns_seed_failed() {
+    // A missing file inside a read-only directory: the probe is `NotFound`
+    // (the file is absent), and the seed write then fails with `EACCES` when
+    // it tries to create its tmpfile alongside.
+    use std::os::unix::fs::PermissionsExt;
+    let dir = fresh_temp_dir();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let path = config_path_in(&dir);
+
+    let result = load_from_path(&path);
+
+    // Restore so cleanup works.
+    let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+
+    match result {
+        Err(ConfigError::SeedFailed { path: p, .. }) => assert_eq!(p, path),
+        Ok(_) => {
+            // Vacuous when running as root: the write succeeds despite 0o500.
+        }
+        Err(other) => panic!("unexpected error: {other:?}"),
     }
 }
 
@@ -299,9 +331,14 @@ fn load_corrupt_file_is_renamed_and_reseeded() {
 
 // ── loader: read error (not NotFound) ───────────────────────────────────────
 
+/// An unreadable config path (here: a directory) is deliberately non-fatal:
+/// the loader logs and falls back to in-memory defaults rather than refusing
+/// to start. This is the counterpart to `load_seed_failure_returns_seed_failed`
+/// — only a *missing* file that cannot be seeded is fatal.
+///
 /// Reading a directory as a file is a non-`NotFound` I/O error on every
-/// platform, so this exercises the "fall back to in-memory defaults" branch
-/// (`load_from_path`'s `Err(source)` arm) on Windows too.
+/// platform (`EISDIR`/`IsADirectory` on Unix, access-denied on Windows), so
+/// this exercises the "fall back to defaults" arm cross-platform.
 #[test]
 fn load_directory_path_returns_in_memory_defaults() {
     let dir = fresh_temp_dir();
