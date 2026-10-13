@@ -373,6 +373,69 @@ mod tests {
         }
     }
 
+    /// Names of the emitted chunk variants, in order. Exhaustive so no match
+    /// arm is left unexecuted.
+    fn variants(chunks: &[ProviderChunk]) -> Vec<&'static str> {
+        chunks
+            .iter()
+            .map(|c| match c {
+                ProviderChunk::Token(_) => "token",
+                ProviderChunk::ThinkingToken(_) => "thinking",
+                ProviderChunk::ToolCalls(_) => "tool_calls",
+                ProviderChunk::Done => "done",
+                ProviderChunk::Cancelled => "cancelled",
+                ProviderChunk::Error(_) => "error",
+            })
+            .collect()
+    }
+
+    /// Text of every `Token` chunk, in order.
+    fn tokens(chunks: &[ProviderChunk]) -> Vec<String> {
+        chunks
+            .iter()
+            .filter_map(|c| match c {
+                ProviderChunk::Token(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Text of every `ThinkingToken` chunk, in order.
+    fn thinking(chunks: &[ProviderChunk]) -> Vec<String> {
+        chunks
+            .iter()
+            .filter_map(|c| match c {
+                ProviderChunk::ThinkingToken(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// `(id, name, arguments)` of every tool call emitted, in order.
+    fn tool_calls(chunks: &[ProviderChunk]) -> Vec<(String, String, String)> {
+        chunks
+            .iter()
+            .flat_map(|c| match c {
+                ProviderChunk::ToolCalls(calls) => calls
+                    .iter()
+                    .map(|tc| (tc.id.clone(), tc.name.clone(), tc.arguments.clone()))
+                    .collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .collect()
+    }
+
+    /// Stable code of every `Error` chunk, in order.
+    fn error_codes(chunks: &[ProviderChunk]) -> Vec<String> {
+        chunks
+            .iter()
+            .filter_map(|c| match c {
+                ProviderChunk::Error(e) => Some(e.code.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     #[test]
     fn anthropic_computer_tool_creation() {
         let tools = anthropic_computer_tool(1920, 1080);
@@ -496,6 +559,15 @@ mod tests {
     }
 
     #[test]
+    fn error_codes_ignores_non_error_chunks() {
+        let chunks = vec![
+            ProviderChunk::Done,
+            ProviderChunk::Error(ApiError::new(super::super::CODE_NETWORK, "down")),
+        ];
+        assert_eq!(error_codes(&chunks), vec![super::super::CODE_NETWORK]);
+    }
+
+    #[test]
     fn drain_tool_call_clears_accumulator() {
         let mut id = "id1".to_string();
         let mut name = "computer".to_string();
@@ -529,9 +601,11 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.code, super::super::CODE_MISSING_API_KEY);
-        assert!(chunks.iter().any(
-            |c| matches!(c, ProviderChunk::Error(e) if e.code == super::super::CODE_MISSING_API_KEY)
-        ));
+        assert_eq!(variants(&chunks), vec!["error"]);
+        assert_eq!(
+            error_codes(&chunks),
+            vec![super::super::CODE_MISSING_API_KEY]
+        );
     }
 
     #[tokio::test]
@@ -563,9 +637,8 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.code, super::super::CODE_RATE_LIMITED);
-        assert!(
-            matches!(&chunks[0], ProviderChunk::Error(e) if e.code == super::super::CODE_RATE_LIMITED)
-        );
+        assert_eq!(variants(&chunks), vec!["error"]);
+        assert_eq!(error_codes(&chunks), vec![super::super::CODE_RATE_LIMITED]);
     }
 
     #[tokio::test]
@@ -599,9 +672,9 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(accumulated, "Hi");
-        assert!(matches!(&chunks[0], ProviderChunk::ThinkingToken(t) if t == "plan"));
-        assert!(matches!(&chunks[1], ProviderChunk::Token(t) if t == "Hi"));
-        assert!(chunks.iter().any(|c| matches!(c, ProviderChunk::Done)));
+        assert_eq!(thinking(&chunks), vec!["plan"]);
+        assert_eq!(tokens(&chunks), vec!["Hi"]);
+        assert_eq!(variants(&chunks), vec!["thinking", "token", "done"]);
     }
 
     /// Runs the Anthropic stream against a mock server returning `body`.
@@ -643,13 +716,14 @@ mod tests {
                     data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"\\\"screenshot\\\"}\"}}\n\n\
                     data: {\"type\":\"content_block_stop\"}\n\n";
         let (_, chunks) = run_against_body(body, CancellationToken::new()).await;
-        assert!(chunks.iter().any(|c| matches!(
-            c,
-            ProviderChunk::ToolCalls(calls)
-                if calls[0].id == "id1"
-                    && calls[0].name == "computer"
-                    && calls[0].arguments == "{\"action\":\"screenshot\"}"
-        )));
+        assert_eq!(
+            tool_calls(&chunks),
+            vec![(
+                "id1".to_string(),
+                "computer".to_string(),
+                r#"{"action":"screenshot"}"#.to_string()
+            )]
+        );
     }
 
     #[tokio::test]
@@ -657,10 +731,11 @@ mod tests {
         let body = "data: {\"type\":\"content_block_start\",\"content_block\":{\"type\":\"tool_use\",\"id\":\"id1\",\"name\":\"computer\"}}\n\n\
                     data: [DONE]\n\n";
         let (_, chunks) = run_against_body(body, CancellationToken::new()).await;
-        assert!(chunks
-            .iter()
-            .any(|c| matches!(c, ProviderChunk::ToolCalls(calls) if calls[0].name == "computer")));
-        assert!(chunks.iter().any(|c| matches!(c, ProviderChunk::Done)));
+        assert_eq!(
+            tool_calls(&chunks),
+            vec![("id1".to_string(), "computer".to_string(), String::new())]
+        );
+        assert_eq!(variants(&chunks), vec!["tool_calls", "done"]);
     }
 
     #[tokio::test]
@@ -669,7 +744,7 @@ mod tests {
         let body = "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n";
         let (accumulated, chunks) = run_against_body(body, CancellationToken::new()).await;
         assert_eq!(accumulated, "hi");
-        assert!(chunks.iter().any(|c| matches!(c, ProviderChunk::Done)));
+        assert!(variants(&chunks).contains(&"done"));
     }
 
     #[tokio::test]
@@ -680,7 +755,7 @@ mod tests {
                     data: {\"type\":\"message_stop\"}\n\n";
         let (accumulated, chunks) = run_against_body(body, CancellationToken::new()).await;
         assert!(accumulated.is_empty());
-        assert!(chunks.iter().any(|c| matches!(c, ProviderChunk::Done)));
+        assert!(variants(&chunks).contains(&"done"));
     }
 
     #[tokio::test]
@@ -689,8 +764,7 @@ mod tests {
         token.cancel();
         let body = "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"x\"}}\n\n";
         let (_, chunks) = run_against_body(body, token).await;
-        assert!(chunks.iter().any(|c| matches!(c, ProviderChunk::Cancelled)));
-        assert!(!chunks.iter().any(|c| matches!(c, ProviderChunk::Done)));
+        assert_eq!(variants(&chunks), vec!["cancelled"]);
     }
 
     #[tokio::test]
@@ -728,20 +802,23 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.code, super::super::CODE_NETWORK);
-        assert!(chunks
-            .iter()
-            .any(|c| matches!(c, ProviderChunk::Error(e) if e.code == super::super::CODE_NETWORK)));
+        assert_eq!(variants(&chunks), vec!["error"]);
+        assert_eq!(error_codes(&chunks), vec![super::super::CODE_NETWORK]);
     }
 
     /// Serves `chunks` as a raw HTTP/1.1 chunked body, flushing each element
     /// separately so the client observes them as distinct network reads.
-    async fn serve_chunks(chunks: Vec<Vec<u8>>) -> u16 {
+    /// Serves `chunks` as a raw HTTP/1.1 chunked body, flushing each element
+    /// separately so the client observes them as distinct network reads.
+    /// Returns the port and the server task's handle; callers await the handle
+    /// so the trailing terminator is always written.
+    async fn serve_chunks(chunks: Vec<Vec<u8>>) -> (u16, tokio::task::JoinHandle<()>) {
         use tokio::io::AsyncWriteExt;
         use tokio::net::TcpListener;
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let _ = stream
                 .write_all(
@@ -759,11 +836,11 @@ mod tests {
             }
             let _ = stream.write_all(b"0\r\n\r\n").await;
         });
-        port
+        (port, handle)
     }
 
     async fn run_against_chunks(chunks: Vec<Vec<u8>>) -> (String, Vec<ProviderChunk>) {
-        let port = serve_chunks(chunks).await;
+        let (port, handle) = serve_chunks(chunks).await;
         let client = reqwest::Client::builder().no_proxy().build().unwrap();
         let mut out: Vec<ProviderChunk> = Vec::new();
         let accumulated = stream_anthropic_chat(
@@ -782,6 +859,8 @@ mod tests {
         )
         .await
         .unwrap();
+        // Wait for the server task so its trailing chunked terminator runs.
+        let _ = handle.await;
         (accumulated, out)
     }
 
@@ -901,9 +980,8 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.code, super::super::CODE_NETWORK);
-        assert!(
-            matches!(&chunks[0], ProviderChunk::Error(e) if e.code == super::super::CODE_NETWORK)
-        );
+        assert_eq!(variants(&chunks), vec!["error"]);
+        assert_eq!(error_codes(&chunks), vec![super::super::CODE_NETWORK]);
     }
 
     #[tokio::test]
@@ -912,7 +990,7 @@ mod tests {
         let (accumulated, chunks) =
             run_with_flags("data: {\"type\":\"message_stop\"}\n\n", false, "").await;
         assert!(accumulated.is_empty());
-        assert!(chunks.iter().any(|c| matches!(c, ProviderChunk::Done)));
+        assert!(variants(&chunks).contains(&"done"));
     }
 
     #[tokio::test]
@@ -925,9 +1003,7 @@ mod tests {
                     data: {\"type\":\"message_stop\"}\n\n";
         let (accumulated, chunks) = run_against_body(body, CancellationToken::new()).await;
         assert!(accumulated.is_empty());
-        assert!(!chunks
-            .iter()
-            .any(|c| matches!(c, ProviderChunk::ToolCalls(_))));
+        assert!(tool_calls(&chunks).is_empty());
     }
 
     #[tokio::test]
@@ -945,9 +1021,8 @@ mod tests {
                     data: {\"type\":\"message_stop\"}\n\n";
         let (accumulated, chunks) = run_against_body(body, CancellationToken::new()).await;
         assert!(accumulated.is_empty());
-        assert!(!chunks
-            .iter()
-            .any(|c| matches!(c, ProviderChunk::Token(_) | ProviderChunk::ThinkingToken(_))));
+        assert!(tokens(&chunks).is_empty());
+        assert!(thinking(&chunks).is_empty());
     }
 
     #[tokio::test]
@@ -955,15 +1030,13 @@ mod tests {
         let body = "data: {\"type\":\"content_block_stop\"}\n\n\
                     data: {\"type\":\"message_stop\"}\n\n";
         let (_, chunks) = run_against_body(body, CancellationToken::new()).await;
-        assert!(!chunks
-            .iter()
-            .any(|c| matches!(c, ProviderChunk::ToolCalls(_))));
+        assert!(tool_calls(&chunks).is_empty());
     }
 
     #[tokio::test]
     async fn done_marker_without_pending_tool_call_emits_done_only() {
         let (_, chunks) = run_against_body("data: [DONE]\n\n", CancellationToken::new()).await;
-        assert!(chunks.iter().all(|c| matches!(c, ProviderChunk::Done)));
+        assert_eq!(variants(&chunks), vec!["done"]);
     }
 
     #[tokio::test]

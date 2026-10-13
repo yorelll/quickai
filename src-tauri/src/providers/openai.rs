@@ -475,6 +475,69 @@ mod tests {
         }
     }
 
+    /// Names of the emitted chunk variants, in order. Exhaustive so no match
+    /// arm is left unexecuted.
+    fn variants(chunks: &[ProviderChunk]) -> Vec<&'static str> {
+        chunks
+            .iter()
+            .map(|c| match c {
+                ProviderChunk::Token(_) => "token",
+                ProviderChunk::ThinkingToken(_) => "thinking",
+                ProviderChunk::ToolCalls(_) => "tool_calls",
+                ProviderChunk::Done => "done",
+                ProviderChunk::Cancelled => "cancelled",
+                ProviderChunk::Error(_) => "error",
+            })
+            .collect()
+    }
+
+    /// Text of every `Token` chunk, in order.
+    fn tokens(chunks: &[ProviderChunk]) -> Vec<String> {
+        chunks
+            .iter()
+            .filter_map(|c| match c {
+                ProviderChunk::Token(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Text of every `ThinkingToken` chunk, in order.
+    fn thinking(chunks: &[ProviderChunk]) -> Vec<String> {
+        chunks
+            .iter()
+            .filter_map(|c| match c {
+                ProviderChunk::ThinkingToken(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// `(name, arguments)` of every tool call emitted, in order.
+    fn tool_calls(chunks: &[ProviderChunk]) -> Vec<(String, String)> {
+        chunks
+            .iter()
+            .flat_map(|c| match c {
+                ProviderChunk::ToolCalls(calls) => calls
+                    .iter()
+                    .map(|tc| (tc.name.clone(), tc.arguments.clone()))
+                    .collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .collect()
+    }
+
+    /// Stable code of every `Error` chunk, in order.
+    fn error_codes(chunks: &[ProviderChunk]) -> Vec<String> {
+        chunks
+            .iter()
+            .filter_map(|c| match c {
+                ProviderChunk::Error(e) => Some(e.code.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     #[test]
     fn openai_tool_definitions_count() {
         let tools = openai_computer_tools();
@@ -644,9 +707,8 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.code, super::super::CODE_UNAUTHORIZED);
-        assert!(
-            matches!(&chunks[0], ProviderChunk::Error(e) if e.code == super::super::CODE_UNAUTHORIZED)
-        );
+        assert_eq!(variants(&chunks), vec!["error"]);
+        assert_eq!(error_codes(&chunks), vec![super::super::CODE_UNAUTHORIZED]);
     }
 
     #[tokio::test]
@@ -677,9 +739,8 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(accumulated, "Hello");
-        assert!(matches!(&chunks[0], ProviderChunk::Token(t) if t == "Hel"));
-        assert!(matches!(&chunks[1], ProviderChunk::Token(t) if t == "lo"));
-        assert!(chunks.iter().any(|c| matches!(c, ProviderChunk::Done)));
+        assert_eq!(tokens(&chunks), vec!["Hel", "lo"]);
+        assert_eq!(variants(&chunks), vec!["token", "token", "done"]);
     }
 
     #[tokio::test]
@@ -710,8 +771,8 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(accumulated, "ok");
-        assert!(matches!(&chunks[0], ProviderChunk::ThinkingToken(t) if t == "step"));
-        assert!(matches!(&chunks[1], ProviderChunk::Token(t) if t == "ok"));
+        assert_eq!(thinking(&chunks), vec!["step"]);
+        assert_eq!(tokens(&chunks), vec!["ok"]);
     }
 
     /// Runs the stream against a mock server returning `body` and returns the
@@ -749,9 +810,10 @@ mod tests {
         let body = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"id1\",\"function\":{\"name\":\"computer_click\",\"arguments\":\"{\\\"x\\\":1}\"}}]},\"finish_reason\":null}]}\n\n\
                     data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n";
         let (_, chunks) = run_against_body(body, CancellationToken::new()).await;
-        assert!(chunks
-            .iter()
-            .any(|c| matches!(c, ProviderChunk::ToolCalls(calls) if calls.len() == 1 && calls[0].name == "computer_click")));
+        assert_eq!(
+            tool_calls(&chunks),
+            vec![("computer_click".to_string(), r#"{"x":1}"#.to_string())]
+        );
     }
 
     #[tokio::test]
@@ -759,10 +821,11 @@ mod tests {
         let body = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"id1\",\"function\":{\"name\":\"computer_type\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n\
                     data: [DONE]\n\n";
         let (_, chunks) = run_against_body(body, CancellationToken::new()).await;
-        assert!(chunks.iter().any(
-            |c| matches!(c, ProviderChunk::ToolCalls(calls) if calls[0].name == "computer_type")
-        ));
-        assert!(chunks.iter().any(|c| matches!(c, ProviderChunk::Done)));
+        assert_eq!(
+            tool_calls(&chunks),
+            vec![("computer_type".to_string(), "{}".to_string())]
+        );
+        assert_eq!(variants(&chunks), vec!["tool_calls", "done"]);
     }
 
     #[tokio::test]
@@ -772,9 +835,7 @@ mod tests {
                     data: [DONE]\n\n";
         let (accumulated, chunks) = run_against_body(body, CancellationToken::new()).await;
         assert_eq!(accumulated, "hi");
-        assert!(!chunks
-            .iter()
-            .any(|c| matches!(c, ProviderChunk::ToolCalls(_))));
+        assert!(tool_calls(&chunks).is_empty());
     }
 
     #[tokio::test]
@@ -784,7 +845,7 @@ mod tests {
             "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\n";
         let (accumulated, chunks) = run_against_body(body, CancellationToken::new()).await;
         assert_eq!(accumulated, "hi");
-        assert!(chunks.iter().any(|c| matches!(c, ProviderChunk::Done)));
+        assert!(variants(&chunks).contains(&"done"));
     }
 
     #[tokio::test]
@@ -793,9 +854,10 @@ mod tests {
         // flush the pending tool call.
         let body = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"id1\",\"function\":{\"name\":\"computer_click\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n";
         let (_, chunks) = run_against_body(body, CancellationToken::new()).await;
-        assert!(chunks.iter().any(
-            |c| matches!(c, ProviderChunk::ToolCalls(calls) if calls[0].name == "computer_click")
-        ));
+        assert_eq!(
+            tool_calls(&chunks),
+            vec![("computer_click".to_string(), "{}".to_string())]
+        );
     }
 
     #[tokio::test]
@@ -805,8 +867,7 @@ mod tests {
         let body =
             "data: {\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\n";
         let (_, chunks) = run_against_body(body, token).await;
-        assert!(chunks.iter().any(|c| matches!(c, ProviderChunk::Cancelled)));
-        assert!(!chunks.iter().any(|c| matches!(c, ProviderChunk::Done)));
+        assert_eq!(variants(&chunks), vec!["cancelled"]);
     }
 
     #[tokio::test]
@@ -817,13 +878,7 @@ mod tests {
                     data: [DONE]\n\n";
         let (accumulated, chunks) = run_against_body(body, CancellationToken::new()).await;
         assert_eq!(accumulated, "hi");
-        assert!(
-            chunks
-                .iter()
-                .filter(|c| matches!(c, ProviderChunk::Token(_)))
-                .count()
-                == 1
-        );
+        assert_eq!(tokens(&chunks), vec!["hi"]);
     }
 
     #[tokio::test]
@@ -859,20 +914,23 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.code, super::super::CODE_NETWORK);
-        assert!(chunks
-            .iter()
-            .any(|c| matches!(c, ProviderChunk::Error(e) if e.code == super::super::CODE_NETWORK)));
+        assert_eq!(variants(&chunks), vec!["error"]);
+        assert_eq!(error_codes(&chunks), vec![super::super::CODE_NETWORK]);
     }
 
     /// Serves `chunks` as a raw HTTP/1.1 chunked body, flushing each element
     /// separately so the client observes them as distinct network reads.
-    async fn serve_chunks(chunks: Vec<Vec<u8>>) -> u16 {
+    /// Serves `chunks` as a raw HTTP/1.1 chunked body, flushing each element
+    /// separately so the client observes them as distinct network reads.
+    /// Returns the port and the server task's handle; callers await the handle
+    /// so the trailing terminator is always written.
+    async fn serve_chunks(chunks: Vec<Vec<u8>>) -> (u16, tokio::task::JoinHandle<()>) {
         use tokio::io::AsyncWriteExt;
         use tokio::net::TcpListener;
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let _ = stream
                 .write_all(
@@ -890,11 +948,11 @@ mod tests {
             }
             let _ = stream.write_all(b"0\r\n\r\n").await;
         });
-        port
+        (port, handle)
     }
 
     async fn run_against_chunks(chunks: Vec<Vec<u8>>) -> (String, Vec<ProviderChunk>) {
-        let port = serve_chunks(chunks).await;
+        let (port, handle) = serve_chunks(chunks).await;
         let client = reqwest::Client::builder().no_proxy().build().unwrap();
         let mut out: Vec<ProviderChunk> = Vec::new();
         let accumulated = stream_openai_chat(
@@ -910,6 +968,8 @@ mod tests {
         )
         .await
         .unwrap();
+        // Wait for the server task so its trailing chunked terminator runs.
+        let _ = handle.await;
         (accumulated, out)
     }
 
@@ -973,7 +1033,7 @@ mod tests {
         .unwrap();
         mock.assert_async().await;
         assert!(accumulated.is_empty());
-        assert!(chunks.iter().any(|c| matches!(c, ProviderChunk::Done)));
+        assert_eq!(variants(&chunks), vec!["done"]);
     }
 
     #[tokio::test]
@@ -996,9 +1056,8 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.code, super::super::CODE_NETWORK);
-        assert!(
-            matches!(&chunks[0], ProviderChunk::Error(e) if e.code == super::super::CODE_NETWORK)
-        );
+        assert_eq!(variants(&chunks), vec!["error"]);
+        assert_eq!(error_codes(&chunks), vec![super::super::CODE_NETWORK]);
     }
 
     #[tokio::test]
@@ -1010,10 +1069,9 @@ mod tests {
                     data: [DONE]\n\n";
         let (accumulated, chunks) = run_against_body(body, CancellationToken::new()).await;
         assert!(accumulated.is_empty());
-        assert!(!chunks
-            .iter()
-            .any(|c| matches!(c, ProviderChunk::Token(_) | ProviderChunk::ThinkingToken(_))));
-        assert!(chunks.iter().any(|c| matches!(c, ProviderChunk::Done)));
+        assert!(tokens(&chunks).is_empty());
+        assert!(thinking(&chunks).is_empty());
+        assert_eq!(variants(&chunks), vec!["done"]);
     }
 
     #[tokio::test]
@@ -1031,9 +1089,9 @@ mod tests {
         let body = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":2,\"id\":\"id3\",\"function\":{\"name\":\"computer_launch\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n\
                     data: [DONE]\n\n";
         let (_, chunks) = run_against_body(body, CancellationToken::new()).await;
-        assert!(chunks.iter().any(
-            |c| matches!(c, ProviderChunk::ToolCalls(calls) if calls.len() == 3 && calls[2].name == "computer_launch")
-        ));
+        let calls = tool_calls(&chunks);
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[2].0, "computer_launch");
     }
 
     #[tokio::test]
@@ -1041,7 +1099,16 @@ mod tests {
         let (accumulated, chunks) =
             run_against_body("data: [DONE]\n\n", CancellationToken::new()).await;
         assert!(accumulated.is_empty());
-        assert!(chunks.iter().all(|c| matches!(c, ProviderChunk::Done)));
+        assert_eq!(variants(&chunks), vec!["done"]);
+    }
+
+    #[test]
+    fn error_codes_ignores_non_error_chunks() {
+        let chunks = vec![
+            ProviderChunk::Done,
+            ProviderChunk::Error(ApiError::new(super::super::CODE_NETWORK, "down")),
+        ];
+        assert_eq!(error_codes(&chunks), vec![super::super::CODE_NETWORK]);
     }
 
     #[test]
