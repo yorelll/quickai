@@ -50,9 +50,11 @@ use tauri::{
 // ─── Window helpers ─────────────────────────────────────────────────────────
 
 /// Expected logical width of the overlay window for spawn-position calculations.
+#[cfg(target_os = "windows")]
 const OVERLAY_LOGICAL_WIDTH: f64 = 650.0;
 /// Collapsed bar height used for Y-clamp at show time. The window starts collapsed;
 /// the ResizeObserver expands it after mount.
+#[cfg(target_os = "windows")]
 const OVERLAY_LOGICAL_HEIGHT_COLLAPSED: f64 = 60.0;
 
 /// Minibar dimensions — thin always-on-top strip shown when the user
@@ -67,8 +69,8 @@ const OVERLAY_VISIBILITY_EVENT: &str = "quickai://visibility";
 const OVERLAY_VISIBILITY_SHOW: &str = "show";
 const OVERLAY_VISIBILITY_HIDE_REQUEST: &str = "hide-request";
 
-/// Frontend event that triggers the onboarding screen when one or more
-/// required permissions have not yet been granted.
+/// Frontend event that triggers the onboarding screen at startup.
+#[cfg(target_os = "windows")]
 const ONBOARDING_EVENT: &str = "quickai://onboarding";
 
 /// Frontend event emitted when the user switches away from QuickAI,
@@ -77,7 +79,9 @@ const ONBOARDING_EVENT: &str = "quickai://onboarding";
 const MINIBAR_EVENT: &str = "quickai://minibar";
 
 /// Logical dimensions of the onboarding window (centered, fixed size).
+#[cfg(target_os = "windows")]
 const ONBOARDING_LOGICAL_WIDTH: f64 = 460.0;
+#[cfg(target_os = "windows")]
 const ONBOARDING_LOGICAL_HEIGHT: f64 = 640.0;
 
 /// Tracks the intended visibility state of the overlay, preventing race conditions
@@ -625,7 +629,7 @@ fn finish_onboarding(
 
 // ─── Onboarding window ───────────────────────────────────────────────────────
 
-/// Shows the onboarding window on Windows. Sizes the main window, centers it,
+/// Shows the onboarding window. Sizes the main window, centers it,
 /// shows it, and emits the onboarding event.
 #[cfg(target_os = "windows")]
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -645,25 +649,8 @@ fn show_onboarding_window(app_handle: &tauri::AppHandle, stage: onboarding::Onbo
     });
 }
 
-/// Shows the onboarding window on platforms without a specific implementation.
-#[cfg(not(target_os = "windows"))]
-#[cfg_attr(coverage_nightly, coverage(off))]
-fn show_onboarding_window(app_handle: &tauri::AppHandle, stage: onboarding::OnboardingStage) {
-    let handle = app_handle.clone();
-    let _ = app_handle.run_on_main_thread(move || {
-        if let Some(window) = handle.get_webview_window("main") {
-            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
-                ONBOARDING_LOGICAL_WIDTH,
-                ONBOARDING_LOGICAL_HEIGHT,
-            )));
-            let _ = window.center();
-            let _ = window.show();
-        }
-        let _ = handle.emit(ONBOARDING_EVENT, OnboardingPayload { stage });
-    });
-}
-
 /// Payload emitted to the frontend for every onboarding transition.
+#[cfg(target_os = "windows")]
 #[derive(Clone, serde::Serialize)]
 struct OnboardingPayload {
     stage: onboarding::OnboardingStage,
@@ -946,6 +933,7 @@ mod tests {
         assert_eq!(OVERLAY_VISIBILITY_HIDE_REQUEST, "hide-request");
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn onboarding_event_constant_matches() {
         assert_eq!(ONBOARDING_EVENT, "quickai://onboarding");
@@ -979,12 +967,14 @@ mod tests {
         assert!(!is_openable_url(""));
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn onboarding_logical_dimensions() {
         assert_eq!(ONBOARDING_LOGICAL_WIDTH, 460.0);
         assert_eq!(ONBOARDING_LOGICAL_HEIGHT, 640.0);
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn overlay_logical_dimensions() {
         assert_eq!(OVERLAY_LOGICAL_WIDTH, 650.0);
