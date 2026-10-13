@@ -157,6 +157,13 @@ jobs:
         working-directory: src-tauri
         run: cargo +nightly-2026-03-30 llvm-cov --ignore-filename-regex "(lib|main)\.rs" --lcov --output-path lcov.info
 
+      # Region-level view: exposes partially-covered lines, which the
+      # --fail-under-lines metric counts as missed but --show-missing-lines
+      # does not list.
+      - name: Backend coverage HTML report
+        working-directory: src-tauri
+        run: cargo +nightly-2026-03-30 llvm-cov report --ignore-filename-regex "(lib|main)\.rs" --html --output-dir coverage-html
+
       # The gate itself, unchanged in strictness. --show-missing-lines prints the
       # uncovered line numbers in the log, so a failing run is self-diagnosing.
       - name: Backend coverage gate (100% lines)
@@ -171,6 +178,13 @@ jobs:
         with:
           name: backend-lcov
           path: src-tauri/lcov.info
+
+      - name: Upload coverage HTML report
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
+        with:
+          name: backend-coverage-html
+          path: src-tauri/coverage-html
 
   # Compiles and runs the backend test suite on Windows itself, so the
   # Win32-only modules (keyboard hook, GDI capture, SendInput, autostart) are

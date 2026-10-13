@@ -773,6 +773,7 @@ mod tests {
         assert_eq!(accumulated, "ok");
         assert_eq!(thinking(&chunks), vec!["step"]);
         assert_eq!(tokens(&chunks), vec!["ok"]);
+        assert_eq!(variants(&chunks), vec!["thinking", "token", "done"]);
     }
 
     /// Runs the stream against a mock server returning `body` and returns the
