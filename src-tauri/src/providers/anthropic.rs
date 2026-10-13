@@ -212,8 +212,8 @@ pub async fn stream_anthropic_chat(
 
     // Anthropic requires the system prompt as a top-level field, which the
     // typed request struct does not model; inject it into the serialized body.
-    let mut body = serde_json::to_value(&request)
-        .map_err(|e| ApiError::new(super::CODE_UNKNOWN, format!("serialize error: {e}")))?;
+    // `AnthropicRequest` is a plain data struct, so serialization is infallible.
+    let mut body = serde_json::to_value(&request).expect("request serializes to object");
     if !system_prompt.is_empty() {
         body.as_object_mut()
             .expect("request serializes to object")
@@ -812,5 +812,192 @@ mod tests {
         ])
         .await;
         assert_eq!(accumulated, "你好");
+    }
+
+    /// Runs the stream against a mock server with explicit `include_tools` and
+    /// system-prompt values.
+    async fn run_with_flags(
+        body: &str,
+        include_tools: bool,
+        system_prompt: &str,
+    ) -> (String, Vec<ProviderChunk>) {
+        let mut server = mockito::Server::new_async().await;
+        let _m = server
+            .mock("POST", "/v1/messages")
+            .with_body(body)
+            .create_async()
+            .await;
+        let client = reqwest::Client::new();
+        let mut chunks: Vec<ProviderChunk> = Vec::new();
+        let accumulated = stream_anthropic_chat(
+            &server.url(),
+            "claude-sonnet-4-5",
+            "sk-ant",
+            system_prompt,
+            vec![user("hi", None)],
+            include_tools,
+            false,
+            1920,
+            1080,
+            &client,
+            CancellationToken::new(),
+            |c| chunks.push(c),
+        )
+        .await
+        .unwrap();
+        (accumulated, chunks)
+    }
+
+    #[tokio::test]
+    async fn include_tools_serializes_computer_tool() {
+        // The computer-use tool must reach the request body when tools are
+        // enabled (the agent path).
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/v1/messages")
+            .match_body(mockito::Matcher::Regex("computer_20250124".to_string()))
+            .with_body("data: {\"type\":\"message_stop\"}\n\n")
+            .create_async()
+            .await;
+        let client = reqwest::Client::new();
+        let mut chunks: Vec<ProviderChunk> = Vec::new();
+        stream_anthropic_chat(
+            &server.url(),
+            "claude-sonnet-4-5",
+            "sk-ant",
+            "sys",
+            vec![user("hi", None)],
+            true,
+            false,
+            1920,
+            1080,
+            &client,
+            CancellationToken::new(),
+            |c| chunks.push(c),
+        )
+        .await
+        .unwrap();
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn request_transport_failure_emits_network_error() {
+        let client = reqwest::Client::new();
+        let mut chunks: Vec<ProviderChunk> = Vec::new();
+        let err = stream_anthropic_chat(
+            "foo://unsupported-scheme",
+            "claude-sonnet-4-5",
+            "sk-ant",
+            "sys",
+            vec![user("hi", None)],
+            false,
+            false,
+            1920,
+            1080,
+            &client,
+            CancellationToken::new(),
+            |c| chunks.push(c),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, super::super::CODE_NETWORK);
+        assert!(
+            matches!(&chunks[0], ProviderChunk::Error(e) if e.code == super::super::CODE_NETWORK)
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_system_prompt_still_streams() {
+        // An empty system prompt must not inject a `system` field.
+        let (accumulated, chunks) =
+            run_with_flags("data: {\"type\":\"message_stop\"}\n\n", false, "").await;
+        assert!(accumulated.is_empty());
+        assert!(chunks.iter().any(|c| matches!(c, ProviderChunk::Done)));
+    }
+
+    #[tokio::test]
+    async fn content_block_start_variants_are_ignored() {
+        // A non-tool_use start block, and a start event with no block at all,
+        // must both be ignored.
+        let body =
+            "data: {\"type\":\"content_block_start\",\"content_block\":{\"type\":\"text\"}}\n\n\
+                    data: {\"type\":\"content_block_start\"}\n\n\
+                    data: {\"type\":\"message_stop\"}\n\n";
+        let (accumulated, chunks) = run_against_body(body, CancellationToken::new()).await;
+        assert!(accumulated.is_empty());
+        assert!(!chunks
+            .iter()
+            .any(|c| matches!(c, ProviderChunk::ToolCalls(_))));
+    }
+
+    #[tokio::test]
+    async fn content_block_delta_without_delta_is_ignored() {
+        let body = "data: {\"type\":\"content_block_delta\"}\n\n\
+                    data: {\"type\":\"message_stop\"}\n\n";
+        let (accumulated, _) = run_against_body(body, CancellationToken::new()).await;
+        assert!(accumulated.is_empty());
+    }
+
+    #[tokio::test]
+    async fn empty_thinking_and_text_deltas_are_ignored() {
+        let body = "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"\"}}\n\n\
+                    data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"\"}}\n\n\
+                    data: {\"type\":\"message_stop\"}\n\n";
+        let (accumulated, chunks) = run_against_body(body, CancellationToken::new()).await;
+        assert!(accumulated.is_empty());
+        assert!(!chunks
+            .iter()
+            .any(|c| matches!(c, ProviderChunk::Token(_) | ProviderChunk::ThinkingToken(_))));
+    }
+
+    #[tokio::test]
+    async fn content_block_stop_without_tool_use_emits_nothing() {
+        let body = "data: {\"type\":\"content_block_stop\"}\n\n\
+                    data: {\"type\":\"message_stop\"}\n\n";
+        let (_, chunks) = run_against_body(body, CancellationToken::new()).await;
+        assert!(!chunks
+            .iter()
+            .any(|c| matches!(c, ProviderChunk::ToolCalls(_))));
+    }
+
+    #[tokio::test]
+    async fn done_marker_without_pending_tool_call_emits_done_only() {
+        let (_, chunks) = run_against_body("data: [DONE]\n\n", CancellationToken::new()).await;
+        assert!(chunks.iter().all(|c| matches!(c, ProviderChunk::Done)));
+    }
+
+    #[tokio::test]
+    async fn http_statuses_map_to_their_error_codes() {
+        for (status, code) in [
+            (403usize, super::super::CODE_FORBIDDEN),
+            (404, super::super::CODE_MODEL_NOT_FOUND),
+            (500, super::super::CODE_SERVER_ERROR),
+        ] {
+            let mut server = mockito::Server::new_async().await;
+            let _m = server
+                .mock("POST", "/v1/messages")
+                .with_status(status)
+                .with_body("boom")
+                .create_async()
+                .await;
+            let client = reqwest::Client::new();
+            let err = stream_anthropic_chat(
+                &server.url(),
+                "claude-sonnet-4-5",
+                "sk-ant",
+                "sys",
+                vec![user("hi", None)],
+                false,
+                false,
+                1920,
+                1080,
+                &client,
+                CancellationToken::new(),
+                |_| {},
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(err.code, code, "status {status}");
+        }
     }
 }

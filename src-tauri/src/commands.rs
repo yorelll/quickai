@@ -636,6 +636,16 @@ mod tests {
     }
 
     #[test]
+    fn resolve_reports_unknown_error_when_db_read_fails() {
+        let conn = crate::database::open_in_memory().unwrap();
+        // Drop the settings table so reading the API key fails.
+        conn.execute_batch("DROP TABLE app_config").unwrap();
+        let config = config_with_chat(Provider::OpenAi, "gpt-4o", "");
+        let err = resolve_chat_provider(&config, &conn).unwrap_err();
+        assert_eq!(err.code, providers::CODE_UNKNOWN);
+    }
+
+    #[test]
     fn resolve_uses_provider_default_base_url() {
         let conn = crate::database::open_in_memory().unwrap();
         crate::database::set_config(&conn, "api_key_openai", "sk-abc").unwrap();

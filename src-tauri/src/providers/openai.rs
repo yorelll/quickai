@@ -506,6 +506,14 @@ mod tests {
     }
 
     #[test]
+    fn message_with_empty_image_list_is_text_only() {
+        // An empty image list must be treated exactly like no images at all.
+        let msg = to_openai_message(user("plain", Some(vec![])));
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["content"], "plain");
+    }
+
+    #[test]
     fn request_omits_tools_and_reasoning_by_default() {
         let request = OpenAIChatRequest {
             model: "gpt-4o".to_string(),
@@ -935,5 +943,196 @@ mod tests {
         ])
         .await;
         assert_eq!(accumulated, "你好");
+    }
+
+    #[tokio::test]
+    async fn include_tools_serializes_computer_tool_definitions() {
+        // The tool definitions must actually reach the request body when tools
+        // are enabled (the agent path); mockito fails the assert if they do not.
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/chat/completions")
+            .match_body(mockito::Matcher::Regex("computer_click".to_string()))
+            .with_body("data: [DONE]\n\n")
+            .create_async()
+            .await;
+        let client = reqwest::Client::new();
+        let mut chunks: Vec<ProviderChunk> = Vec::new();
+        let accumulated = stream_openai_chat(
+            &server.url(),
+            "gpt-4o",
+            "sk-test",
+            vec![user("hi", None)],
+            true,
+            false,
+            &client,
+            CancellationToken::new(),
+            |c| chunks.push(c),
+        )
+        .await
+        .unwrap();
+        mock.assert_async().await;
+        assert!(accumulated.is_empty());
+        assert!(chunks.iter().any(|c| matches!(c, ProviderChunk::Done)));
+    }
+
+    #[tokio::test]
+    async fn request_transport_failure_emits_network_error() {
+        // An unsupported scheme fails at `send()` (never reaching the SSE loop),
+        // exercising the request-time error mapping.
+        let client = reqwest::Client::new();
+        let mut chunks: Vec<ProviderChunk> = Vec::new();
+        let err = stream_openai_chat(
+            "foo://unsupported-scheme",
+            "gpt-4o",
+            "sk-test",
+            vec![user("hi", None)],
+            false,
+            false,
+            &client,
+            CancellationToken::new(),
+            |c| chunks.push(c),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, super::super::CODE_NETWORK);
+        assert!(
+            matches!(&chunks[0], ProviderChunk::Error(e) if e.code == super::super::CODE_NETWORK)
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_delta_fields_are_ignored() {
+        // Chunks with no content/reasoning/tool_calls/finish_reason, and chunks
+        // whose text fields are empty, must emit nothing.
+        let body = "data: {\"choices\":[{\"delta\":{},\"finish_reason\":null}]}\n\n\
+                    data: {\"choices\":[{\"delta\":{\"content\":\"\",\"reasoning_content\":\"\"},\"finish_reason\":null}]}\n\n\
+                    data: [DONE]\n\n";
+        let (accumulated, chunks) = run_against_body(body, CancellationToken::new()).await;
+        assert!(accumulated.is_empty());
+        assert!(!chunks
+            .iter()
+            .any(|c| matches!(c, ProviderChunk::Token(_) | ProviderChunk::ThinkingToken(_))));
+        assert!(chunks.iter().any(|c| matches!(c, ProviderChunk::Done)));
+    }
+
+    #[tokio::test]
+    async fn multiple_choices_in_one_chunk_emit_all_tokens() {
+        let body = "data: {\"choices\":[{\"delta\":{\"content\":\"A\"},\"finish_reason\":null},{\"delta\":{\"content\":\"B\"},\"finish_reason\":null}]}\n\n\
+                    data: [DONE]\n\n";
+        let (accumulated, _) = run_against_body(body, CancellationToken::new()).await;
+        assert_eq!(accumulated, "AB");
+    }
+
+    #[tokio::test]
+    async fn tool_call_index_gap_fills_placeholder_entries() {
+        // An index beyond the current length forces placeholder entries to be
+        // pushed so the vector stays index-addressable.
+        let body = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":2,\"id\":\"id3\",\"function\":{\"name\":\"computer_launch\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n\
+                    data: [DONE]\n\n";
+        let (_, chunks) = run_against_body(body, CancellationToken::new()).await;
+        assert!(chunks.iter().any(
+            |c| matches!(c, ProviderChunk::ToolCalls(calls) if calls.len() == 3 && calls[2].name == "computer_launch")
+        ));
+    }
+
+    #[tokio::test]
+    async fn done_without_any_data_emits_done_only() {
+        let (accumulated, chunks) =
+            run_against_body("data: [DONE]\n\n", CancellationToken::new()).await;
+        assert!(accumulated.is_empty());
+        assert!(chunks.iter().all(|c| matches!(c, ProviderChunk::Done)));
+    }
+
+    #[test]
+    fn accumulate_tool_calls_tolerates_missing_function_and_arguments() {
+        let mut acc: Vec<OpenAIToolCall> = Vec::new();
+        accumulate_tool_calls(
+            &mut acc,
+            &[OpenAIStreamToolCall {
+                index: Some(0),
+                id: Some("id1".to_string()),
+                r#type: None,
+                function: None,
+            }],
+        );
+        accumulate_tool_calls(
+            &mut acc,
+            &[OpenAIStreamToolCall {
+                index: Some(0),
+                id: None,
+                r#type: None,
+                function: Some(OpenAIStreamFunction {
+                    name: Some("computer_click".to_string()),
+                    arguments: None,
+                }),
+            }],
+        );
+        assert_eq!(acc.len(), 1);
+        assert_eq!(acc[0].id, "id1");
+        assert_eq!(acc[0].function.name, "computer_click");
+        assert!(acc[0].function.arguments.is_empty());
+    }
+
+    #[tokio::test]
+    async fn http_statuses_map_to_their_error_codes() {
+        for (status, code) in [
+            (403usize, super::super::CODE_FORBIDDEN),
+            (404, super::super::CODE_MODEL_NOT_FOUND),
+            (429, super::super::CODE_RATE_LIMITED),
+            (500, super::super::CODE_SERVER_ERROR),
+        ] {
+            let mut server = mockito::Server::new_async().await;
+            let _m = server
+                .mock("POST", "/chat/completions")
+                .with_status(status)
+                .with_body("boom")
+                .create_async()
+                .await;
+            let client = reqwest::Client::new();
+            let err = stream_openai_chat(
+                &server.url(),
+                "gpt-4o",
+                "sk-test",
+                vec![user("hi", None)],
+                false,
+                false,
+                &client,
+                CancellationToken::new(),
+                |_| {},
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(err.code, code, "status {status}");
+        }
+    }
+
+    #[tokio::test]
+    async fn base_url_with_trailing_slash_is_trimmed() {
+        // The openai-compatible provider takes a user-supplied base URL, which
+        // may carry a trailing slash.
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/chat/completions")
+            .with_body("data: [DONE]\n\n")
+            .create_async()
+            .await;
+        let client = reqwest::Client::new();
+        let base = format!("{}/", server.url());
+        let accumulated = stream_openai_chat(
+            &base,
+            "local-model",
+            "",
+            vec![user("hi", None)],
+            false,
+            false,
+            &client,
+            CancellationToken::new(),
+            |_| {},
+        )
+        .await
+        .unwrap();
+        mock.assert_async().await;
+        assert!(accumulated.is_empty());
     }
 }
