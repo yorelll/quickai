@@ -1,0 +1,4 @@
+# Normalize all text files to LF in the repository and in the working tree.
+# The Windows CI runners check out with core.autocrlf=true by default; without
+# this, prettier (which defaults to LF) would flag every file on `format:check`.
+* text=auto eol=lf

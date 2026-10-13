@@ -1,0 +1,86 @@
+name: Bug Report
+description: Something isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill out the form below as completely as possible.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of what the bug is.
+      placeholder: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Exact steps to reproduce the behavior.
+      placeholder: |
+        1. Open QuickAI with ...
+        2. Type ...
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened? Include any error messages or logs.
+    validations:
+      required: true
+
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows Version
+      placeholder: e.g. Windows 11 23H2 (build 22631)
+    validations:
+      required: true
+
+  - type: input
+    id: quickai-version
+    attributes:
+      label: QuickAI Version
+      placeholder: e.g. v0.0.1 (from the About tab in Settings or GitHub Releases)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-type
+    attributes:
+      label: Installation
+      description: How did you install QuickAI?
+      options:
+        - NSIS installer (.exe)
+        - Portable zip
+        - Built from source
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: AI Provider
+      description: Which provider were you using when the bug occurred?
+      options:
+        - OpenAI
+        - Anthropic
+        - OpenAI-compatible (custom)
+        - Not sure
+    validations:
+      required: true

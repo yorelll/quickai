@@ -1,0 +1,557 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { render, screen, fireEvent, act, within } from '@testing-library/react';
+import { SettingsWindow } from '../SettingsWindow';
+import { invoke } from '../../testUtils/mocks/tauri';
+import { __mockWindow } from '../../testUtils/mocks/tauri-window';
+import { LANGUAGE_STORAGE_KEY, setLocale } from '../../i18n';
+
+const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>;
+
+const RAW = {
+  prompt: { system: '' },
+  window: { overlay_width: 600, max_chat_height: 648, max_images: 3 },
+  quote: {
+    max_display_lines: 4,
+    max_display_chars: 300,
+    max_context_length: 4096,
+  },
+  chat: { provider: 'openai', model: 'gpt-4o', base_url: '' },
+  agent: { provider: 'openai', model: '', base_url: '' },
+};
+
+let scrollHeightValue = 0;
+
+/** Installs a mock invoke that echoes config edits back like the backend. */
+function installBackend(
+  options: { marker?: unknown; settings?: Record<string, string> } = {},
+) {
+  mockInvoke.mockImplementation(
+    async (cmd: string, args?: Record<string, unknown>) => {
+      switch (cmd) {
+        case 'get_config':
+        case 'reload_config_from_disk':
+        case 'reset_config':
+          return RAW;
+        case 'set_config_field': {
+          const section = args?.section as keyof typeof RAW;
+          const key = args?.key as string;
+          const value = args?.value;
+          return {
+            ...RAW,
+            [section]: { ...RAW[section], [key]: value },
+          };
+        }
+        case 'get_settings':
+          return options.settings ?? {};
+        case 'get_corrupt_marker':
+          return options.marker ?? null;
+        default:
+          return undefined;
+      }
+    },
+  );
+}
+
+async function renderWindow(
+  options: { marker?: unknown; settings?: Record<string, string> } = {},
+) {
+  installBackend(options);
+  const view = render(<SettingsWindow />);
+  await act(async () => {});
+  return view;
+}
+
+function tab(name: string) {
+  return screen.getByRole('tab', { name });
+}
+
+async function flushDebounce() {
+  await act(async () => {
+    vi.advanceTimersByTime(300);
+  });
+}
+
+describe('SettingsWindow', () => {
+  beforeEach(() => {
+    mockInvoke.mockReset();
+    scrollHeightValue = 0;
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    setLocale('en');
+    localStorage.removeItem(LANGUAGE_STORAGE_KEY);
+    __mockWindow.setSize.mockClear();
+    __mockWindow.hide.mockClear();
+    __mockWindow.setFocus.mockClear();
+    __mockWindow.startDragging.mockClear();
+    vi.useFakeTimers({
+      toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;
+  });
+
+  it('renders nothing until the config resolves', () => {
+    mockInvoke.mockReturnValue(new Promise(() => {}));
+    const { container } = render(<SettingsWindow />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('renders the four tabs', async () => {
+    await renderWindow();
+    expect(tab('AI')).toHaveAttribute('aria-selected', 'true');
+    expect(tab('Display')).toBeInTheDocument();
+    expect(tab('Agent')).toBeInTheDocument();
+    expect(tab('About')).toBeInTheDocument();
+    expect(
+      screen.getByRole('tablist', { name: 'Settings sections' }),
+    ).toBeInTheDocument();
+  });
+
+  it('switches tabs on click', async () => {
+    await renderWindow();
+
+    fireEvent.click(tab('Display'));
+    expect(screen.getByText('Overlay width')).toBeInTheDocument();
+
+    fireEvent.click(tab('Agent'));
+    expect(screen.getByText('Agent provider')).toBeInTheDocument();
+
+    fireEvent.click(tab('About'));
+    expect(screen.getByText('Refresh config.toml')).toBeInTheDocument();
+  });
+
+  it('navigates tabs with the arrow keys and ignores other keys', async () => {
+    await renderWindow();
+
+    fireEvent.keyDown(tab('AI'), { key: 'ArrowRight' });
+    expect(tab('Display')).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.keyDown(tab('Display'), { key: 'ArrowLeft' });
+    expect(tab('AI')).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.keyDown(tab('AI'), { key: 'ArrowLeft' });
+    expect(tab('About')).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.keyDown(tab('About'), { key: 'a' });
+    expect(tab('About')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('marks the body scrollable when the content is clamped', async () => {
+    scrollHeightValue = 900;
+    await renderWindow();
+    expect(screen.getByRole('tabpanel').className).toContain('Scrollable');
+  });
+
+  it('hides the window from the close button and Ctrl+W, and focuses on Ctrl+,', async () => {
+    await renderWindow();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close settings' }));
+    expect(__mockWindow.hide).toHaveBeenCalled();
+
+    fireEvent.keyDown(document, { key: 'w', ctrlKey: true });
+    expect(__mockWindow.hide).toHaveBeenCalledTimes(2);
+
+    fireEvent.keyDown(document, { key: ',', ctrlKey: true });
+    expect(__mockWindow.setFocus).toHaveBeenCalled();
+
+    fireEvent.keyDown(document, { key: 'x', ctrlKey: true });
+    expect(__mockWindow.setFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts a window drag only from non-interactive chrome', async () => {
+    const { container } = await renderWindow();
+    const root = container.firstChild as HTMLElement;
+
+    fireEvent.mouseDown(root, { button: 0 });
+    expect(__mockWindow.startDragging).toHaveBeenCalledTimes(1);
+
+    // Right-click never drags.
+    fireEvent.mouseDown(root, { button: 2 });
+    expect(__mockWindow.startDragging).toHaveBeenCalledTimes(1);
+
+    // Interactive controls never drag.
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'Close settings' }));
+    expect(__mockWindow.startDragging).toHaveBeenCalledTimes(1);
+
+    // Text-bearing elements never drag.
+    fireEvent.click(tab('About'));
+    fireEvent.mouseDown(screen.getByText('QuickAI'));
+    expect(__mockWindow.startDragging).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the corrupt-config banner and supports reveal and dismiss', async () => {
+    await renderWindow({
+      marker: {
+        path: 'C:\\Users\\me\\.config\\quickai\\config.toml.bak',
+        ts: 1,
+      },
+    });
+
+    const banner = screen.getByRole('alert');
+    expect(banner).toHaveTextContent('config.toml.bak');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reveal' }));
+    expect(mockInvoke).toHaveBeenCalledWith('reveal_config_in_explorer');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('hides the corrupt-config banner when no marker is returned', async () => {
+    await renderWindow();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shortens a POSIX marker path', async () => {
+    await renderWindow({
+      marker: { path: '/home/me/.config/quickai/config.toml.bak', ts: 1 },
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('config.toml.bak');
+  });
+
+  it('handles a marker path with no separator at all', async () => {
+    await renderWindow({ marker: { path: 'config.toml.bak', ts: 1 } });
+    expect(screen.getByRole('alert')).toHaveTextContent('config.toml.bak');
+  });
+
+  it('shows the saved pill briefly after a config change', async () => {
+    await renderWindow();
+
+    fireEvent.click(tab('About'));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Reset all to defaults...' }),
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Reset all' }));
+    });
+
+    expect(screen.getByRole('status').className).toContain('Visible');
+
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(screen.getByRole('status').className).not.toContain('Visible');
+  });
+
+  describe('AI tab', () => {
+    it('loads and saves the API key for the active provider', async () => {
+      await renderWindow({ settings: { api_key_openai: 'sk-openai' } });
+
+      const keyInput = screen.getByLabelText('API Key (OpenAI)', {
+        selector: 'input',
+      });
+      expect(keyInput).toHaveValue('sk-openai');
+
+      fireEvent.change(keyInput, { target: { value: 'sk-new' } });
+      await act(async () => {
+        fireEvent.blur(keyInput);
+      });
+      expect(mockInvoke).toHaveBeenCalledWith('set_setting', {
+        key: 'api_key_openai',
+        value: 'sk-new',
+      });
+    });
+
+    it('reloads the API key when the provider changes', async () => {
+      await renderWindow({
+        settings: { api_key_openai: 'sk-openai', api_key_anthropic: 'sk-ant' },
+      });
+
+      fireEvent.change(
+        screen.getByLabelText('Chat provider', { selector: 'select' }),
+        {
+          target: { value: 'anthropic' },
+        },
+      );
+      await flushDebounce();
+
+      expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
+        section: 'chat',
+        key: 'provider',
+        value: 'anthropic',
+      });
+      expect(
+        screen.getByLabelText('API Key (Anthropic)', { selector: 'input' }),
+      ).toHaveValue('sk-ant');
+    });
+
+    it('saves the model, base URL and system prompt', async () => {
+      await renderWindow();
+
+      fireEvent.change(
+        screen.getByLabelText('Chat model', { selector: 'input' }),
+        {
+          target: { value: 'o4-mini' },
+        },
+      );
+      await flushDebounce();
+      expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
+        section: 'chat',
+        key: 'model',
+        value: 'o4-mini',
+      });
+
+      fireEvent.change(
+        screen.getByLabelText('Base URL', { selector: 'input' }),
+        {
+          target: { value: 'https://proxy.example/v1' },
+        },
+      );
+      await flushDebounce();
+      expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
+        section: 'chat',
+        key: 'base_url',
+        value: 'https://proxy.example/v1',
+      });
+
+      fireEvent.change(
+        screen.getByLabelText('System prompt', { selector: 'textarea' }),
+        {
+          target: { value: 'Be terse.' },
+        },
+      );
+      await flushDebounce();
+      expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
+        section: 'prompt',
+        key: 'system',
+        value: 'Be terse.',
+      });
+      expect(screen.getByText('9 / 8000')).toBeInTheDocument();
+    });
+
+    it('tolerates a failing API-key lookup', async () => {
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'get_config' || cmd === 'reload_config_from_disk')
+          return RAW;
+        if (cmd === 'get_settings') throw new Error('db locked');
+        return undefined;
+      });
+      render(<SettingsWindow />);
+      await act(async () => {});
+
+      expect(
+        screen.getByLabelText('API Key (OpenAI)', { selector: 'input' }),
+      ).toHaveValue('');
+    });
+
+    it('ignores a failing API-key save', async () => {
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'get_config' || cmd === 'reload_config_from_disk')
+          return RAW;
+        if (cmd === 'get_settings') return {};
+        if (cmd === 'set_setting') throw new Error('db locked');
+        return undefined;
+      });
+      render(<SettingsWindow />);
+      await act(async () => {});
+
+      const input = screen.getByLabelText('API Key (OpenAI)', {
+        selector: 'input',
+      });
+      fireEvent.change(input, { target: { value: 'sk-x' } });
+      await act(async () => {
+        fireEvent.blur(input);
+      });
+
+      expect(mockInvoke).toHaveBeenCalledWith('set_setting', {
+        key: 'api_key_openai',
+        value: 'sk-x',
+      });
+    });
+  });
+
+  describe('Display tab', () => {
+    it('saves window and quote limits', async () => {
+      await renderWindow();
+      fireEvent.click(tab('Display'));
+
+      const width = screen.getByLabelText('Overlay width', {
+        selector: 'input',
+      });
+      fireEvent.change(width, { target: { value: '800' } });
+      fireEvent.mouseUp(width);
+      await flushDebounce();
+      expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
+        section: 'window',
+        key: 'overlay_width',
+        value: 800,
+      });
+
+      const maxImages = screen.getByRole('spinbutton', { name: 'Max images' });
+      fireEvent.click(
+        within(maxImages).getByRole('button', { name: 'Increase' }),
+      );
+      await flushDebounce();
+      expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
+        section: 'window',
+        key: 'max_images',
+        value: 4,
+      });
+    });
+
+    it('persists the interface language', async () => {
+      await renderWindow();
+      fireEvent.click(tab('Display'));
+
+      const select = screen.getByLabelText('Interface language', {
+        selector: 'select',
+      });
+      expect(select).toHaveValue('en');
+
+      fireEvent.change(select, { target: { value: 'zh' } });
+
+      expect(localStorage.getItem(LANGUAGE_STORAGE_KEY)).toBe('zh');
+      expect(document.documentElement.lang).toBe('zh');
+      setLocale('en');
+    });
+  });
+
+  describe('Agent tab', () => {
+    it('saves the agent provider, model, base URL and API key', async () => {
+      await renderWindow({ settings: { api_key_openai: 'sk-agent' } });
+      await act(async () => {
+        fireEvent.click(tab('Agent'));
+      });
+
+      expect(
+        screen.getByLabelText('API Key (OpenAI)', { selector: 'input' }),
+      ).toHaveValue('sk-agent');
+
+      fireEvent.change(
+        screen.getByLabelText('Agent model', { selector: 'input' }),
+        {
+          target: { value: 'gpt-4.1' },
+        },
+      );
+      await flushDebounce();
+      expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
+        section: 'agent',
+        key: 'model',
+        value: 'gpt-4.1',
+      });
+
+      fireEvent.change(
+        screen.getByLabelText('Base URL', { selector: 'input' }),
+        {
+          target: { value: 'https://agent.example/v1' },
+        },
+      );
+      await flushDebounce();
+      expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
+        section: 'agent',
+        key: 'base_url',
+        value: 'https://agent.example/v1',
+      });
+
+      fireEvent.change(
+        screen.getByLabelText('Agent provider', { selector: 'select' }),
+        {
+          target: { value: 'openai_compatible' },
+        },
+      );
+      await flushDebounce();
+      expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
+        section: 'agent',
+        key: 'provider',
+        value: 'openai_compatible',
+      });
+    });
+
+    it('saves the agent API key and ignores a failure', async () => {
+      await renderWindow({ settings: { api_key_openai: 'sk-agent' } });
+      await act(async () => {
+        fireEvent.click(tab('Agent'));
+      });
+
+      const input = screen.getByLabelText('API Key (OpenAI)', {
+        selector: 'input',
+      });
+      fireEvent.change(input, { target: { value: 'sk-agent-2' } });
+      await act(async () => {
+        fireEvent.blur(input);
+      });
+      expect(mockInvoke).toHaveBeenCalledWith('set_setting', {
+        key: 'api_key_openai',
+        value: 'sk-agent-2',
+      });
+
+      // A failing save must be swallowed.
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'set_setting') throw new Error('db locked');
+        return undefined;
+      });
+      fireEvent.change(input, { target: { value: 'sk-agent-3' } });
+      await act(async () => {
+        fireEvent.blur(input);
+      });
+      expect(
+        screen.getByLabelText('API Key (OpenAI)', { selector: 'input' }),
+      ).toHaveValue('sk-agent-3');
+    });
+  });
+
+  describe('About tab', () => {
+    it('opens links and file actions', async () => {
+      await renderWindow();
+      fireEvent.click(tab('About'));
+
+      fireEvent.click(screen.getByRole('button', { name: /release notes/i }));
+      expect(mockInvoke).toHaveBeenCalledWith('open_url', {
+        url: expect.stringContaining('/releases/tag/v'),
+      });
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'View QuickAI on GitHub' }),
+      );
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: 'Open an issue or share feedback on GitHub',
+        }),
+      );
+      expect(mockInvoke).toHaveBeenCalledWith('open_url', {
+        url: 'https://github.com/yorelll/quickai',
+      });
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Reveal QuickAI app data' }),
+      );
+      expect(mockInvoke).toHaveBeenCalledWith('reveal_config_in_explorer');
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Refresh config.toml' }),
+      );
+      expect(mockInvoke).toHaveBeenCalledWith('reload_config_from_disk');
+    });
+
+    it('cancels the reset confirmation', async () => {
+      await renderWindow();
+      fireEvent.click(tab('About'));
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Reset all to defaults...' }),
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(mockInvoke).not.toHaveBeenCalledWith('reset_config', {
+        section: null,
+      });
+    });
+
+    it('shows a nightly version when a commit sha is baked in', async () => {
+      vi.stubEnv('VITE_GIT_COMMIT_SHA', 'abc1234def5678');
+      try {
+        await renderWindow();
+        fireEvent.click(tab('About'));
+        expect(screen.getByText(/\+nightly\.abc1234/)).toBeInTheDocument();
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+  });
+});

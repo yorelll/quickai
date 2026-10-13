@@ -1,0 +1,167 @@
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re)build and upload release assets for (e.g. v0.0.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    name: Open or update release PR
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      pr: ${{ steps.release.outputs.pr }}
+    steps:
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071  # v4.4.1
+        id: release
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  sync-cargo-lock:
+    name: Sync Cargo.lock into release PR
+    needs: release-please
+    if: ${{ github.event_name == 'push' && !needs.release-please.outputs.release_created && needs.release-please.outputs.pr }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release PR branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+
+      - name: Install stable Rust toolchain
+        run: rustup toolchain install stable --no-self-update
+
+      - name: Update Cargo.lock for quickai package
+        working-directory: src-tauri
+        run: cargo update --package quickai
+
+      - name: Commit Cargo.lock if it changed
+        run: |
+          if ! git diff --quiet src-tauri/Cargo.lock; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add src-tauri/Cargo.lock
+            git commit -m "chore: sync Cargo.lock to version bump"
+            git push
+          else
+            echo "Cargo.lock already in sync, nothing to commit"
+          fi
+
+  build-and-release:
+    name: Build and publish Windows app
+    needs: release-please
+    # Run when: release-please just created a release (push to main), a GitHub
+    # Release was published (covers the manual first release and re-releases),
+    # or the workflow was dispatched on demand with a tag input. `always()` is
+    # required so this job is not auto-skipped when the release-please job is
+    # skipped on the release / workflow_dispatch events.
+    if: ${{ always() && ((github.event_name == 'push' && needs.release-please.outputs.release_created) || github.event_name == 'release' || github.event_name == 'workflow_dispatch') }}
+    # Deduplicate the release-please-created release: its push run and its
+    # `release: published` run resolve to the same tag and thus the same group,
+    # so only one build survives.
+    concurrency:
+      group: release-build-${{ needs.release-please.outputs.tag_name || github.event.release.tag_name || inputs.tag || github.run_id }}
+      cancel-in-progress: true
+    runs-on: windows-latest
+    steps:
+      - name: Resolve target tag
+        id: tag
+        shell: pwsh
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RP_TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          $tag = $env:INPUT_TAG
+          if (-not $tag) { $tag = $env:RELEASE_TAG }
+          if (-not $tag) { $tag = $env:RP_TAG }
+          if (-not $tag) {
+            throw "Could not resolve a release tag from inputs.tag, github.event.release.tag_name, or the release-please output."
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          Write-Host "Target tag: $tag"
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6  # v2.2.0
+        with:
+          bun-version: 1.3.11
+
+      - name: Install stable Rust toolchain
+        run: rustup toolchain install stable --component clippy --component rustfmt --no-self-update
+
+      - name: Install nightly Rust toolchain
+        run: rustup toolchain install nightly-2026-03-30 --component llvm-tools --no-self-update
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@0c7a94999971db56e9df89df226240aab222e776  # v2.75.14
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint and format check
+        shell: pwsh
+        run: bun run lint && bun run format:check
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Run all tests with coverage enforcement
+        run: bun run test:all:coverage
+
+      - name: Build Tauri app (NSIS installer)
+        env:
+          VITE_GIT_COMMIT_SHA: ${{ github.sha }}
+        run: bun run build:backend
+
+      - name: Create portable zip
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.tag.outputs.tag }}"
+          $version = $tag -replace '^v', ''
+          $exe = "src-tauri\target\release\quickai.exe"
+          if (-not (Test-Path $exe)) {
+            throw "Standalone binary not found at $exe"
+          }
+          $zip = "QuickAI_${version}_x64_portable.zip"
+          Compress-Archive -Path $exe -DestinationPath $zip -Force
+          Write-Host "Created $zip"
+
+      - name: Upload release assets
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ steps.tag.outputs.tag }}"
+          $version = $tag -replace '^v', ''
+          $installer = Get-ChildItem -Path "src-tauri\target\release\bundle\nsis\*.exe" | Select-Object -First 1
+          if (-not $installer) {
+            throw "NSIS installer not found under src-tauri\target\release\bundle\nsis"
+          }
+          $zip = "QuickAI_${version}_x64_portable.zip"
+          Write-Host "Uploading $($installer.Name) and $zip to $tag"
+          gh release upload $tag $installer.FullName $zip --clobber
