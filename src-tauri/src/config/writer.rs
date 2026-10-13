@@ -103,6 +103,7 @@ fn write_and_sync(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 #[cfg(unix)]
 fn fsync_dir(dir: &Path) -> std::io::Result<()> {
+    use std::fs::File;
     let f = File::open(dir)?;
     f.sync_all()
 }

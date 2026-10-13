@@ -38,6 +38,7 @@ mod windows_lifecycle;
 mod windows_screenshot;
 
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "windows")]
 use std::sync::Arc;
 
 use tauri::{
@@ -534,38 +535,48 @@ fn exit_minibar_size(app_handle: tauri::AppHandle) {
 /// the frontend listener registration.
 #[tauri::command]
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn notify_frontend_ready(app_handle: tauri::AppHandle, db: tauri::State<history::Database>) {
+fn notify_frontend_ready(app_handle: tauri::AppHandle) {
     if LAUNCH_SHOW_PENDING.swap(false, Ordering::SeqCst) {
         #[cfg(target_os = "windows")]
         {
-            if let Ok(conn) = db.0.lock() {
-                let stage =
-                    onboarding::get_stage(&conn).unwrap_or(onboarding::OnboardingStage::Intro);
-
-                // On Windows, there are no Accessibility or Screen Recording
-                // permission gates. Skip the permissions stage entirely and
-                // go directly to intro (or overlay if onboarding is complete).
-                if matches!(stage, onboarding::OnboardingStage::Permissions) {
-                    // Upgrade permissions stage to intro since Windows doesn't
-                    // need a permissions gate.
-                    let _ = onboarding::set_stage(&conn, &onboarding::OnboardingStage::Intro);
-                    show_onboarding_window(&app_handle, onboarding::OnboardingStage::Intro);
-                    return;
-                }
-
-                if !matches!(stage, onboarding::OnboardingStage::Complete) {
-                    show_onboarding_window(&app_handle, stage);
-                    return;
-                }
-                // Complete: fall through to show the overlay.
-            } else {
-                show_onboarding_window(&app_handle, onboarding::OnboardingStage::Intro);
+            if show_startup_screen(&app_handle) {
                 return;
             }
         }
 
         show_overlay(&app_handle, crate::context::ActivationContext::empty());
     }
+}
+
+/// On Windows, decides whether to show the onboarding window instead of the
+/// overlay at startup. Returns `true` when the onboarding window was shown.
+#[cfg(target_os = "windows")]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn show_startup_screen(app_handle: &tauri::AppHandle) -> bool {
+    let db = app_handle.state::<history::Database>();
+    let Ok(conn) = db.0.lock() else {
+        show_onboarding_window(app_handle, onboarding::OnboardingStage::Intro);
+        return true;
+    };
+    let stage = onboarding::get_stage(&conn).unwrap_or(onboarding::OnboardingStage::Intro);
+
+    // On Windows, there are no Accessibility or Screen Recording permission
+    // gates. Skip the permissions stage entirely and go directly to intro (or
+    // the overlay if onboarding is complete).
+    if matches!(stage, onboarding::OnboardingStage::Permissions) {
+        // Upgrade permissions stage to intro since Windows doesn't need a
+        // permissions gate.
+        let _ = onboarding::set_stage(&conn, &onboarding::OnboardingStage::Intro);
+        show_onboarding_window(app_handle, onboarding::OnboardingStage::Intro);
+        return true;
+    }
+
+    if !matches!(stage, onboarding::OnboardingStage::Complete) {
+        show_onboarding_window(app_handle, stage);
+        return true;
+    }
+    // Complete: fall through to show the overlay.
+    false
 }
 
 // ─── Onboarding completion ───────────────────────────────────────────────────
@@ -834,7 +845,7 @@ pub fn run() {
             images::save_image_command,
             #[cfg(not(coverage))]
             images::remove_image_command,
-            #[cfg(not(coverage))]
+            #[cfg(all(target_os = "windows", not(coverage)))]
             screenshot::capture_full_screen_command,
             notify_overlay_hidden,
             notify_frontend_ready,
