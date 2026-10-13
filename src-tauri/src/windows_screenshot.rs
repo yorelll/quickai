@@ -59,7 +59,7 @@ fn capture_virtual_screen_pixels() -> Result<(i32, i32, u32, u32, Vec<u8>), Stri
         }
 
         // Convert BGRA to RGBA in-place.
-        for chunk in pixels.chunks_exact_mut(4) {
+        for chunk in pixels.as_chunks_mut::<4>().0 {
             chunk.swap(0, 2);
         }
 
