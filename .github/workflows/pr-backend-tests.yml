@@ -50,11 +50,15 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      - name: Run backend tests with coverage
+      # Produce the report first, so it exists even when the gate below fails.
+      - name: Backend coverage report
         working-directory: src-tauri
-        run: |
-          echo "Running Cargo tests with 100% line coverage enforcement..."
-          cargo +nightly-2026-03-30 llvm-cov --ignore-filename-regex "(lib|main)\.rs" --fail-under-lines 100 --lcov --output-path lcov.info
+        run: cargo +nightly-2026-03-30 llvm-cov --ignore-filename-regex "(lib|main)\.rs" --lcov --output-path lcov.info
+
+      # The gate itself, unchanged in strictness.
+      - name: Backend coverage gate (100% lines)
+        working-directory: src-tauri
+        run: cargo +nightly-2026-03-30 llvm-cov report --ignore-filename-regex "(lib|main)\.rs" --fail-under-lines 100
 
       # Always upload the report, so a red gate can be diagnosed from the
       # uncovered lines instead of re-running the suite blind.
