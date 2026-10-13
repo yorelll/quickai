@@ -17,6 +17,25 @@ toolchain (mingw64) cannot link the Tauri `cdylib` and fails with an
 `export ordinal too large` error. Local builds are for development only (see
 [Local development builds](#local-development-builds)).
 
+### Which runner does what
+
+The pipeline deliberately spans two runner types:
+
+| Job | Runner | Why |
+| :--- | :--- | :--- |
+| `quality` | `ubuntu-latest` | Lint, format, typecheck, and both 100% coverage gates (frontend via `vitest --coverage`, backend via `cargo llvm-cov --fail-under-lines 100`). |
+| `windows-backend-tests` | `windows-latest` | Compiles (`cargo check --all-targets`) and runs (`cargo test --lib`) the backend suite on Windows, with **no** coverage gate. |
+| `build-and-release` | `windows-latest` | Builds the NSIS installer and the portable zip, then uploads both. Requires both jobs above to succeed. |
+
+The **backend coverage gate runs on Linux by design**. It was written for a
+runner where the Win32-only `#[cfg(target_os = "windows")]` modules are not
+compiled. On Windows those modules *are* compiled, so `cargo llvm-cov` counts
+them in the report — but they call Win32 APIs (keyboard hooks, GDI `BitBlt`,
+`SendInput`, `schtasks`) that cannot be unit-tested, so the measured line
+coverage is ~86% and the gate can never pass there. The `windows-backend-tests`
+job covers that path instead: it proves the Win32 code compiles and its tests
+pass, while the 100% threshold is enforced on Linux where it is achievable.
+
 ## Prerequisites
 
 The release workflow (`.github/workflows/release-please.yml`) authenticates with
@@ -97,9 +116,10 @@ deleting and re-creating the `v0.0.1` tag and release:
    - **Run the workflow on demand.** Go to **Actions → Release Please → Run
      workflow**, and enter the tag (e.g. `v0.0.1`) in the required `tag` input.
 
-Either path runs the full quality gate, builds the NSIS installer and the
-portable zip, and uploads both to the release with `--clobber`, so re-running is
-safe and idempotent.
+Either path runs the quality gates (`quality` on Linux and
+`windows-backend-tests` on Windows), builds the NSIS installer and the portable
+zip, and uploads both to the release with `--clobber`, so re-running is safe and
+idempotent.
 
 ## How it works
 
@@ -111,13 +131,18 @@ release-please. It continuously maintains an open **release PR** that:
   `src-tauri/tauri.conf.json`,
 - updates `CHANGELOG.md` with entries grouped by type.
 
-When you merge that PR, the build workflow runs on a **Windows** runner and:
+When you merge that PR, the build workflow runs on **Windows** and first waits
+on the quality gates:
 
-1. Runs the full quality gate — lint, format check, typecheck, and the complete
-   test suite with 100% coverage enforcement (frontend via `vitest --coverage`,
-   backend via `cargo llvm-cov --fail-under-lines 100`).
-2. Builds the app with Tauri (NSIS bundle target).
-3. Publishes a GitHub Release containing **two assets**:
+1. On `ubuntu-latest`, the `quality` job runs lint, format check, typecheck, and
+   the complete test suite with 100% coverage enforcement (frontend via
+   `vitest --coverage`, backend via `cargo llvm-cov --fail-under-lines 100`).
+2. In parallel, the `windows-backend-tests` job compiles and runs the backend
+   suite on `windows-latest` without a coverage gate (see
+   [Which runner does what](#which-runner-does-what)).
+3. Only if both succeed does the `windows-latest` build job run: it builds the
+   app with Tauri (NSIS bundle target) and publishes a GitHub Release containing
+   **two assets**:
    - **`QuickAI_<version>_x64-setup.exe`** — the NSIS installer.
    - **`QuickAI_<version>_x64_portable.zip`** — a portable archive containing
      the standalone `quickai.exe`.
