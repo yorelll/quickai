@@ -55,10 +55,11 @@ jobs:
         working-directory: src-tauri
         run: cargo +nightly-2026-03-30 llvm-cov --ignore-filename-regex "(lib|main)\.rs" --lcov --output-path lcov.info
 
-      # The gate itself, unchanged in strictness.
+      # The gate itself, unchanged in strictness. --show-missing-lines prints the
+      # uncovered line numbers in the log, so a failing run is self-diagnosing.
       - name: Backend coverage gate (100% lines)
         working-directory: src-tauri
-        run: cargo +nightly-2026-03-30 llvm-cov report --ignore-filename-regex "(lib|main)\.rs" --fail-under-lines 100
+        run: cargo +nightly-2026-03-30 llvm-cov report --ignore-filename-regex "(lib|main)\.rs" --fail-under-lines 100 --show-missing-lines
 
       # Always upload the report, so a red gate can be diagnosed from the
       # uncovered lines instead of re-running the suite blind.
