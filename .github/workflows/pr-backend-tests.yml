@@ -24,6 +24,24 @@ jobs:
           ref: ${{ inputs.head_ref || github.head_ref }}
           fetch-depth: 1
 
+      # Tauri v2 Linux prerequisites. Required before any cargo step: the crate
+      # pulls in WebKitGTK/GTK, which is not present on the stock runner image,
+      # so compiling it fails with "The system library `gobject-2.0` required by
+      # crate `gobject-sys` was not found". Note the 4.1 package (Tauri v2).
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
       - name: Install nightly Rust toolchain
         run: rustup toolchain install nightly-2026-03-30 --component llvm-tools --no-self-update
 
