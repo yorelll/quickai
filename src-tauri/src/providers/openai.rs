@@ -1203,4 +1203,23 @@ mod tests {
         mock.assert_async().await;
         assert!(accumulated.is_empty());
     }
+
+    #[tokio::test]
+    async fn tool_call_streamed_across_chunks_is_reassembled() {
+        // A tool-call frame split across two reads, ending with `[DONE]`, must
+        // assemble into a single `ToolCalls` chunk.
+        let full = b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"id1\",\"function\":{\"name\":\"computer_click\",\"arguments\":\"{\\\"x\\\":1}\"}}]},\"finish_reason\":null}]}\n\n";
+        let mid = full.len() / 2;
+        let (_, chunks) = run_against_chunks(vec![
+            full[..mid].to_vec(),
+            full[mid..].to_vec(),
+            b"data: [DONE]\n\n".to_vec(),
+        ])
+        .await;
+        assert!(variants(&chunks).contains(&"tool_calls"));
+        assert_eq!(
+            tool_calls(&chunks),
+            vec![("computer_click".to_string(), r#"{"x":1}"#.to_string())]
+        );
+    }
 }

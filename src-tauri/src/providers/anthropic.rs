@@ -518,6 +518,20 @@ mod tests {
     }
 
     #[test]
+    fn message_with_empty_content_is_translated() {
+        // A message with no text and no images still translates (to an empty
+        // content-parts array) rather than being dropped.
+        let out = to_anthropic_messages(&[ChatMessage {
+            role: "user".to_string(),
+            content: String::new(),
+            images: None,
+        }]);
+        assert_eq!(out.len(), 1);
+        let json = serde_json::to_value(&out[0]).unwrap();
+        assert_eq!(json["content"], serde_json::json!([]));
+    }
+
+    #[test]
     fn thinking_request_enables_extended_thinking() {
         let request = AnthropicRequest {
             model: "claude-sonnet-4-5".to_string(),
