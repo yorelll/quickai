@@ -1,5 +1,6 @@
 /**
- * About tab - app identity, version, links, file actions.
+ * About tab - app identity, version, links, shortcuts and commands, help,
+ * and file actions.
  *
  * Windows-adapted: no macOS permissions (Accessibility/Screen Recording),
  * uses Windows-style file reveal.
@@ -11,24 +12,28 @@ import { invoke } from '@tauri-apps/api/core';
 
 import quickaiLogo from '../../../src-tauri/icons/128x128.png';
 import pkg from '../../../package.json';
+import { COMMANDS } from '../../config/commands';
+import { normalizeHotkey, hotkeyLabelKey } from '../hotkeys';
 import { Section, ConfirmDialog } from '../components';
 import { useTranslation } from '../../i18n';
 import styles from '../../styles/settings.module.css';
 import type { RawAppConfig } from '../types';
 
 interface AboutTabProps {
+  config: RawAppConfig;
   onSaved: (next: RawAppConfig) => void;
   onReload: () => Promise<void>;
 }
 
 const REPO_URL = 'https://github.com/yorelll/quickai';
 
-export function AboutTab({ onSaved, onReload }: AboutTabProps) {
+export function AboutTab({ config, onSaved, onReload }: AboutTabProps) {
   const { t } = useTranslation();
   const sha = import.meta.env.VITE_GIT_COMMIT_SHA?.slice(0, 7);
   const APP_VERSION = sha ? `${pkg.version}+nightly.${sha}` : pkg.version;
   const releaseUrl = `${REPO_URL}/releases/tag/v${pkg.version}`;
   const [confirmResetAll, setConfirmResetAll] = useState(false);
+  const hotkey = t(hotkeyLabelKey(normalizeHotkey(config.general.hotkey)));
 
   return (
     <div className={styles.aboutBody}>
@@ -75,6 +80,65 @@ export function AboutTab({ onSaved, onReload }: AboutTabProps) {
         </div>
       </div>
 
+      <Section heading={t('settings.section.shortcuts')}>
+        <InfoRow
+          keys={t('about.keys.summon', { key: hotkey })}
+          label={t('about.shortcut.summon')}
+        />
+        <InfoRow keys={t('about.keys.save')} label={t('about.shortcut.save')} />
+        <InfoRow keys={t('about.keys.new')} label={t('about.shortcut.new')} />
+        <InfoRow
+          keys={t('about.keys.history')}
+          label={t('about.shortcut.history')}
+        />
+        <InfoRow keys={t('about.keys.copy')} label={t('about.shortcut.copy')} />
+        <InfoRow keys={t('about.keys.hide')} label={t('about.shortcut.hide')} />
+        <InfoRow
+          keys={t('about.keys.scroll')}
+          label={t('about.shortcut.scroll')}
+        />
+        <InfoRow
+          keys={t('about.keys.settings')}
+          label={t('about.shortcut.settings')}
+        />
+        <InfoRow
+          keys={t('about.keys.closeSettings')}
+          label={t('about.shortcut.closeSettings')}
+        />
+        <InfoRow
+          keys={t('about.keys.agentAllow')}
+          label={t('about.shortcut.agentAllow')}
+        />
+        <InfoRow
+          keys={t('about.keys.agentDeny')}
+          label={t('about.shortcut.agentDeny')}
+        />
+        <InfoRow
+          keys={t('about.keys.agentAbort')}
+          label={t('about.shortcut.agentAbort')}
+        />
+
+        <p className={styles.helpText}>{t('about.commandsIntro')}</p>
+        {COMMANDS.map((command) => (
+          <InfoRow
+            key={command.trigger}
+            keys={command.trigger}
+            label={t(command.descriptionKey)}
+          />
+        ))}
+      </Section>
+
+      <Section heading={t('settings.section.help')}>
+        <h4 className={styles.helpHeading}>{t('about.help.featuresTitle')}</h4>
+        <p className={styles.helpText}>{t('about.help.features')}</p>
+        <h4 className={styles.helpHeading}>{t('about.help.usageTitle')}</h4>
+        <p className={styles.helpText}>
+          {t('about.help.usage', { key: hotkey })}
+        </p>
+        <h4 className={styles.helpHeading}>{t('about.help.trayTitle')}</h4>
+        <p className={styles.helpText}>{t('about.help.tray')}</p>
+      </Section>
+
       <Section heading={t('settings.section.file')}>
         <div className={styles.aboutLinkRow}>
           <button
@@ -102,15 +166,7 @@ export function AboutTab({ onSaved, onReload }: AboutTabProps) {
       </Section>
 
       <Section heading={t('settings.section.danger')}>
-        <p
-          style={{
-            fontSize: 11,
-            color: 'var(--color-text-secondary)',
-            margin: 0,
-          }}
-        >
-          {t('about.license')}
-        </p>
+        <p className={styles.helpText}>{t('about.license')}</p>
       </Section>
 
       <ConfirmDialog
@@ -127,6 +183,16 @@ export function AboutTab({ onSaved, onReload }: AboutTabProps) {
         }}
         onCancel={() => setConfirmResetAll(false)}
       />
+    </div>
+  );
+}
+
+/** One keyboard-shortcut or slash-command row: keys on the left, label next. */
+function InfoRow({ keys, label }: { keys: string; label: string }) {
+  return (
+    <div className={styles.infoRow}>
+      <kbd className={styles.infoKeys}>{keys}</kbd>
+      <span className={styles.infoLabel}>{label}</span>
     </div>
   );
 }

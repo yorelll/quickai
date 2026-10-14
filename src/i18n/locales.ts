@@ -8,6 +8,24 @@ export type Locale = 'en' | 'zh';
 /** All supported locales, in the order shown in the language switcher. */
 export const SUPPORTED_LOCALES: readonly Locale[] = ['en', 'zh'];
 
+/**
+ * Interface language setting. An explicit locale pins the UI language;
+ * `auto` follows the operating system (`navigator.language`).
+ */
+export type LanguageSetting = 'auto' | Locale;
+
+/** All supported language settings, in switcher order. */
+export const SUPPORTED_LANGUAGE_SETTINGS: readonly LanguageSetting[] = [
+  'auto',
+  'en',
+  'zh',
+];
+
+/** Returns true when `value` is a supported language setting. */
+export function isLanguageSetting(value: unknown): value is LanguageSetting {
+  return value === 'auto' || isLocale(value);
+}
+
 /** localStorage key that persists the user's explicit language choice. */
 export const LANGUAGE_STORAGE_KEY = 'quickai.uiLanguage';
 

@@ -1,13 +1,13 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import { DisplayTab } from '../DisplayTab';
 import { invoke } from '../../../testUtils/mocks/tauri';
-import { en } from '../../../i18n/en';
 import type { RawAppConfig } from '../../types';
 
 const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>;
 
 const RAW = {
+  general: { hotkey: 'ctrl', language: 'auto', data_dir: '' },
   prompt: { system: '' },
   window: { overlay_width: 600, max_chat_height: 648, max_images: 3 },
   quote: {
@@ -15,154 +15,80 @@ const RAW = {
     max_display_chars: 300,
     max_context_length: 4096,
   },
-  chat: { provider: 'openai', model: 'gpt-4o', base_url: '' },
-  agent: { provider: 'openai', model: '', base_url: '' },
+  chat: { provider: 'openai', model: '', base_url: '' },
+  agent: {
+    mode: 'same_as_chat',
+    provider: 'openai',
+    model: '',
+    base_url: '',
+    permission: 'limited',
+  },
 } as unknown as RawAppConfig;
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
-/** Installs a backend mock and renders the tab. */
-function renderTab(
-  autoStart: boolean | 'reject' | Promise<boolean> = false,
-  options: { toggleFails?: boolean } = {},
-) {
-  mockInvoke.mockImplementation(async (cmd: string) => {
-    if (cmd === 'is_auto_start_enabled_command') {
-      if (autoStart === 'reject') throw new Error('schtasks query failed');
-      if (autoStart instanceof Promise) return autoStart;
-      return autoStart;
-    }
-    if (
-      cmd === 'enable_auto_start_command' ||
-      cmd === 'disable_auto_start_command'
-    ) {
-      if (options.toggleFails) throw new Error('schtasks failed');
-      return undefined;
-    }
+function renderTab() {
+  mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+    if (cmd === 'set_config_field') return { ...RAW, ...(args as object) };
     return undefined;
   });
-
   return render(<DisplayTab config={RAW} resyncToken={0} onSaved={vi.fn()} />);
 }
 
-const startOnBootToggle = () =>
-  screen.getByRole('switch', { name: 'Start on boot' });
+async function flushDebounce() {
+  await act(async () => {
+    vi.advanceTimersByTime(300);
+  });
+}
 
-describe('DisplayTab start-on-boot', () => {
+describe('DisplayTab', () => {
   beforeEach(() => {
     mockInvoke.mockReset();
-  });
-
-  it('loads the enabled state from the OS', async () => {
-    renderTab(true);
-    await act(async () => {});
-
-    expect(mockInvoke).toHaveBeenCalledWith('is_auto_start_enabled_command');
-    expect(startOnBootToggle()).toHaveAttribute('aria-checked', 'true');
-  });
-
-  it('loads the disabled state from the OS', async () => {
-    renderTab(false);
-    await act(async () => {});
-
-    expect(startOnBootToggle()).toHaveAttribute('aria-checked', 'false');
-  });
-
-  it('registers the startup task when switched on', async () => {
-    renderTab(false);
-    await act(async () => {});
-
-    await act(async () => {
-      fireEvent.click(startOnBootToggle());
+    vi.useFakeTimers({
+      toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
     });
-
-    expect(mockInvoke).toHaveBeenCalledWith('enable_auto_start_command');
-    expect(startOnBootToggle()).toHaveAttribute('aria-checked', 'true');
   });
 
-  it('removes the startup task when switched off', async () => {
-    renderTab(true);
-    await act(async () => {});
-
-    await act(async () => {
-      fireEvent.click(startOnBootToggle());
-    });
-
-    expect(mockInvoke).toHaveBeenCalledWith('disable_auto_start_command');
-    expect(startOnBootToggle()).toHaveAttribute('aria-checked', 'false');
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
-  it('surfaces a localized error and leaves the switch unchanged', async () => {
-    renderTab(false, { toggleFails: true });
-    await act(async () => {});
-
-    await act(async () => {
-      fireEvent.click(startOnBootToggle());
-    });
-
-    expect(mockInvoke).toHaveBeenCalledWith('enable_auto_start_command');
-    expect(startOnBootToggle()).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      en['settings.display.startOnBootError'],
-    );
+  it('renders the window and quote controls', () => {
+    renderTab();
+    expect(
+      screen.getByLabelText('Overlay width', { selector: 'input' }),
+    ).toHaveValue('600');
+    expect(
+      screen.getByRole('spinbutton', { name: 'Max context length' }),
+    ).toBeInTheDocument();
   });
 
-  it('clears the error after a later successful toggle', async () => {
-    renderTab(false, { toggleFails: true });
-    await act(async () => {});
-    await act(async () => {
-      fireEvent.click(startOnBootToggle());
-    });
-    expect(screen.getByRole('alert')).toBeInTheDocument();
+  it('saves the overlay width', async () => {
+    renderTab();
 
-    mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === 'is_auto_start_enabled_command') return false;
-      return undefined;
-    });
-    await act(async () => {
-      fireEvent.click(startOnBootToggle());
-    });
+    const width = screen.getByLabelText('Overlay width', { selector: 'input' });
+    fireEvent.change(width, { target: { value: '800' } });
+    fireEvent.mouseUp(width);
+    await flushDebounce();
 
-    expect(screen.queryByRole('alert')).toBeNull();
-    expect(startOnBootToggle()).toHaveAttribute('aria-checked', 'true');
+    expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
+      section: 'window',
+      key: 'overlay_width',
+      value: 800,
+    });
   });
 
-  it('falls back to disabled when the OS query fails', async () => {
-    renderTab('reject');
-    await act(async () => {});
+  it('saves a quote limit through its stepper', async () => {
+    renderTab();
 
-    expect(startOnBootToggle()).toHaveAttribute('aria-checked', 'false');
-  });
-
-  it('ignores an enabled state that lands after unmount', async () => {
-    const d = deferred<boolean>();
-    const { unmount } = renderTab(d.promise);
-    unmount();
-
-    await act(async () => {
-      d.resolve(true);
+    const stepper = screen.getByRole('spinbutton', {
+      name: 'Max context length',
     });
+    fireEvent.click(within(stepper).getByRole('button', { name: 'Increase' }));
+    await flushDebounce();
 
-    expect(screen.queryByRole('switch', { name: 'Start on boot' })).toBeNull();
-  });
-
-  it('ignores a query failure that lands after unmount', async () => {
-    const d = deferred<boolean>();
-    const { unmount } = renderTab(d.promise);
-    unmount();
-
-    await act(async () => {
-      d.reject(new Error('late'));
+    expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
+      section: 'quote',
+      key: 'max_context_length',
+      value: 4096 + 256,
     });
-
-    expect(screen.queryByRole('switch', { name: 'Start on boot' })).toBeNull();
   });
 });

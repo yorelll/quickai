@@ -16,14 +16,17 @@ import {
 import { en, type TranslationKey } from './en';
 import { zh } from './zh';
 import {
+  isLanguageSetting,
   isLocale,
   LANGUAGE_STORAGE_KEY,
+  SUPPORTED_LANGUAGE_SETTINGS,
   SUPPORTED_LOCALES,
+  type LanguageSetting,
   type Locale,
 } from './locales';
 
-export type { Locale, TranslationKey };
-export { LANGUAGE_STORAGE_KEY, SUPPORTED_LOCALES };
+export type { LanguageSetting, Locale, TranslationKey };
+export { LANGUAGE_STORAGE_KEY, SUPPORTED_LANGUAGE_SETTINGS, SUPPORTED_LOCALES };
 
 /** Values interpolated into `{placeholder}` slots in a translation. */
 export type TranslateParams = Record<string, string | number>;
@@ -73,9 +76,36 @@ export function getLocale(): Locale {
 /** Persists and switches the active locale, notifying every subscriber. */
 export function setLocale(next: Locale): void {
   localStorage.setItem(LANGUAGE_STORAGE_KEY, next);
+  applyLocale(next);
+}
+
+/** Swaps the active locale and notifies subscribers without persisting it. */
+function applyLocale(next: Locale): void {
   document.documentElement.lang = next;
   activeLocale = next;
   for (const listener of listeners) listener();
+}
+
+/**
+ * Reads the persisted language setting. Absent or invalid stored values mean
+ * `auto` — follow the operating system.
+ */
+export function getLanguageSetting(): LanguageSetting {
+  const stored = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+  return isLanguageSetting(stored) ? stored : 'auto';
+}
+
+/**
+ * Applies a language setting. `auto` clears the persisted choice and
+ * re-detects from the system; an explicit locale pins and persists it.
+ */
+export function setLanguageSetting(next: LanguageSetting): void {
+  if (next === 'auto') {
+    localStorage.removeItem(LANGUAGE_STORAGE_KEY);
+    applyLocale(detectLocale());
+    return;
+  }
+  setLocale(next);
 }
 
 function subscribe(listener: () => void): () => void {

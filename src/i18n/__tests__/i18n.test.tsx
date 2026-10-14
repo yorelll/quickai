@@ -4,18 +4,21 @@ import type { ReactNode } from 'react';
 
 import {
   detectLocale,
+  getLanguageSetting,
   getLocale,
+  setLanguageSetting,
   setLocale,
   t,
   translate,
   useTranslation,
   LocaleProvider,
   LANGUAGE_STORAGE_KEY,
+  SUPPORTED_LANGUAGE_SETTINGS,
   SUPPORTED_LOCALES,
 } from '../index';
 import { en } from '../en';
 import { zh } from '../zh';
-import { isLocale } from '../locales';
+import { isLanguageSetting, isLocale } from '../locales';
 import { COMMANDS } from '../../config/commands';
 import { TIPS } from '../../config/tips';
 
@@ -45,6 +48,56 @@ describe('locales', () => {
     expect(isLocale('zh')).toBe(true);
     expect(isLocale('fr')).toBe(false);
     expect(isLocale(null)).toBe(false);
+  });
+});
+
+describe('language setting', () => {
+  beforeEach(() => {
+    setSystemLanguage('en-US');
+    setLocale('en');
+    localStorage.removeItem(LANGUAGE_STORAGE_KEY);
+  });
+
+  it('lists the supported language settings', () => {
+    expect(SUPPORTED_LANGUAGE_SETTINGS).toEqual(['auto', 'en', 'zh']);
+  });
+
+  it('narrows valid and invalid language settings', () => {
+    expect(isLanguageSetting('auto')).toBe(true);
+    expect(isLanguageSetting('en')).toBe(true);
+    expect(isLanguageSetting('zh')).toBe(true);
+    expect(isLanguageSetting('fr')).toBe(false);
+    expect(isLanguageSetting(null)).toBe(false);
+  });
+
+  it('reports auto when nothing is persisted', () => {
+    expect(getLanguageSetting()).toBe('auto');
+  });
+
+  it('reports the persisted locale', () => {
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, 'zh');
+    expect(getLanguageSetting()).toBe('zh');
+  });
+
+  it('reports auto for a garbage persisted value', () => {
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, 'klingon');
+    expect(getLanguageSetting()).toBe('auto');
+  });
+
+  it('pins and persists an explicit locale', () => {
+    setLanguageSetting('zh');
+    expect(localStorage.getItem(LANGUAGE_STORAGE_KEY)).toBe('zh');
+    expect(getLocale()).toBe('zh');
+  });
+
+  it('clears the persisted choice and re-detects for auto', () => {
+    setLocale('zh');
+    setSystemLanguage('fr-FR');
+
+    setLanguageSetting('auto');
+
+    expect(localStorage.getItem(LANGUAGE_STORAGE_KEY)).toBeNull();
+    expect(getLocale()).toBe('en');
   });
 });
 

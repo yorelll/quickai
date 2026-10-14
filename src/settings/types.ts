@@ -9,6 +9,11 @@
 import type { Translate } from '../i18n';
 
 export interface RawAppConfig {
+  general: {
+    hotkey: string;
+    language: string;
+    data_dir: string;
+  };
   prompt: {
     system: string;
   };
@@ -28,9 +33,11 @@ export interface RawAppConfig {
     base_url: string;
   };
   agent: {
+    mode: string;
     provider: string;
     model: string;
     base_url: string;
+    permission: string;
   };
 }
 
@@ -50,7 +57,7 @@ export interface CorruptMarker {
 }
 
 /** Identifier for the active Settings tab. */
-export type SettingsTabId = 'general' | 'display' | 'agent' | 'about';
+export type SettingsTabId = 'general' | 'ai' | 'display' | 'agent' | 'about';
 
 /** Localizes a `set_config_field` failure into user-facing copy. */
 export function describeConfigError(err: unknown, t: Translate): string {

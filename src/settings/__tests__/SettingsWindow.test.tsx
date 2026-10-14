@@ -4,10 +4,12 @@ import { SettingsWindow } from '../SettingsWindow';
 import { invoke } from '../../testUtils/mocks/tauri';
 import { __mockWindow } from '../../testUtils/mocks/tauri-window';
 import { LANGUAGE_STORAGE_KEY, setLocale } from '../../i18n';
+import { en } from '../../i18n/en';
 
 const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>;
 
 const RAW = {
+  general: { hotkey: 'ctrl', language: 'auto', data_dir: '' },
   prompt: { system: '' },
   window: { overlay_width: 600, max_chat_height: 648, max_images: 3 },
   quote: {
@@ -15,33 +17,47 @@ const RAW = {
     max_display_chars: 300,
     max_context_length: 4096,
   },
-  chat: { provider: 'openai', model: 'gpt-4o', base_url: '' },
-  agent: { provider: 'openai', model: '', base_url: '' },
+  chat: { provider: 'openai', model: '', base_url: '' },
+  agent: {
+    mode: 'same_as_chat',
+    provider: 'openai',
+    model: '',
+    base_url: '',
+    permission: 'limited',
+  },
 };
 
 let scrollHeightValue = 0;
 
 /** Installs a mock invoke that echoes config edits back like the backend. */
 function installBackend(
-  options: { marker?: unknown; settings?: Record<string, string> } = {},
+  options: {
+    marker?: unknown;
+    settings?: Record<string, string>;
+    settingsError?: boolean;
+  } = {},
 ) {
+  let state = structuredClone(RAW);
   mockInvoke.mockImplementation(
     async (cmd: string, args?: Record<string, unknown>) => {
       switch (cmd) {
         case 'get_config':
         case 'reload_config_from_disk':
+          return state;
         case 'reset_config':
-          return RAW;
+          state = structuredClone(RAW);
+          return state;
         case 'set_config_field': {
           const section = args?.section as keyof typeof RAW;
           const key = args?.key as string;
-          const value = args?.value;
-          return {
-            ...RAW,
-            [section]: { ...RAW[section], [key]: value },
+          state = {
+            ...state,
+            [section]: { ...state[section], [key]: args?.value },
           };
+          return state;
         }
         case 'get_settings':
+          if (options.settingsError) throw new Error('db locked');
           return options.settings ?? {};
         case 'get_corrupt_marker':
           return options.marker ?? null;
@@ -53,7 +69,11 @@ function installBackend(
 }
 
 async function renderWindow(
-  options: { marker?: unknown; settings?: Record<string, string> } = {},
+  options: {
+    marker?: unknown;
+    settings?: Record<string, string>;
+    settingsError?: boolean;
+  } = {},
 ) {
   installBackend(options);
   const view = render(<SettingsWindow />);
@@ -63,6 +83,12 @@ async function renderWindow(
 
 function tab(name: string) {
   return screen.getByRole('tab', { name });
+}
+
+/** Switches to a tab and flushes the async effects it mounts. */
+async function goToTab(name: string) {
+  fireEvent.click(tab(name));
+  await act(async () => {});
 }
 
 async function flushDebounce() {
@@ -101,9 +127,10 @@ describe('SettingsWindow', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders the four tabs', async () => {
+  it('renders the five tabs, starting on General', async () => {
     await renderWindow();
-    expect(tab('AI')).toHaveAttribute('aria-selected', 'true');
+    expect(tab('General')).toHaveAttribute('aria-selected', 'true');
+    expect(tab('AI')).toBeInTheDocument();
     expect(tab('Display')).toBeInTheDocument();
     expect(tab('Agent')).toBeInTheDocument();
     expect(tab('About')).toBeInTheDocument();
@@ -115,26 +142,29 @@ describe('SettingsWindow', () => {
   it('switches tabs on click', async () => {
     await renderWindow();
 
-    fireEvent.click(tab('Display'));
+    await goToTab('AI');
+    expect(screen.getByText('Chat model')).toBeInTheDocument();
+
+    await goToTab('Display');
     expect(screen.getByText('Overlay width')).toBeInTheDocument();
 
-    fireEvent.click(tab('Agent'));
-    expect(screen.getByText('Agent provider')).toBeInTheDocument();
+    await goToTab('Agent');
+    expect(screen.getByText('Agent permissions')).toBeInTheDocument();
 
-    fireEvent.click(tab('About'));
+    await goToTab('About');
     expect(screen.getByText('Refresh config.toml')).toBeInTheDocument();
   });
 
   it('navigates tabs with the arrow keys and ignores other keys', async () => {
     await renderWindow();
 
-    fireEvent.keyDown(tab('AI'), { key: 'ArrowRight' });
-    expect(tab('Display')).toHaveAttribute('aria-selected', 'true');
-
-    fireEvent.keyDown(tab('Display'), { key: 'ArrowLeft' });
+    fireEvent.keyDown(tab('General'), { key: 'ArrowRight' });
     expect(tab('AI')).toHaveAttribute('aria-selected', 'true');
 
     fireEvent.keyDown(tab('AI'), { key: 'ArrowLeft' });
+    expect(tab('General')).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.keyDown(tab('General'), { key: 'ArrowLeft' });
     expect(tab('About')).toHaveAttribute('aria-selected', 'true');
 
     fireEvent.keyDown(tab('About'), { key: 'a' });
@@ -238,9 +268,78 @@ describe('SettingsWindow', () => {
     expect(screen.getByRole('status').className).not.toContain('Visible');
   });
 
+  describe('General tab', () => {
+    it('saves the summon hotkey', async () => {
+      await renderWindow();
+
+      fireEvent.change(
+        screen.getByLabelText('Summon hotkey', { selector: 'select' }),
+        { target: { value: 'alt' } },
+      );
+      await flushDebounce();
+
+      expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
+        section: 'general',
+        key: 'hotkey',
+        value: 'alt',
+      });
+    });
+
+    it('persists the interface language', async () => {
+      await renderWindow();
+
+      const select = screen.getByLabelText('Interface language', {
+        selector: 'select',
+      });
+      expect(select).toHaveValue('auto');
+
+      fireEvent.change(select, { target: { value: 'zh' } });
+
+      expect(localStorage.getItem(LANGUAGE_STORAGE_KEY)).toBe('zh');
+      expect(document.documentElement.lang).toBe('zh');
+
+      await flushDebounce();
+      expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
+        section: 'general',
+        key: 'language',
+        value: 'zh',
+      });
+      setLocale('en');
+    });
+
+    it('saves the data directory', async () => {
+      await renderWindow();
+
+      fireEvent.change(
+        screen.getByLabelText('Data directory', { selector: 'input' }),
+        { target: { value: 'D:\\QuickAI' } },
+      );
+      await flushDebounce();
+
+      expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
+        section: 'general',
+        key: 'data_dir',
+        value: 'D:\\QuickAI',
+      });
+    });
+  });
+
   describe('AI tab', () => {
+    it('starts the model field empty with a placeholder', async () => {
+      await renderWindow();
+      await goToTab('AI');
+
+      const model = screen.getByLabelText('Chat model', { selector: 'input' });
+      expect(model).toHaveValue('');
+      expect(model).toHaveAttribute(
+        'placeholder',
+        en['settings.ai.modelPlaceholder'],
+      );
+    });
+
     it('loads and saves the API key for the active provider', async () => {
       await renderWindow({ settings: { api_key_openai: 'sk-openai' } });
+      await goToTab('AI');
 
       const keyInput = screen.getByLabelText('API Key (OpenAI)', {
         selector: 'input',
@@ -261,6 +360,7 @@ describe('SettingsWindow', () => {
       await renderWindow({
         settings: { api_key_openai: 'sk-openai', api_key_anthropic: 'sk-ant' },
       });
+      await goToTab('AI');
 
       fireEvent.change(
         screen.getByLabelText('Chat provider', { selector: 'select' }),
@@ -282,6 +382,7 @@ describe('SettingsWindow', () => {
 
     it('saves the model, base URL and system prompt', async () => {
       await renderWindow();
+      await goToTab('AI');
 
       fireEvent.change(
         screen.getByLabelText('Chat model', { selector: 'input' }),
@@ -333,6 +434,7 @@ describe('SettingsWindow', () => {
       });
       render(<SettingsWindow />);
       await act(async () => {});
+      await goToTab('AI');
 
       expect(
         screen.getByLabelText('API Key (OpenAI)', { selector: 'input' }),
@@ -349,6 +451,7 @@ describe('SettingsWindow', () => {
       });
       render(<SettingsWindow />);
       await act(async () => {});
+      await goToTab('AI');
 
       const input = screen.getByLabelText('API Key (OpenAI)', {
         selector: 'input',
@@ -393,40 +496,41 @@ describe('SettingsWindow', () => {
         value: 4,
       });
     });
-
-    it('persists the interface language', async () => {
-      await renderWindow();
-      fireEvent.click(tab('Display'));
-
-      const select = screen.getByLabelText('Interface language', {
-        selector: 'select',
-      });
-      expect(select).toHaveValue('en');
-
-      fireEvent.change(select, { target: { value: 'zh' } });
-
-      expect(localStorage.getItem(LANGUAGE_STORAGE_KEY)).toBe('zh');
-      expect(document.documentElement.lang).toBe('zh');
-      setLocale('en');
-    });
   });
 
   describe('Agent tab', () => {
-    it('saves the agent provider, model, base URL and API key', async () => {
-      await renderWindow({ settings: { api_key_openai: 'sk-agent' } });
-      await act(async () => {
-        fireEvent.click(tab('Agent'));
-      });
+    it('shows the chat configuration while in same-as-AI mode', async () => {
+      await renderWindow();
+      await goToTab('Agent');
 
+      expect(
+        screen.getByText('Uses your AI configuration'),
+      ).toBeInTheDocument();
+      expect(screen.queryByLabelText('Agent model')).toBeNull();
+      expect(screen.queryByLabelText('Agent provider')).toBeNull();
+    });
+
+    it('reveals the agent fields in custom mode', async () => {
+      await renderWindow({ settings: { api_key_openai: 'sk-agent' } });
+      await goToTab('Agent');
+
+      fireEvent.change(
+        screen.getByLabelText('Configuration', { selector: 'select' }),
+        { target: { value: 'custom' } },
+      );
+      await flushDebounce();
+      await act(async () => {});
+
+      expect(
+        screen.getByLabelText('Agent model', { selector: 'input' }),
+      ).toHaveValue('');
       expect(
         screen.getByLabelText('API Key (OpenAI)', { selector: 'input' }),
       ).toHaveValue('sk-agent');
 
       fireEvent.change(
         screen.getByLabelText('Agent model', { selector: 'input' }),
-        {
-          target: { value: 'gpt-4.1' },
-        },
+        { target: { value: 'gpt-4.1' } },
       );
       await flushDebounce();
       expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
@@ -436,23 +540,8 @@ describe('SettingsWindow', () => {
       });
 
       fireEvent.change(
-        screen.getByLabelText('Base URL', { selector: 'input' }),
-        {
-          target: { value: 'https://agent.example/v1' },
-        },
-      );
-      await flushDebounce();
-      expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
-        section: 'agent',
-        key: 'base_url',
-        value: 'https://agent.example/v1',
-      });
-
-      fireEvent.change(
         screen.getByLabelText('Agent provider', { selector: 'select' }),
-        {
-          target: { value: 'openai_compatible' },
-        },
+        { target: { value: 'openai_compatible' } },
       );
       await flushDebounce();
       expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
@@ -462,11 +551,53 @@ describe('SettingsWindow', () => {
       });
     });
 
-    it('saves the agent API key and ignores a failure', async () => {
-      await renderWindow({ settings: { api_key_openai: 'sk-agent' } });
-      await act(async () => {
-        fireEvent.click(tab('Agent'));
+    it('tolerates a failing agent key lookup in custom mode', async () => {
+      await renderWindow({ settingsError: true });
+      await goToTab('Agent');
+
+      fireEvent.change(
+        screen.getByLabelText('Configuration', { selector: 'select' }),
+        { target: { value: 'custom' } },
+      );
+      await flushDebounce();
+      await act(async () => {});
+
+      expect(
+        screen.getByLabelText('API Key (OpenAI)', { selector: 'input' }),
+      ).toHaveValue('');
+    });
+
+    it('warns when full agent permissions are selected', async () => {
+      await renderWindow();
+      await goToTab('Agent');
+
+      const select = screen.getByLabelText('Agent permissions', {
+        selector: 'select',
       });
+      expect(select).toHaveValue('limited');
+
+      fireEvent.change(select, { target: { value: 'full' } });
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        en['settings.agent.permissionWarning'],
+      );
+
+      await flushDebounce();
+      expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
+        section: 'agent',
+        key: 'permission',
+        value: 'full',
+      });
+    });
+
+    it('saves the agent API key in custom mode and ignores a failure', async () => {
+      await renderWindow({ settings: { api_key_openai: 'sk-agent' } });
+      await goToTab('Agent');
+      fireEvent.change(
+        screen.getByLabelText('Configuration', { selector: 'select' }),
+        { target: { value: 'custom' } },
+      );
+      await flushDebounce();
+      await act(async () => {});
 
       const input = screen.getByLabelText('API Key (OpenAI)', {
         selector: 'input',
@@ -496,6 +627,18 @@ describe('SettingsWindow', () => {
   });
 
   describe('About tab', () => {
+    it('lists the shortcuts, commands and help', async () => {
+      await renderWindow();
+      fireEvent.click(tab('About'));
+
+      expect(screen.getByText('Shortcuts and commands')).toBeInTheDocument();
+      expect(screen.getByText('Help')).toBeInTheDocument();
+      expect(screen.getByText('Double-tap Ctrl')).toBeInTheDocument();
+      expect(screen.getByText('Ctrl+S')).toBeInTheDocument();
+      expect(screen.getByText('/screen')).toBeInTheDocument();
+      expect(screen.getByText(en['about.help.trayTitle'])).toBeInTheDocument();
+    });
+
     it('opens links and file actions', async () => {
       await renderWindow();
       fireEvent.click(tab('About'));

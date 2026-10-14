@@ -1,9 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { useSettingsAutoResize } from '../useSettingsAutoResize';
 import { __mockWindow } from '../../../testUtils/mocks/tauri-window';
 
 const CHROME = 148;
+
+function setSizeCallCount(): number {
+  return (__mockWindow.setSize as unknown as { mock: { calls: unknown[][] } })
+    .mock.calls.length;
+}
 
 /** Reads the LogicalSize passed to the most recent `setSize` call. */
 function lastSize(): { width: number; height: number } {
@@ -25,14 +30,6 @@ describe('useSettingsAutoResize', () => {
       configurable: true,
     });
     __mockWindow.setSize.mockClear();
-    // The shared setup mocks rAF synchronously, which would recurse forever in
-    // the easing loop; make it inert for this suite.
-    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation(() => 0);
-    vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
   });
 
   it('does nothing when there is no element', () => {
@@ -58,7 +55,29 @@ describe('useSettingsAutoResize', () => {
     expect(result.current).toBe(true);
   });
 
-  it('animates towards a new target when the content height changes', () => {
+  it('clamps to the minimum height', () => {
+    height = 10;
+    renderHook(() => useSettingsAutoResize(el, CHROME, 0));
+
+    expect(lastSize().height).toBe(280);
+  });
+
+  it('resizes once to the new target when the content height changes', () => {
+    const { rerender } = renderHook(
+      ({ rev }) => useSettingsAutoResize(el, CHROME, rev),
+      { initialProps: { rev: 0 } },
+    );
+    expect(setSizeCallCount()).toBe(1);
+
+    height = 800;
+    rerender({ rev: 1 });
+
+    // Exactly one extra call — no per-frame resize storm.
+    expect(setSizeCallCount()).toBe(2);
+    expect(lastSize().height).toBe(700);
+  });
+
+  it('reports clamping for the new tab', () => {
     const { result, rerender } = renderHook(
       ({ rev }) => useSettingsAutoResize(el, CHROME, rev),
       { initialProps: { rev: 0 } },
@@ -68,7 +87,6 @@ describe('useSettingsAutoResize', () => {
     height = 800;
     rerender({ rev: 1 });
 
-    // The easing loop only starts (rAF is inert here) but clamping is reported.
     expect(result.current).toBe(true);
   });
 
@@ -77,72 +95,32 @@ describe('useSettingsAutoResize', () => {
       ({ rev }) => useSettingsAutoResize(el, CHROME, rev),
       { initialProps: { rev: 0 } },
     );
-    expect(__mockWindow.setSize).toHaveBeenCalledTimes(1);
+    expect(setSizeCallCount()).toBe(1);
 
     height = 302; // target 450 vs last sent 448 → below the 4px threshold
     rerender({ rev: 1 });
 
-    expect(__mockWindow.setSize).toHaveBeenCalledTimes(1);
+    expect(setSizeCallCount()).toBe(1);
   });
 
-  it('cancels a pending animation frame on unmount', () => {
-    const { rerender, unmount } = renderHook(
-      ({ rev }) => useSettingsAutoResize(el, CHROME, rev),
-      { initialProps: { rev: 0 } },
+  it('resizes when the chrome height changes (banner appears)', () => {
+    const { rerender } = renderHook(
+      ({ chrome }) => useSettingsAutoResize(el, chrome, 0),
+      { initialProps: { chrome: CHROME } },
     );
+    expect(setSizeCallCount()).toBe(1);
 
-    height = 800;
-    rerender({ rev: 1 });
+    rerender({ chrome: CHROME + 56 });
+
+    expect(setSizeCallCount()).toBe(2);
+    expect(lastSize().height).toBe(height + CHROME + 56);
+  });
+
+  it('stops resizing after unmount', () => {
+    const { unmount } = renderHook(() => useSettingsAutoResize(el, CHROME, 0));
+    expect(setSizeCallCount()).toBe(1);
 
     unmount();
-    expect(globalThis.cancelAnimationFrame).toHaveBeenCalled();
-  });
-
-  it('eases to the target and stops at the end of the animation', () => {
-    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => {
-      // A frame far enough in the future that the easing completes at once.
-      cb(performance.now() + 1000);
-      return 1;
-    });
-
-    const { rerender } = renderHook(
-      ({ rev }) => useSettingsAutoResize(el, CHROME, rev),
-      { initialProps: { rev: 0 } },
-    );
-    expect(lastSize().height).toBe(height + CHROME);
-
-    height = 800;
-    rerender({ rev: 1 });
-
-    expect(lastSize().height).toBe(700);
-  });
-
-  it('keeps requesting frames while the easing is still running', () => {
-    let frames = 0;
-    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => {
-      frames += 1;
-      // Only the first frame runs (elapsed ≈ 0), so the loop must schedule
-      // another frame and then stop when the mock declines to invoke it.
-      if (frames === 1) cb(performance.now());
-      return frames;
-    });
-
-    const { rerender } = renderHook(
-      ({ rev }) => useSettingsAutoResize(el, CHROME, rev),
-      { initialProps: { rev: 0 } },
-    );
-    const callsAfterMount = (
-      __mockWindow.setSize as unknown as { mock: { calls: unknown[][] } }
-    ).mock.calls.length;
-
-    height = 800;
-    rerender({ rev: 1 });
-
-    // The first frame lands on the start height, so nothing new is sent.
-    expect(
-      (__mockWindow.setSize as unknown as { mock: { calls: unknown[][] } }).mock
-        .calls.length,
-    ).toBe(callsAfterMount);
-    expect(frames).toBeGreaterThan(1);
+    expect(setSizeCallCount()).toBe(1);
   });
 });

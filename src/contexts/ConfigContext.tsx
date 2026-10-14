@@ -28,6 +28,11 @@ const CONFIG_UPDATED_EVENT = 'quickai://config-updated';
 
 /** Shape returned by the Rust `get_config` command (snake_case). */
 interface RawAppConfig {
+  general: {
+    hotkey: string;
+    language: string;
+    data_dir: string;
+  };
   prompt: {
     system: string;
   };
@@ -47,14 +52,21 @@ interface RawAppConfig {
     base_url: string;
   };
   agent: {
+    mode: string;
     provider: string;
     model: string;
     base_url: string;
+    permission: string;
   };
 }
 
 /** Camel-cased, frontend-friendly view of the configuration. */
 export interface AppConfig {
+  general: {
+    hotkey: string;
+    language: string;
+    dataDir: string;
+  };
   prompt: {
     /** Raw user-editable persona prompt (may be empty). */
     system: string;
@@ -75,14 +87,21 @@ export interface AppConfig {
     baseUrl: string;
   };
   agent: {
+    mode: string;
     provider: string;
     model: string;
     baseUrl: string;
+    permission: string;
   };
 }
 
 function transform(raw: RawAppConfig): AppConfig {
   return {
+    general: {
+      hotkey: raw.general.hotkey,
+      language: raw.general.language,
+      dataDir: raw.general.data_dir,
+    },
     prompt: {
       system: raw.prompt.system,
     },
@@ -102,9 +121,11 @@ function transform(raw: RawAppConfig): AppConfig {
       baseUrl: raw.chat.base_url,
     },
     agent: {
+      mode: raw.agent.mode,
       provider: raw.agent.provider,
       model: raw.agent.model,
       baseUrl: raw.agent.base_url,
+      permission: raw.agent.permission,
     },
   };
 }
@@ -216,6 +237,11 @@ export function ConfigProviderForTest({
  * `src-tauri/src/config/defaults.rs`).
  */
 export const DEFAULT_CONFIG: AppConfig = {
+  general: {
+    hotkey: 'ctrl',
+    language: 'auto',
+    dataDir: '',
+  },
   prompt: { system: '' },
   window: {
     overlayWidth: 600,
@@ -229,12 +255,14 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
   chat: {
     provider: 'openai',
-    model: 'gpt-4o',
+    model: '',
     baseUrl: '',
   },
   agent: {
+    mode: 'same_as_chat',
     provider: 'openai',
     model: '',
     baseUrl: '',
+    permission: 'limited',
   },
 };

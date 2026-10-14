@@ -8,6 +8,11 @@
 import type { TranslationKey } from '../i18n';
 
 const HELP_KEYS = {
+  general: {
+    hotkey: 'help.general.hotkey',
+    language: 'help.general.language',
+    data_dir: 'help.general.data_dir',
+  },
   prompt: {
     system: 'help.prompt.system',
   },
@@ -27,9 +32,11 @@ const HELP_KEYS = {
     base_url: 'help.chat.base_url',
   },
   agent: {
+    mode: 'help.agent.mode',
     provider: 'help.agent.provider',
     model: 'help.agent.model',
     base_url: 'help.agent.base_url',
+    permission: 'help.agent.permission',
   },
 } as const;
 

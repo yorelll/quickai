@@ -125,6 +125,7 @@ export const en = {
 
   // ─── Error cards (ApiError.code → copy) ──────────────────────────────────
   'error.missingApiKey': 'No API key configured. Add one in Settings.',
+  'error.missingModel': 'No chat model selected. Set one in Settings.',
   'error.unauthorized': 'Authentication failed. Check your API key.',
   'error.forbidden': 'The provider denied access to this model.',
   'error.rateLimited': 'Rate limit reached. Try again in a moment.',
@@ -265,10 +266,6 @@ export const en = {
   'settings.display.maxDisplayLines': 'Max display lines',
   'settings.display.maxDisplayChars': 'Max display chars',
   'settings.display.maxContextLength': 'Max context length',
-  'settings.display.language': 'Interface language',
-  'settings.display.startOnBoot': 'Start on boot',
-  'settings.display.startOnBootError':
-    "Couldn't update the start-on-boot setting.",
 
   // ─── Settings: provider names ────────────────────────────────────────────
   'provider.openai': 'OpenAI',
@@ -329,6 +326,98 @@ export const en = {
   'configError.parse':
     'config.toml has a syntax error. Restart QuickAI to recover.',
   'configError.seedFailed': "Couldn't write defaults: {source}.",
+
+  // ─── Batch 2: chat & agent UX (T6) ──────────────────────────────────────
+  'window.pin': 'Pin window',
+  'window.unpin': 'Unpin window',
+  'window.pinTip': 'Keep the window open when you click away',
+  'window.unpinTip': 'Let the window hide when you click away',
+  'conversation.rename': 'Rename conversation',
+  'conversation.renameLabel': 'Conversation name',
+  'history.rename': 'Rename',
+  'history.renameError': "Couldn't rename — try again.",
+  'history.deleteConfirmTitle': 'Delete conversation?',
+  'history.deleteAction': 'Delete',
+  'agent.dismiss': 'Dismiss',
+  'agent.keyboardHint': 'Press 1 to allow, 2 to deny, Ctrl+C to abort',
+
+  // ─── Batch 2: settings General / Agent / About (T5) ─────────────────────
+  'settings.tab.general': 'General',
+  'settings.section.hotkey': 'Hotkey',
+  'settings.section.data': 'Data',
+  'settings.section.agentMode': 'Agent mode',
+  'settings.section.permissions': 'Permissions',
+  'settings.section.shortcuts': 'Shortcuts and commands',
+  'settings.section.help': 'Help',
+  'settings.general.hotkey': 'Summon hotkey',
+  'settings.general.language': 'Interface language',
+  'settings.general.dataDir': 'Data directory',
+  'settings.general.dataDirPlaceholder': 'Default location',
+  'settings.general.dataDirNote':
+    'A restart is required for changes to take effect.',
+  'settings.general.startOnBoot': 'Start on boot',
+  'settings.general.startOnBootError':
+    "Couldn't update the start-on-boot setting.",
+  'hotkey.ctrl': 'Ctrl',
+  'hotkey.alt': 'Alt',
+  'hotkey.shift': 'Shift',
+  'hotkey.win': 'Windows',
+  'language.auto': 'Auto (system)',
+  'help.general.hotkey':
+    'The key you double-tap to summon QuickAI from any app. Pick one that does not clash with your other shortcuts.',
+  'help.general.language':
+    'The interface language. Auto follows your Windows display language.',
+  'help.general.data_dir':
+    'Where QuickAI keeps its database and saved images. Leave empty to use the default app data folder. A restart is required.',
+  'settings.agent.mode': 'Configuration',
+  'agent.mode.sameAsChat': 'Same as AI configuration',
+  'agent.mode.custom': 'Custom',
+  'settings.agent.usesChat': 'Uses your AI configuration',
+  'settings.agent.noModel': 'No model set',
+  'settings.agent.permission': 'Agent permissions',
+  'agent.permission.limited': 'Limited — ask before dangerous actions',
+  'agent.permission.full': 'Full — unrestricted control',
+  'settings.agent.permissionWarning':
+    'Full control lets the agent run any action on your computer without asking for confirmation.',
+  'help.agent.mode':
+    'Whether agent mode reuses your AI configuration, or uses its own provider, model, base URL and API key.',
+  'help.agent.permission':
+    'Limited runs safe actions automatically and asks before anything dangerous. Full never asks — the agent may act freely on your computer.',
+  'about.shortcut.summon': 'Summon QuickAI from any app',
+  'about.keys.summon': 'Double-tap {key}',
+  'about.shortcut.save': 'Save or unsave the conversation',
+  'about.keys.save': 'Ctrl+S',
+  'about.shortcut.new': 'Start a new conversation',
+  'about.keys.new': 'Ctrl+N',
+  'about.shortcut.history': 'Open conversation history',
+  'about.keys.history': 'Ctrl+H',
+  'about.shortcut.copy': 'Copy the last response',
+  'about.keys.copy': 'Ctrl+Shift+C',
+  'about.shortcut.hide': 'Hide the window',
+  'about.keys.hide': 'Esc / Ctrl+W',
+  'about.shortcut.scroll': 'Jump to the top or bottom of the chat',
+  'about.keys.scroll': 'Ctrl+Home / Ctrl+End',
+  'about.shortcut.settings': 'Open Settings',
+  'about.keys.settings': 'Ctrl+,',
+  'about.shortcut.closeSettings': 'Close Settings from inside the window',
+  'about.keys.closeSettings': 'Ctrl+W',
+  'about.shortcut.agentAllow': 'Agent: allow the pending action',
+  'about.keys.agentAllow': '1',
+  'about.shortcut.agentDeny': 'Agent: deny the pending action',
+  'about.keys.agentDeny': '2',
+  'about.shortcut.agentAbort': 'Agent: abort the run',
+  'about.keys.agentAbort': 'Ctrl+C',
+  'about.commandsIntro':
+    'Type / in the ask bar to see these commands, then pick one with Tab.',
+  'about.help.featuresTitle': 'Features',
+  'about.help.features':
+    'QuickAI floats above your other windows as a fast AI assistant. Chat with OpenAI, Anthropic, or any OpenAI-compatible model; attach screenshots or images for visual context; use slash commands to capture the screen, translate, rewrite, summarize, or extract to-dos; let /do agent mode control your desktop; and browse saved conversations from the history panel. The interface speaks English and Simplified Chinese.',
+  'about.help.usageTitle': 'Usage',
+  'about.help.usage':
+    'Double-tap {key} anywhere to summon QuickAI. Type your question and press Enter, or attach text and images first. Add a slash command for special tasks. Press Ctrl+S to save the conversation to history, and Ctrl+W or Esc to hide the window — QuickAI keeps running in the background.',
+  'about.help.trayTitle': 'Tray icon',
+  'about.help.tray':
+    'QuickAI lives in the system tray. The tray icon always shows the QuickAI logo — it has no separate states while the app runs. Left-click it to open its menu (Open QuickAI, Quit); right-click it to show or hide the overlay.',
 } as const;
 
 /** The complete set of translation keys understood by the app. */

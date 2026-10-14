@@ -9,6 +9,9 @@ describe('configHelp', () => {
     // Each entry is a thunk so `configHelp` sees literal section/key arguments
     // (its generics cannot resolve a widened union).
     const cases: Array<() => TranslationKey> = [
+      () => configHelp('general', 'hotkey'),
+      () => configHelp('general', 'language'),
+      () => configHelp('general', 'data_dir'),
       () => configHelp('prompt', 'system'),
       () => configHelp('window', 'overlay_width'),
       () => configHelp('window', 'max_chat_height'),
@@ -19,9 +22,11 @@ describe('configHelp', () => {
       () => configHelp('chat', 'provider'),
       () => configHelp('chat', 'model'),
       () => configHelp('chat', 'base_url'),
+      () => configHelp('agent', 'mode'),
       () => configHelp('agent', 'provider'),
       () => configHelp('agent', 'model'),
       () => configHelp('agent', 'base_url'),
+      () => configHelp('agent', 'permission'),
     ];
 
     for (const getHelpKey of cases) {
