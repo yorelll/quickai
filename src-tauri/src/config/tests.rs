@@ -12,17 +12,19 @@
 use std::path::PathBuf;
 
 use super::defaults::{
-    DEFAULT_CHAT_BASE_URL, DEFAULT_CHAT_MODEL, DEFAULT_CHAT_PROVIDER, DEFAULT_MAX_CHAT_HEIGHT,
-    DEFAULT_MAX_IMAGES, DEFAULT_OVERLAY_WIDTH, DEFAULT_QUOTE_MAX_CONTEXT_LENGTH,
-    DEFAULT_QUOTE_MAX_DISPLAY_CHARS, DEFAULT_QUOTE_MAX_DISPLAY_LINES, DEFAULT_SYSTEM_PROMPT_BASE,
-    SLASH_COMMAND_PROMPT_APPENDIX,
+    DEFAULT_AGENT_MODE, DEFAULT_AGENT_PERMISSION, DEFAULT_AGENT_PROVIDER, DEFAULT_CHAT_BASE_URL,
+    DEFAULT_CHAT_MODEL, DEFAULT_CHAT_PROVIDER, DEFAULT_GENERAL_DATA_DIR, DEFAULT_GENERAL_HOTKEY,
+    DEFAULT_GENERAL_LANGUAGE, DEFAULT_MAX_CHAT_HEIGHT, DEFAULT_MAX_IMAGES, DEFAULT_OVERLAY_WIDTH,
+    DEFAULT_QUOTE_MAX_CONTEXT_LENGTH, DEFAULT_QUOTE_MAX_DISPLAY_CHARS,
+    DEFAULT_QUOTE_MAX_DISPLAY_LINES, DEFAULT_SYSTEM_PROMPT_BASE, SLASH_COMMAND_PROMPT_APPENDIX,
 };
 use super::error::ConfigError;
 use super::loader::{
     compose_system_prompt, load_from_path, try_rename_corrupt, write_corrupt_marker,
 };
 use super::schema::{
-    AgentSection, AppConfig, ChatSection, PromptSection, QuoteSection, WindowSection,
+    AgentMode, AgentPermission, AgentSection, AppConfig, ChatSection, GeneralSection, Hotkey,
+    Language, PromptSection, QuoteSection, WindowSection,
 };
 use super::writer::atomic_write;
 use crate::providers::Provider;
@@ -54,9 +56,52 @@ fn defaults_const_values_match_schema_defaults() {
     assert_eq!(c.quote.max_display_lines, DEFAULT_QUOTE_MAX_DISPLAY_LINES);
     assert_eq!(c.quote.max_display_chars, DEFAULT_QUOTE_MAX_DISPLAY_CHARS);
     assert_eq!(c.quote.max_context_length, DEFAULT_QUOTE_MAX_CONTEXT_LENGTH);
+    assert_eq!(c.general.hotkey, DEFAULT_GENERAL_HOTKEY);
+    assert_eq!(c.general.language, DEFAULT_GENERAL_LANGUAGE);
+    assert_eq!(c.general.data_dir, DEFAULT_GENERAL_DATA_DIR);
     assert_eq!(c.chat.provider, DEFAULT_CHAT_PROVIDER);
     assert_eq!(c.chat.model, DEFAULT_CHAT_MODEL);
     assert_eq!(c.chat.base_url, DEFAULT_CHAT_BASE_URL);
+    assert_eq!(c.agent.mode, DEFAULT_AGENT_MODE);
+    assert_eq!(c.agent.provider, DEFAULT_AGENT_PROVIDER);
+    assert_eq!(c.agent.permission, DEFAULT_AGENT_PERMISSION);
+}
+
+#[test]
+fn default_chat_model_is_empty() {
+    // Item 1: the chat model has no default; the UI shows a placeholder and an
+    // empty model surfaces as `missing_model` when a chat is attempted.
+    assert!(DEFAULT_CHAT_MODEL.is_empty());
+}
+
+#[test]
+fn resolved_data_dir_path_accessor() {
+    let dir = super::ResolvedDataDir(PathBuf::from("/tmp/quickai-data"));
+    assert_eq!(dir.path(), std::path::Path::new("/tmp/quickai-data"));
+}
+
+#[test]
+fn resolve_data_dir_from_prefers_configured_value() {
+    let default = PathBuf::from("/default/data");
+    assert_eq!(
+        super::resolve_data_dir_from("D:/quickai", default.clone()),
+        PathBuf::from("D:/quickai")
+    );
+    // Surrounding whitespace is trimmed before the value is used.
+    assert_eq!(
+        super::resolve_data_dir_from("  D:/quickai  ", default),
+        PathBuf::from("D:/quickai")
+    );
+}
+
+#[test]
+fn resolve_data_dir_from_falls_back_to_default() {
+    let default = PathBuf::from("/default/data");
+    assert_eq!(super::resolve_data_dir_from("", default.clone()), default);
+    assert_eq!(
+        super::resolve_data_dir_from("   ", default.clone()),
+        default
+    );
 }
 
 #[test]
@@ -79,18 +124,26 @@ fn section_defaults_are_sensible() {
     let q = QuoteSection::default();
     assert_eq!(q.max_display_lines, DEFAULT_QUOTE_MAX_DISPLAY_LINES);
 
+    let g = GeneralSection::default();
+    assert_eq!(g.hotkey, Hotkey::Ctrl);
+    assert_eq!(g.language, Language::Auto);
+    assert!(g.data_dir.is_empty());
+
     let c = ChatSection::default();
     assert_eq!(c.provider, Provider::OpenAi);
     assert_eq!(c.model, DEFAULT_CHAT_MODEL);
+    assert!(c.model.is_empty());
     assert!(c.base_url.is_empty());
 }
 
 #[test]
 fn agent_section_defaults_are_sensible() {
     let a = AgentSection::default();
+    assert_eq!(a.mode, AgentMode::SameAsChat);
     assert_eq!(a.provider, Provider::OpenAi);
     assert!(a.model.is_empty());
     assert!(a.base_url.is_empty());
+    assert_eq!(a.permission, AgentPermission::Limited);
 }
 
 #[test]
@@ -103,8 +156,58 @@ fn app_config_serde_round_trip_matches_defaults() {
     assert_eq!(parsed.prompt.system, original.prompt.system);
     assert_eq!(parsed.window, original.window);
     assert_eq!(parsed.quote, original.quote);
+    assert_eq!(parsed.general, original.general);
     assert_eq!(parsed.chat, original.chat);
     assert_eq!(parsed.agent, original.agent);
+}
+
+#[test]
+fn general_section_deserializes_every_enum_value() {
+    for (wire, hotkey) in [
+        ("ctrl", Hotkey::Ctrl),
+        ("alt", Hotkey::Alt),
+        ("shift", Hotkey::Shift),
+        ("win", Hotkey::Win),
+    ] {
+        let toml_str = format!("[general]\nhotkey = \"{wire}\"");
+        let parsed: AppConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.general.hotkey, hotkey);
+    }
+
+    for (wire, language) in [
+        ("auto", Language::Auto),
+        ("en", Language::En),
+        ("zh", Language::Zh),
+    ] {
+        let toml_str = format!("[general]\nlanguage = \"{wire}\"");
+        let parsed: AppConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.general.language, language);
+    }
+}
+
+#[test]
+fn general_section_serializes_enums_as_wire_strings() {
+    let mut config = AppConfig::default();
+    config.general.hotkey = Hotkey::Win;
+    config.general.language = Language::Zh;
+    config.general.data_dir = "D:/quickai-data".to_string();
+
+    let toml_str = toml::to_string_pretty(&config).unwrap();
+    assert!(toml_str.contains("hotkey = \"win\""));
+    assert!(toml_str.contains("language = \"zh\""));
+    assert!(toml_str.contains("data_dir = \"D:/quickai-data\""));
+}
+
+#[test]
+fn agent_section_deserializes_mode_and_permission() {
+    let toml_str = r#"
+        [agent]
+        mode = "custom"
+        permission = "full"
+    "#;
+    let parsed: AppConfig = toml::from_str(toml_str).unwrap();
+    assert_eq!(parsed.agent.mode, AgentMode::Custom);
+    assert_eq!(parsed.agent.permission, AgentPermission::Full);
 }
 
 #[test]
@@ -530,12 +633,23 @@ fn resolve_values_within_bounds_are_preserved() {
 }
 
 #[test]
-fn resolve_empty_chat_model_falls_back_to_default() {
+fn resolve_empty_chat_model_is_preserved() {
+    // Item 1: an empty model is NOT an error at load time and is not defaulted;
+    // it surfaces as `missing_model` when a chat is attempted.
     let dir = fresh_temp_dir();
     let path = config_path_in(&dir);
     std::fs::write(&path, "[chat]\nmodel = \"   \"\n").unwrap();
     let config = load_from_path(&path).unwrap();
-    assert_eq!(config.chat.model, DEFAULT_CHAT_MODEL);
+    assert!(config.chat.model.trim().is_empty());
+}
+
+#[test]
+fn resolve_general_data_dir_is_preserved() {
+    let dir = fresh_temp_dir();
+    let path = config_path_in(&dir);
+    std::fs::write(&path, "[general]\ndata_dir = \"D:/quickai\"\n").unwrap();
+    let config = load_from_path(&path).unwrap();
+    assert_eq!(config.general.data_dir, "D:/quickai");
 }
 
 #[test]

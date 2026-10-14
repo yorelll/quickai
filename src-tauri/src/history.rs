@@ -10,7 +10,6 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
 use tauri::State;
 
 use crate::commands::{ChatMessage, ConversationHistory};
@@ -36,6 +35,36 @@ pub struct SaveConversationResponse {
     pub conversation_id: String,
 }
 
+/// Longest placeholder title taken from the first user message. The guard is
+/// byte length while the cut is char-counted, so a multi-byte message is never
+/// split mid-codepoint.
+const PLACEHOLDER_TITLE_MAX_CHARS: usize = 50;
+
+/// Derives the placeholder title written when a conversation is first saved:
+/// the first user message, trimmed and truncated to
+/// [`PLACEHOLDER_TITLE_MAX_CHARS`]. Returns `None` when there is no user
+/// message.
+///
+/// Shared by [`save_conversation`] (which writes it) and [`generate_title`]
+/// (which uses it as the compare-and-set guard, so a generated title can never
+/// clobber a manual rename).
+fn placeholder_title(messages: &[SaveMessagePayload]) -> Option<String> {
+    messages.iter().find(|m| m.role == "user").map(|m| {
+        let trimmed = m.content.trim();
+        if trimmed.len() > PLACEHOLDER_TITLE_MAX_CHARS {
+            let end = trimmed
+                .char_indices()
+                .take(PLACEHOLDER_TITLE_MAX_CHARS)
+                .last()
+                .map(|(i, c)| i + c.len_utf8())
+                .unwrap_or(PLACEHOLDER_TITLE_MAX_CHARS);
+            format!("{}...", &trimmed[..end])
+        } else {
+            trimmed.to_string()
+        }
+    })
+}
+
 /// Persists the current in-memory conversation to SQLite. Creates a new
 /// conversation row and bulk-inserts all messages. Returns the conversation ID
 /// so the frontend can track it for subsequent auto-persist calls.
@@ -49,26 +78,10 @@ pub fn save_conversation(
     let conn = db.0.lock().map_err(|e| e.to_string())?;
 
     // Use the first user message (truncated) as the initial title placeholder.
-    let placeholder_title = messages.iter().find(|m| m.role == "user").map(|m| {
-        let trimmed = m.content.trim();
-        if trimmed.len() > 50 {
-            format!(
-                "{}...",
-                &trimmed[..trimmed
-                    .char_indices()
-                    .take(50)
-                    .last()
-                    .map(|(i, c)| i + c.len_utf8())
-                    .unwrap_or(50)]
-            )
-        } else {
-            trimmed.to_string()
-        }
-    });
+    let placeholder = placeholder_title(&messages);
 
-    let conversation_id =
-        database::create_conversation(&conn, placeholder_title.as_deref(), &model)
-            .map_err(|e| e.to_string())?;
+    let conversation_id = database::create_conversation(&conn, placeholder.as_deref(), &model)
+        .map_err(|e| e.to_string())?;
 
     let batch: Vec<database::MessageBatchRow> = messages
         .into_iter()
@@ -168,8 +181,8 @@ pub fn load_conversation(
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(not(coverage), tauri::command)]
 pub fn delete_conversation(
-    app_handle: tauri::AppHandle,
     conversation_id: String,
+    data_dir: State<'_, crate::config::ResolvedDataDir>,
     db: State<'_, Database>,
 ) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
@@ -186,20 +199,60 @@ pub fn delete_conversation(
     database::delete_conversation(&conn, &conversation_id).map_err(|e| e.to_string())?;
 
     // Best-effort file cleanup — don't fail the command if a file is missing.
-    let base_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("failed to resolve app data dir: {e}"))?;
+    let base_dir = data_dir.path();
     for path in &image_paths {
-        let _ = crate::images::remove_image(&base_dir, path);
+        let _ = crate::images::remove_image(base_dir, path);
     }
 
     Ok(())
 }
 
+/// Longest conversation title accepted by [`rename_conversation`]. Longer
+/// titles are capped rather than rejected so a long paste still saves
+/// something usable.
+const MAX_CONVERSATION_TITLE_CHARS: usize = 200;
+
+/// Trims `title` and caps it at [`MAX_CONVERSATION_TITLE_CHARS`] characters
+/// (counted by `char`, so multi-byte text is never split mid-codepoint).
+/// Returns `None` when the trimmed title is empty.
+///
+/// Split out of the command so the validation rules are unit-tested; the
+/// command itself is coverage-excluded like every other Tauri wrapper.
+fn normalize_conversation_title(title: &str) -> Option<String> {
+    let trimmed = title.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.chars().take(MAX_CONVERSATION_TITLE_CHARS).collect())
+}
+
+/// Renames a saved conversation.
+///
+/// The title is trimmed and capped; an empty title (after trimming) is
+/// rejected with a plain string error, matching the other history commands.
+/// An unknown `conversation_id` is not an error: the underlying UPDATE simply
+/// matches no rows, the same idempotent semantics as
+/// [`delete_conversation`].
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(not(coverage), tauri::command)]
+pub fn rename_conversation(
+    conversation_id: String,
+    title: String,
+    db: State<'_, Database>,
+) -> Result<(), String> {
+    let title = normalize_conversation_title(&title)
+        .ok_or_else(|| "conversation title must not be empty".to_string())?;
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    database::update_conversation_title(&conn, &conversation_id, &title).map_err(|e| e.to_string())
+}
+
 /// Generates a short AI title for a saved conversation by asking the configured
 /// chat provider. Runs as a fire-and-forget background task — the frontend
 /// polls or refreshes the list to see the updated title.
+///
+/// The title is written with a compare-and-set guard: it replaces only the
+/// placeholder title [`save_conversation`] wrote, so a manual rename that lands
+/// while generation is in flight is never clobbered.
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(not(coverage), tauri::command)]
 pub async fn generate_title(
@@ -275,9 +328,21 @@ pub async fn generate_title(
     }
 
     if !title.is_empty() {
+        // Compare-and-set against the placeholder `save_conversation` wrote. A
+        // manual rename that lands while this fire-and-forget generation is in
+        // flight makes the stored title differ, and the write is skipped so the
+        // user's name survives. If generation lands first, a later rename still
+        // wins (it is an unconditional write). Either order preserves the manual
+        // title.
+        let expected = placeholder_title(&messages);
         let conn = db.0.lock().map_err(|e| e.to_string())?;
-        database::update_conversation_title(&conn, &conversation_id, &title)
-            .map_err(|e| e.to_string())?;
+        database::update_conversation_title_if_unchanged(
+            &conn,
+            &conversation_id,
+            expected.as_deref(),
+            &title,
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     Ok(())
@@ -410,5 +475,146 @@ mod tests {
         title.truncate(i + c.len_utf8());
         title.push_str("...");
         assert_eq!(title.len(), 103); // 100 + "..."
+    }
+
+    #[test]
+    fn normalize_conversation_title_trims_surrounding_whitespace() {
+        assert_eq!(
+            normalize_conversation_title("  Weekly plan \n").as_deref(),
+            Some("Weekly plan")
+        );
+    }
+
+    #[test]
+    fn normalize_conversation_title_rejects_blank() {
+        assert!(normalize_conversation_title("").is_none());
+        assert!(normalize_conversation_title("   \t\n ").is_none());
+    }
+
+    #[test]
+    fn normalize_conversation_title_caps_length_by_chars() {
+        let long = "日".repeat(MAX_CONVERSATION_TITLE_CHARS + 50);
+        let capped = normalize_conversation_title(&long).expect("non-empty");
+        assert_eq!(capped.chars().count(), MAX_CONVERSATION_TITLE_CHARS);
+    }
+
+    #[test]
+    fn rename_updates_the_stored_title() {
+        let db = test_db();
+        let conn = db.0.lock().unwrap();
+        let id = database::create_conversation(&conn, Some("Old name"), "gpt-4o").unwrap();
+
+        let title = normalize_conversation_title("  New name  ").expect("non-empty");
+        database::update_conversation_title(&conn, &id, &title).unwrap();
+
+        let listed = database::list_conversations(&conn, None).unwrap();
+        assert_eq!(listed[0].title.as_deref(), Some("New name"));
+    }
+
+    fn user_payload(content: &str) -> SaveMessagePayload {
+        SaveMessagePayload {
+            role: "user".to_string(),
+            content: content.to_string(),
+            quoted_text: None,
+            image_paths: None,
+            thinking_content: None,
+        }
+    }
+
+    #[test]
+    fn placeholder_title_is_none_without_a_user_message() {
+        let assistant_only = vec![SaveMessagePayload {
+            role: "assistant".to_string(),
+            content: "hello".to_string(),
+            quoted_text: None,
+            image_paths: None,
+            thinking_content: None,
+        }];
+        assert!(placeholder_title(&assistant_only).is_none());
+    }
+
+    #[test]
+    fn placeholder_title_uses_the_first_user_message() {
+        let messages = vec![
+            user_payload("What is Rust?"),
+            user_payload("A later question that must be ignored"),
+        ];
+        assert_eq!(
+            placeholder_title(&messages).as_deref(),
+            Some("What is Rust?")
+        );
+    }
+
+    #[test]
+    fn placeholder_title_truncates_long_messages_without_splitting_codepoints() {
+        let long = "a".repeat(100);
+        let expected = format!("{}...", "a".repeat(50));
+        assert_eq!(
+            placeholder_title(&[user_payload(&long)]).as_deref(),
+            Some(expected.as_str())
+        );
+
+        // 40 multi-byte chars (120 bytes) fit entirely, so the cut lands at the
+        // end rather than mid-codepoint.
+        let unicode = "日".repeat(40);
+        let expected = format!("{unicode}...");
+        assert_eq!(
+            placeholder_title(&[user_payload(&unicode)]).as_deref(),
+            Some(expected.as_str())
+        );
+    }
+
+    /// Item 12: a manual rename that lands while the fire-and-forget AI title is
+    /// still in flight must survive in the database.
+    #[test]
+    fn generated_title_never_clobbers_a_manual_rename() {
+        let db = test_db();
+        let conn = db.0.lock().unwrap();
+        let messages = vec![user_payload("What is Rust?")];
+
+        // `save_conversation` writes the placeholder title.
+        let placeholder = placeholder_title(&messages);
+        let id = database::create_conversation(&conn, placeholder.as_deref(), "gpt-4o").unwrap();
+
+        // The user renames by hand before the generated title lands.
+        database::update_conversation_title(&conn, &id, "My notes").unwrap();
+
+        // The generated title then tries to replace the placeholder it expected.
+        let wrote = database::update_conversation_title_if_unchanged(
+            &conn,
+            &id,
+            placeholder.as_deref(),
+            "Rust overview",
+        )
+        .unwrap();
+
+        assert!(
+            !wrote,
+            "the compare-and-set must skip a renamed conversation"
+        );
+        let listed = database::list_conversations(&conn, None).unwrap();
+        assert_eq!(listed[0].title.as_deref(), Some("My notes"));
+    }
+
+    /// The normal path is unchanged: an untouched conversation gets its AI name.
+    #[test]
+    fn generated_title_names_an_untouched_conversation() {
+        let db = test_db();
+        let conn = db.0.lock().unwrap();
+        let messages = vec![user_payload("What is Rust?")];
+        let placeholder = placeholder_title(&messages);
+        let id = database::create_conversation(&conn, placeholder.as_deref(), "gpt-4o").unwrap();
+
+        let wrote = database::update_conversation_title_if_unchanged(
+            &conn,
+            &id,
+            placeholder.as_deref(),
+            "Rust overview",
+        )
+        .unwrap();
+
+        assert!(wrote);
+        let listed = database::list_conversations(&conn, None).unwrap();
+        assert_eq!(listed[0].title.as_deref(), Some("Rust overview"));
     }
 }

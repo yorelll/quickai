@@ -1,8 +1,10 @@
 /*!
  * SQLite persistence layer for conversation history.
  *
- * Stores conversations and messages in `<app_data_dir>/quickai.db` using rusqlite
+ * Stores conversations and messages in `<data_dir>/quickai.db` using rusqlite
  * with WAL journal mode for concurrent read access during streaming writes.
+ * `<data_dir>` is the startup-resolved `[general].data_dir` (the OS app data
+ * directory when unset).
  *
  * All public functions accept a `&Connection` and are synchronous — callers
  * in async Tauri commands should use `spawn_blocking` or hold the connection
@@ -44,19 +46,20 @@ pub struct PersistedMessage {
     pub created_at: i64,
 }
 
-/// Opens (or creates) the SQLite database at `<app_data_dir>/quickai.db` and
-/// runs migrations.
+/// Opens (or creates) the SQLite database at `<data_dir>/quickai.db` and
+/// runs migrations. `data_dir` is the resolved `[general].data_dir` (the OS
+/// app data directory when the setting is empty).
 ///
 /// # Errors
 ///
 /// Returns an error if the data directory cannot be created or SQLite
 /// initialisation fails.
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub fn open_database(app_data_dir: &std::path::Path) -> SqlResult<Connection> {
-    std::fs::create_dir_all(app_data_dir)
+pub fn open_database(data_dir: &std::path::Path) -> SqlResult<Connection> {
+    std::fs::create_dir_all(data_dir)
         .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
 
-    let db_path = app_data_dir.join("quickai.db");
+    let db_path = data_dir.join("quickai.db");
 
     let conn = Connection::open(&db_path)?;
     conn.execute_batch("PRAGMA journal_mode = WAL;")?;
@@ -212,6 +215,30 @@ pub fn update_conversation_title(
         params![title, now_millis(), conversation_id],
     )?;
     Ok(())
+}
+
+/// Compare-and-set title update: writes `new_title` only when the stored title
+/// still equals `expected_title`, returning whether a row was updated.
+///
+/// Used by AI title generation so it can never clobber a title the user set by
+/// hand: the generator knows the placeholder it expects to replace, and a
+/// mismatch (a manual rename landed first) leaves the row — and its
+/// `updated_at` — untouched.
+///
+/// `expected_title` of `None` matches a NULL (never-named) title; SQLite's `IS`
+/// operator compares NULLs, unlike `=`.
+pub fn update_conversation_title_if_unchanged(
+    conn: &Connection,
+    conversation_id: &str,
+    expected_title: Option<&str>,
+    new_title: &str,
+) -> SqlResult<bool> {
+    let changed = conn.execute(
+        "UPDATE conversations SET title = ?1, updated_at = ?2
+         WHERE id = ?3 AND title IS ?4",
+        params![new_title, now_millis(), conversation_id, expected_title],
+    )?;
+    Ok(changed > 0)
 }
 
 /// Deletes a conversation and its messages (via ON DELETE CASCADE).
@@ -423,6 +450,65 @@ mod tests {
 
         let convos = list_conversations(&conn, None).unwrap();
         assert_eq!(convos[0].title.as_deref(), Some("New Title"));
+    }
+
+    #[test]
+    fn update_conversation_title_if_unchanged_only_writes_on_a_match() {
+        let conn = open_in_memory().unwrap();
+        let id = create_conversation(&conn, Some("Placeholder"), "gpt-4o").unwrap();
+
+        // Mismatch: the row carries a different title (a manual rename landed
+        // first), so the generated title is dropped.
+        let wrote = super::update_conversation_title_if_unchanged(
+            &conn,
+            &id,
+            Some("Something else"),
+            "AI Title",
+        )
+        .unwrap();
+        assert!(!wrote);
+        assert_eq!(
+            list_conversations(&conn, None).unwrap()[0].title.as_deref(),
+            Some("Placeholder")
+        );
+
+        // Match: the placeholder is replaced.
+        let wrote = super::update_conversation_title_if_unchanged(
+            &conn,
+            &id,
+            Some("Placeholder"),
+            "AI Title",
+        )
+        .unwrap();
+        assert!(wrote);
+        assert_eq!(
+            list_conversations(&conn, None).unwrap()[0].title.as_deref(),
+            Some("AI Title")
+        );
+    }
+
+    #[test]
+    fn update_conversation_title_if_unchanged_matches_a_null_title() {
+        let conn = open_in_memory().unwrap();
+        let id = create_conversation(&conn, None, "gpt-4o").unwrap();
+
+        // A NULL stored title is matched by `expected = None`.
+        assert!(super::update_conversation_title_if_unchanged(&conn, &id, None, "Named").unwrap());
+        assert_eq!(
+            list_conversations(&conn, None).unwrap()[0].title.as_deref(),
+            Some("Named")
+        );
+
+        // Once named, it no longer matches `None`.
+        assert!(!super::update_conversation_title_if_unchanged(&conn, &id, None, "Again").unwrap());
+    }
+
+    #[test]
+    fn update_conversation_title_if_unchanged_ignores_unknown_id() {
+        let conn = open_in_memory().unwrap();
+        let wrote =
+            super::update_conversation_title_if_unchanged(&conn, "nope", Some("a"), "b").unwrap();
+        assert!(!wrote);
     }
 
     #[test]

@@ -7,7 +7,7 @@
 //!        - Ok(contents)           -> fall through to parse.
 //!   2. Parse TOML.
 //!        - Parse error -> rename file to `<name>.corrupt-<ts>`, seed defaults.
-//!   3. Resolve (empties -> defaults, out-of-bounds -> defaults, compose appendix).
+//!   3. Resolve (out-of-bounds -> defaults, compose appendix).
 //!
 //! Additive schema evolution (new fields, new sections) is handled for free by
 //! serde's `#[serde(default)]`: missing fields in an older file deserialize to
@@ -24,10 +24,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::defaults::{
     BOUNDS_MAX_CHAT_HEIGHT, BOUNDS_MAX_IMAGES, BOUNDS_OVERLAY_WIDTH,
     BOUNDS_QUOTE_MAX_CONTEXT_LENGTH, BOUNDS_QUOTE_MAX_DISPLAY_CHARS,
-    BOUNDS_QUOTE_MAX_DISPLAY_LINES, DEFAULT_CHAT_MODEL, DEFAULT_MAX_CHAT_HEIGHT,
-    DEFAULT_MAX_IMAGES, DEFAULT_OVERLAY_WIDTH, DEFAULT_QUOTE_MAX_CONTEXT_LENGTH,
-    DEFAULT_QUOTE_MAX_DISPLAY_CHARS, DEFAULT_QUOTE_MAX_DISPLAY_LINES, DEFAULT_SYSTEM_PROMPT_BASE,
-    SLASH_COMMAND_PROMPT_APPENDIX,
+    BOUNDS_QUOTE_MAX_DISPLAY_LINES, DEFAULT_MAX_CHAT_HEIGHT, DEFAULT_MAX_IMAGES,
+    DEFAULT_OVERLAY_WIDTH, DEFAULT_QUOTE_MAX_CONTEXT_LENGTH, DEFAULT_QUOTE_MAX_DISPLAY_CHARS,
+    DEFAULT_QUOTE_MAX_DISPLAY_LINES, DEFAULT_SYSTEM_PROMPT_BASE, SLASH_COMMAND_PROMPT_APPENDIX,
 };
 use super::error::ConfigError;
 use super::schema::AppConfig;
@@ -196,16 +195,15 @@ pub(crate) fn resolve(config: &mut AppConfig) {
         "quote.max_context_length",
     );
 
-    // Chat section: an empty model falls back to the compiled default so the
-    // chat path always has something to send. An empty base_url is intentional
-    // (it means "use the provider default"), so it is left untouched.
-    if config.chat.model.trim().is_empty() {
-        config.chat.model = DEFAULT_CHAT_MODEL.to_string();
-    }
-
-    // Agent section: model and base_url are allowed to stay empty (an
-    // unconfigured agent is a legitimate state; the agent errors clearly until
-    // the user picks a provider and model).
+    // Chat section: an empty model is a legitimate state (the user configures
+    // one in Settings), so it is preserved rather than defaulted; it surfaces
+    // as a `missing_model` error when a chat is attempted. An empty base_url is
+    // likewise intentional ("use the provider default").
+    //
+    // General and agent sections need no resolution: their enums deserialize
+    // to a valid variant or fail parsing, `data_dir` empty means the OS default
+    // (resolved at startup), and the agent model/base_url are allowed to stay
+    // empty until the user configures custom mode.
 }
 
 /// Composes the user-editable base prompt with the generated slash-command

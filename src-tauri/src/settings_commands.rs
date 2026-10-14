@@ -64,6 +64,20 @@ fn emit_config_updated(app: &AppHandle) {
     let _ = app.emit(CONFIG_UPDATED_EVENT, ());
 }
 
+/// Applies config settings that take effect immediately, without a restart.
+/// Currently the activation hotkey (`[general].hotkey`); the data directory is
+/// applied at startup and window geometry is applied by the frontend.
+#[cfg(target_os = "windows")]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn apply_live_settings(config: &AppConfig) {
+    crate::windows_activator::apply_hotkey(config.general.hotkey);
+}
+
+/// Non-Windows stub: there is no activation hook to retune.
+#[cfg(not(target_os = "windows"))]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn apply_live_settings(_config: &AppConfig) {}
+
 /// Resolves the absolute path to the user config file.
 ///
 /// Centralizes the `app.path().app_config_dir() + CONFIG_FILE_NAME` join used
@@ -128,6 +142,7 @@ pub fn set_config_field(
         resolved
     };
     emit_config_updated(&app);
+    apply_live_settings(&resolved);
     Ok(resolved)
 }
 
@@ -191,6 +206,7 @@ pub fn reset_config(
         resolved
     };
     emit_config_updated(&app);
+    apply_live_settings(&resolved);
     Ok(resolved)
 }
 
@@ -260,6 +276,7 @@ pub fn reload_config_from_disk(
         resolved
     };
     emit_config_updated(&app);
+    apply_live_settings(&resolved);
     Ok(resolved)
 }
 

@@ -67,13 +67,15 @@ fn capture_virtual_screen_pixels() -> Result<(i32, i32, u32, u32, Vec<u8>), Stri
     }
 }
 
-/// Captures the full virtual screen and saves it as a PNG under the app data
-/// directory, returning the absolute file path.
+/// Captures the full virtual screen and saves it as a PNG in the images
+/// directory of the startup-resolved data directory, returning the absolute
+/// file path.
 async fn capture_full_screen_to_file(app_handle: tauri::AppHandle) -> Result<String, String> {
+    // The startup-resolved `[general].data_dir` override, or the OS default.
     let base_dir = app_handle
+        .state::<crate::config::ResolvedDataDir>()
         .path()
-        .app_data_dir()
-        .map_err(|e| format!("failed to resolve app data dir: {e}"))?;
+        .to_path_buf();
 
     tokio::task::spawn_blocking(move || {
         let (_vx, _vy, width, height, rgba_bytes) = capture_virtual_screen_pixels()?;

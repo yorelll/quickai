@@ -13,6 +13,7 @@
 //! - [`load_from_path`] - pure, test-friendly variant that takes a `Path`.
 //! - [`atomic_write`] - safe write that never produces a torn file.
 //! - [`ConfigError`] - error type returned by loader and writer.
+//! - [`ResolvedDataDir`] - the effective app data directory (startup state).
 
 pub mod defaults;
 pub mod error;
@@ -23,7 +24,8 @@ pub mod writer;
 pub use error::ConfigError;
 pub use loader::load_from_path;
 pub use schema::{
-    AgentSection, AppConfig, ChatSection, PromptSection, QuoteSection, WindowSection,
+    AgentMode, AgentPermission, AgentSection, AppConfig, ChatSection, GeneralSection, Hotkey,
+    Language, PromptSection, QuoteSection, WindowSection,
 };
 pub use writer::{atomic_write, atomic_write_bytes};
 
@@ -66,6 +68,52 @@ pub fn consume_corrupt_marker(dir: &std::path::Path) -> Option<CorruptMarker> {
         return None;
     }
     Some(CorruptMarker { path, ts })
+}
+
+/// The effective app data directory, resolved once at startup from
+/// `[general].data_dir`. An empty setting yields the OS default
+/// (`app_data_dir`). Managed Tauri state: the database, images, and cleanup
+/// sweep all derive their paths from it, so changing the setting takes effect
+/// only on the next launch (the Settings UI tells the user a restart is
+/// needed).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedDataDir(pub std::path::PathBuf);
+
+impl ResolvedDataDir {
+    /// The resolved directory.
+    pub fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+/// Pure core of [`resolve_data_dir`]: returns `configured` with surrounding
+/// whitespace trimmed when it is non-empty, otherwise `default`. Split out so
+/// both branches are unit-testable without an `AppHandle`.
+pub fn resolve_data_dir_from(configured: &str, default: std::path::PathBuf) -> std::path::PathBuf {
+    let trimmed = configured.trim();
+    if trimmed.is_empty() {
+        default
+    } else {
+        std::path::PathBuf::from(trimmed)
+    }
+}
+
+/// Resolves the effective app data directory from the configured
+/// `[general].data_dir`: the configured directory when non-empty (whitespace
+/// is trimmed), otherwise the OS default app data directory for the bundle
+/// identifier.
+///
+/// Tauri-aware wrapper; excluded from coverage because it needs a real
+/// `AppHandle`. All of its logic lives in [`resolve_data_dir_from`], which is
+/// fully covered.
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub fn resolve_data_dir(app: &tauri::AppHandle, configured: &str) -> ResolvedDataDir {
+    use tauri::Manager;
+    let default = app
+        .path()
+        .app_data_dir()
+        .expect("failed to resolve app data directory");
+    ResolvedDataDir(resolve_data_dir_from(configured, default))
 }
 
 /// Tauri-aware entry point. Resolves the per-user config path via

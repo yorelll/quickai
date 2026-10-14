@@ -85,6 +85,8 @@ impl ApiError {
 
 /// Stable error code: no API key is configured for the selected provider.
 pub const CODE_MISSING_API_KEY: &str = "missing_api_key";
+/// Stable error code: no chat model is configured for the selected provider.
+pub const CODE_MISSING_MODEL: &str = "missing_model";
 /// Stable error code: the API rejected the key (HTTP 401).
 pub const CODE_UNAUTHORIZED: &str = "unauthorized";
 /// Stable error code: the account is not permitted to use the model (HTTP 403).
@@ -367,6 +369,11 @@ mod tests {
         let err = ApiError::missing_api_key("api_key_openai");
         assert_eq!(err.code, CODE_MISSING_API_KEY);
         assert!(err.message.contains("api_key_openai"));
+    }
+
+    #[test]
+    fn missing_model_code_matches_contract() {
+        assert_eq!(CODE_MISSING_MODEL, "missing_model");
     }
 
     #[test]

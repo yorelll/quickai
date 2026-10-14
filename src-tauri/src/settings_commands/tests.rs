@@ -17,7 +17,7 @@ use super::{
     write_field_to_disk,
 };
 use crate::config::defaults::{ALLOWED_FIELDS, ALLOWED_SECTIONS};
-use crate::config::ConfigError;
+use crate::config::{AgentMode, AgentPermission, ConfigError, Hotkey, Language};
 
 // ─── Test fixtures ──────────────────────────────────────────────────────────
 
@@ -36,15 +36,22 @@ max_display_lines = 4
 max_display_chars = 300
 max_context_length = 4096
 
+[general]
+hotkey = "ctrl"
+language = "auto"
+data_dir = ""
+
 [chat]
 provider = "openai"
 model = "gpt-4o"
 base_url = ""
 
 [agent]
+mode = "same_as_chat"
 provider = "openai"
 model = ""
 base_url = ""
+permission = "limited"
 "#;
 
 fn parse_sample() -> DocumentMut {
@@ -56,17 +63,17 @@ fn parse_sample() -> DocumentMut {
 #[test]
 fn allowed_fields_count_matches_schema_field_count() {
     // Hand-counted from `AppConfig`: prompt(1) + window(3) + quote(3)
-    // + chat(3) + agent(3) = 13 tunable fields. If this assertion fails, the
-    // schema has drifted from the allowlist and someone added a field without
-    // extending ALLOWED_FIELDS.
-    assert_eq!(ALLOWED_FIELDS.len(), 13);
+    // + general(3) + chat(3) + agent(5) = 18 tunable fields. If this assertion
+    // fails, the schema has drifted from the allowlist and someone added a
+    // field without extending ALLOWED_FIELDS.
+    assert_eq!(ALLOWED_FIELDS.len(), 18);
 }
 
 #[test]
 fn allowed_sections_match_app_config_top_level_keys() {
     assert_eq!(
         ALLOWED_SECTIONS,
-        &["prompt", "window", "quote", "chat", "agent"]
+        &["prompt", "window", "quote", "general", "chat", "agent"]
     );
 }
 
@@ -75,6 +82,11 @@ fn is_allowed_field_accepts_known_pair() {
     assert!(is_allowed_field("chat", "provider"));
     assert!(is_allowed_field("chat", "model"));
     assert!(is_allowed_field("agent", "base_url"));
+    assert!(is_allowed_field("agent", "mode"));
+    assert!(is_allowed_field("agent", "permission"));
+    assert!(is_allowed_field("general", "hotkey"));
+    assert!(is_allowed_field("general", "language"));
+    assert!(is_allowed_field("general", "data_dir"));
     assert!(is_allowed_field("window", "max_images"));
 }
 
@@ -484,6 +496,45 @@ fn write_field_to_disk_accepts_window_max_images() {
 }
 
 #[test]
+fn write_field_to_disk_accepts_general_hotkey() {
+    let dir = tempdir();
+    let path = dir.join("config.toml");
+    std::fs::write(&path, SAMPLE_CONFIG).unwrap();
+
+    let resolved = write_field_to_disk(&path, "general", "hotkey", json!("alt")).unwrap();
+    assert_eq!(resolved.general.hotkey, Hotkey::Alt);
+
+    let on_disk = std::fs::read_to_string(&path).unwrap();
+    assert!(on_disk.contains("hotkey = \"alt\""));
+}
+
+#[test]
+fn write_field_to_disk_accepts_general_language_and_data_dir() {
+    let dir = tempdir();
+    let path = dir.join("config.toml");
+    std::fs::write(&path, SAMPLE_CONFIG).unwrap();
+
+    let resolved = write_field_to_disk(&path, "general", "language", json!("zh")).unwrap();
+    assert_eq!(resolved.general.language, Language::Zh);
+
+    let resolved = write_field_to_disk(&path, "general", "data_dir", json!("D:/quickai")).unwrap();
+    assert_eq!(resolved.general.data_dir, "D:/quickai");
+}
+
+#[test]
+fn write_field_to_disk_accepts_agent_mode_and_permission() {
+    let dir = tempdir();
+    let path = dir.join("config.toml");
+    std::fs::write(&path, SAMPLE_CONFIG).unwrap();
+
+    let resolved = write_field_to_disk(&path, "agent", "mode", json!("custom")).unwrap();
+    assert_eq!(resolved.agent.mode, AgentMode::Custom);
+
+    let resolved = write_field_to_disk(&path, "agent", "permission", json!("full")).unwrap();
+    assert_eq!(resolved.agent.permission, AgentPermission::Full);
+}
+
+#[test]
 fn write_field_to_disk_rejects_unknown_section() {
     let dir = tempdir();
     let path = dir.join("config.toml");
@@ -590,7 +641,8 @@ fn reset_section_on_disk_replaces_named_section_with_defaults() {
     write_field_to_disk(&path, "chat", "model", json!("gpt-4.1")).unwrap();
 
     let resolved = reset_section_on_disk(&path, Some("chat")).unwrap();
-    assert_eq!(resolved.chat.model, "gpt-4o");
+    // The default chat model is empty (item 1: no default model).
+    assert!(resolved.chat.model.is_empty());
 }
 
 #[test]
@@ -606,6 +658,17 @@ fn reset_section_on_disk_preserves_other_sections() {
     // Reset only chat; window.max_images should still be 7.
     let resolved = reset_section_on_disk(&path, Some("chat")).unwrap();
     assert_eq!(resolved.window.max_images, 7);
+}
+
+#[test]
+fn reset_section_on_disk_resets_general_section() {
+    let dir = tempdir();
+    let path = dir.join("config.toml");
+    std::fs::write(&path, SAMPLE_CONFIG).unwrap();
+
+    write_field_to_disk(&path, "general", "hotkey", json!("win")).unwrap();
+    let resolved = reset_section_on_disk(&path, Some("general")).unwrap();
+    assert_eq!(resolved.general.hotkey, Hotkey::Ctrl);
 }
 
 #[test]

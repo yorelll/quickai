@@ -4,14 +4,14 @@
 //! the OpenAI / Anthropic / OpenAI-compatible providers. The model returns
 //! structured JSON tool calls that map directly to a computer action.
 //!
-//! Confirmation model: "learning" mode — first N actions require user
-//! confirmation, then auto-execute. Dangerous actions always require
-//! confirmation.
+//! Confirmation model: driven by the `[agent].permission` setting. `limited`
+//! (default) auto-executes safe actions and requires explicit user approval for
+//! dangerous ones; `full` never asks.
 //!
 //! The frontend-facing [`AgentEvent`] carries no English UI prose: it ships a
 //! structured [`AgentAction`] the frontend localizes, and reuses the
-//! [`crate::providers`] error codes for failures. The provider is configured
-//! through the `[agent]` config section, resolved at start time.
+//! [`crate::providers`] error codes for failures. The provider is resolved from
+//! the `[chat]` or `[agent]` section per `[agent].mode` at start time.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -23,6 +23,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::commands::ChatProviderConfig;
 use crate::computer_control::{self, AgentAction as ComputerAction};
+use crate::config::AgentPermission;
 use crate::providers::{self, ApiError, ProviderChunk, ToolCall};
 
 /// Frontend event carrying agent-loop progress.
@@ -61,16 +62,60 @@ pub enum AgentEvent {
 
 // ─── Confirmation state ─────────────────────────────────────────────────────────
 
-/// Number of actions that require confirmation before auto-executing.
-const LEARNING_CONFIRMATION_LIMIT: u32 = 3;
+/// Modifier spellings that denote the Windows key across providers.
+const WIN_MODIFIERS: &[&str] = &["win", "lwin", "rwin", "meta", "super", "cmd"];
+/// Key spellings that are the Windows key itself.
+const WIN_KEYS: &[&str] = &["win", "lwin", "rwin", "meta"];
 
-/// Actions that always require confirmation regardless of learning state.
-const DANGEROUS_ACTION_NAMES: &[&str] = &["computer_launch"];
+/// Whether a synthetic key press can reach a system surface or terminate the
+/// foreground application.
+///
+/// `limited` mode exists to keep the agent from taking actions the user would
+/// not expect, and key presses are a full bypass of the `Launch` gate: `Win+R`
+/// opens the Run dialog (arbitrary program execution), `Win`/`Ctrl+Esc` open the
+/// Start menu, `Ctrl+Shift+Esc` opens Task Manager, and `Alt+F4` closes the
+/// foreground window. Combos are matched case-insensitively because provider
+/// tool calls spell them inconsistently (`Ctrl`/`ctrl`, `Esc`/`Escape`).
+fn is_dangerous_key_press(modifiers: &[String], key: &str) -> bool {
+    let has = |name: &str| modifiers.iter().any(|m| m.eq_ignore_ascii_case(name));
+    let is = |name: &str| key.eq_ignore_ascii_case(name);
 
-/// Tracks confirmation state for the "learning" mode.
+    // Any use of the Windows key reaches a system surface (Start, Run,
+    // Settings, lock screen).
+    if WIN_MODIFIERS.iter().any(|w| has(w)) || WIN_KEYS.iter().any(|w| is(w)) {
+        return true;
+    }
+    // Ctrl+Shift+Esc opens Task Manager; Ctrl+Esc opens the Start menu.
+    if (has("ctrl") || has("control")) && (is("esc") || is("escape")) {
+        return true;
+    }
+    // Alt+F4 closes the foreground window.
+    has("alt") && is("f4")
+}
+
+/// Whether `action` requires explicit user approval under `permission`.
+///
+/// `full` never asks. `limited` asks only for the actions classified dangerous
+/// below; everything else (clicks, drags, scrolling, plain typing) auto-executes
+/// so ordinary automation is not interrupted.
+///
+/// Dangerous = can start or terminate arbitrary software:
+/// - `Launch` starts an arbitrary program, file, or URL.
+/// - `KeyPress` can reach the same capability indirectly (see
+///   [`is_dangerous_key_press`]).
+fn requires_confirmation(action: &ComputerAction, permission: AgentPermission) -> bool {
+    match permission {
+        AgentPermission::Full => false,
+        AgentPermission::Limited => match action {
+            ComputerAction::Launch { .. } => true,
+            ComputerAction::KeyPress { modifiers, key } => is_dangerous_key_press(modifiers, key),
+            _ => false,
+        },
+    }
+}
+
+/// Tracks the pending confirmation, if any.
 struct ConfirmationState {
-    /// How many actions have been confirmed so far in this session.
-    confirmed_count: u32,
     /// Pending confirmations: action_id -> computer action.
     pending: HashMap<String, ComputerAction>,
 }
@@ -78,33 +123,13 @@ struct ConfirmationState {
 impl ConfirmationState {
     fn new() -> Self {
         Self {
-            confirmed_count: 0,
             pending: HashMap::new(),
         }
     }
 
-    /// Returns true if this action requires user confirmation.
-    fn requires_confirmation(&self, action: &ComputerAction) -> bool {
-        // Dangerous actions always require confirmation.
-        let action_name = match action {
-            ComputerAction::Launch { .. } => "computer_launch",
-            _ => "",
-        };
-        if DANGEROUS_ACTION_NAMES.contains(&action_name) {
-            return true;
-        }
-        // In learning mode: confirm first N actions.
-        self.confirmed_count < LEARNING_CONFIRMATION_LIMIT
-    }
-
-    /// Mark an action as confirmed.
+    /// Mark an action as confirmed, returning it for execution.
     fn confirm(&mut self, action_id: &str) -> Option<ComputerAction> {
-        if let Some(action) = self.pending.remove(action_id) {
-            self.confirmed_count += 1;
-            Some(action)
-        } else {
-            None
-        }
+        self.pending.remove(action_id)
     }
 
     /// Reject an action.
@@ -360,10 +385,11 @@ pub async fn run_agent_loop(
     state: Arc<AgentState>,
     task: String,
     config: ChatProviderConfig,
+    permission: AgentPermission,
 ) -> Result<(), String> {
     state.reset();
 
-    run_tool_use_loop(app_handle, state, task, config).await
+    run_tool_use_loop(app_handle, state, task, config, permission).await
 }
 
 /// Agent loop using cloud provider tool calling (OpenAI / Anthropic /
@@ -373,6 +399,7 @@ async fn run_tool_use_loop(
     state: Arc<AgentState>,
     task: String,
     config: ChatProviderConfig,
+    permission: AgentPermission,
 ) -> Result<(), String> {
     let client = reqwest::Client::new();
     let cancel_token = state.cancel.lock().unwrap().clone();
@@ -538,10 +565,7 @@ async fn run_tool_use_loop(
             }
 
             // Check if confirmation is needed.
-            let needs_confirm = {
-                let conf = state.confirmation.lock().unwrap();
-                conf.requires_confirmation(&action)
-            };
+            let needs_confirm = requires_confirmation(&action, permission);
 
             if needs_confirm {
                 let action_id = uuid::Uuid::new_v4().to_string();
@@ -682,8 +706,9 @@ fn read_image_as_base64(path: &str) -> Result<String, String> {
 
 // ─── Tauri commands ──────────────────────────────────────────────────────────────
 
-/// Starts the cloud agent loop for `task`. The provider, model, and base URL
-/// come from the `[agent]` config section (with the API key read from SQLite).
+/// Starts the cloud agent loop for `task`. The provider, model, base URL, and
+/// API key come from the `[chat]` or `[agent]` section per `[agent].mode`; the
+/// consent policy comes from `[agent].permission`.
 #[tauri::command]
 pub async fn start_agent_mode(
     app_handle: tauri::AppHandle,
@@ -694,17 +719,19 @@ pub async fn start_agent_mode(
 ) -> Result<(), String> {
     // Lock order (config read guard, then DB lock) matches `commands::ask`
     // and `history::generate_title`.
-    let provider_config = {
+    let (provider_config, permission) = {
         let guard = config.read();
         let conn = db.0.lock().map_err(|e| e.to_string())?;
-        crate::commands::resolve_agent_provider(&guard, &conn).map_err(|e| e.message)?
+        let provider_config =
+            crate::commands::resolve_agent_provider(&guard, &conn).map_err(|e| e.message)?;
+        (provider_config, guard.agent.permission)
     };
 
     let state = state.inner().clone();
     let app_handle = app_handle.clone();
 
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = run_agent_loop(app_handle, state, task, provider_config).await {
+        if let Err(e) = run_agent_loop(app_handle, state, task, provider_config, permission).await {
             eprintln!("quickai: [agent] error: {e}");
         }
     });
@@ -1208,29 +1235,93 @@ mod tests {
     }
 
     #[test]
-    fn confirmation_state_learning() {
-        let cs = ConfirmationState::new();
+    fn limited_permission_auto_executes_safe_actions() {
         let click = ComputerAction::Click { x: 100, y: 200 };
-        // First 3 actions need confirmation.
-        assert!(cs.requires_confirmation(&click));
-    }
-
-    #[test]
-    fn confirmation_state_dangerous_always() {
-        let mut cs = ConfirmationState::new();
-        cs.confirmed_count = 100; // Way past learning limit.
-        let launch = ComputerAction::Launch {
-            target: "test".to_string(),
+        assert!(!requires_confirmation(&click, AgentPermission::Limited));
+        let typed = ComputerAction::TypeText {
+            text: "hi".to_string(),
         };
-        assert!(cs.requires_confirmation(&launch));
+        assert!(!requires_confirmation(&typed, AgentPermission::Limited));
+        let scroll = ComputerAction::Scroll {
+            direction: "down".to_string(),
+            amount: 3,
+        };
+        assert!(!requires_confirmation(&scroll, AgentPermission::Limited));
+        // Ordinary editing shortcuts stay automatic.
+        let copy = ComputerAction::KeyPress {
+            modifiers: vec!["ctrl".to_string()],
+            key: "c".to_string(),
+        };
+        assert!(!requires_confirmation(&copy, AgentPermission::Limited));
+        let enter = ComputerAction::KeyPress {
+            modifiers: vec![],
+            key: "enter".to_string(),
+        };
+        assert!(!requires_confirmation(&enter, AgentPermission::Limited));
     }
 
     #[test]
-    fn confirmation_state_auto_after_learning() {
-        let mut cs = ConfirmationState::new();
-        cs.confirmed_count = LEARNING_CONFIRMATION_LIMIT;
-        let click = ComputerAction::Click { x: 100, y: 200 };
-        assert!(!cs.requires_confirmation(&click));
+    fn limited_permission_confirms_dangerous_actions() {
+        let launch = ComputerAction::Launch {
+            target: "notepad".to_string(),
+        };
+        assert!(requires_confirmation(&launch, AgentPermission::Limited));
+
+        // Key presses that reach a system surface are equally dangerous — they
+        // are a complete bypass of the `Launch` gate.
+        for (modifiers, key) in [
+            (vec!["win"], "r"),
+            (vec!["meta"], "r"),
+            (vec!["ctrl", "shift"], "esc"),
+            (vec!["ctrl"], "escape"),
+            (vec!["alt"], "f4"),
+        ] {
+            let action = ComputerAction::KeyPress {
+                modifiers: modifiers.iter().map(|s| s.to_string()).collect(),
+                key: key.to_string(),
+            };
+            assert!(
+                requires_confirmation(&action, AgentPermission::Limited),
+                "{modifiers:?}+{key} should require confirmation"
+            );
+        }
+    }
+
+    #[test]
+    fn is_dangerous_key_press_rules() {
+        let m = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+        // Windows key, as a modifier or as the key itself.
+        assert!(is_dangerous_key_press(&m(&["win"]), "d"));
+        assert!(is_dangerous_key_press(&m(&["WIN"]), "r"));
+        assert!(is_dangerous_key_press(&m(&[]), "lwin"));
+        assert!(is_dangerous_key_press(&m(&["meta"]), "e"));
+        // Task Manager / Start menu.
+        assert!(is_dangerous_key_press(&m(&["ctrl", "shift"]), "Esc"));
+        assert!(is_dangerous_key_press(&m(&["Control"]), "escape"));
+        // Closing the foreground window.
+        assert!(is_dangerous_key_press(&m(&["Alt"]), "F4"));
+
+        // Benign combos stay safe.
+        assert!(!is_dangerous_key_press(&m(&["ctrl"]), "c"));
+        assert!(!is_dangerous_key_press(&m(&["ctrl", "shift"]), "s"));
+        assert!(!is_dangerous_key_press(&m(&[]), "enter"));
+        assert!(!is_dangerous_key_press(&m(&["alt"]), "tab"));
+    }
+
+    #[test]
+    fn full_permission_never_confirms() {
+        let launch = ComputerAction::Launch {
+            target: "notepad".to_string(),
+        };
+        assert!(!requires_confirmation(&launch, AgentPermission::Full));
+        let click = ComputerAction::Click { x: 1, y: 2 };
+        assert!(!requires_confirmation(&click, AgentPermission::Full));
+        let win_r = ComputerAction::KeyPress {
+            modifiers: vec!["win".to_string()],
+            key: "r".to_string(),
+        };
+        assert!(!requires_confirmation(&win_r, AgentPermission::Full));
     }
 
     #[test]
@@ -1241,12 +1332,11 @@ mod tests {
 
         let confirmed = cs.confirm("id1");
         assert!(confirmed.is_some());
-        assert_eq!(cs.confirmed_count, 1);
         assert!(cs.confirm("id1").is_none()); // Already removed.
 
         cs.add_pending("id2".to_string(), action);
         let rejected = cs.reject("id2");
         assert!(rejected.is_some());
-        assert_eq!(cs.confirmed_count, 1); // Not incremented on reject.
+        assert!(cs.reject("id2").is_none()); // Already removed.
     }
 }

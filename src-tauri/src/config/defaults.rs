@@ -5,6 +5,7 @@
 //! Changing a default here propagates to a fresh first-run config file and to
 //! any field a user has left unset or left empty in their existing file.
 
+use super::schema::{AgentMode, AgentPermission, Hotkey, Language};
 use crate::providers::Provider;
 
 /// Built-in assistant persona prompt. User overrides via `[prompt] system` in
@@ -46,9 +47,18 @@ pub const BOUNDS_QUOTE_MAX_DISPLAY_LINES: (u32, u32) = (1, 100);
 pub const BOUNDS_QUOTE_MAX_DISPLAY_CHARS: (u32, u32) = (1, 10_000);
 pub const BOUNDS_QUOTE_MAX_CONTEXT_LENGTH: (u32, u32) = (1, 65_536);
 
+/// General settings defaults.
+pub const DEFAULT_GENERAL_HOTKEY: Hotkey = Hotkey::Ctrl;
+pub const DEFAULT_GENERAL_LANGUAGE: Language = Language::Auto;
+/// Empty means "use the OS default app data directory".
+pub const DEFAULT_GENERAL_DATA_DIR: &str = "";
+
 /// Chat provider defaults, driving main chat, vision, and `/think`.
 pub const DEFAULT_CHAT_PROVIDER: Provider = Provider::OpenAi;
-pub const DEFAULT_CHAT_MODEL: &str = "gpt-4o";
+/// Deliberately empty: there is no default model. The Settings field shows a
+/// placeholder, and an empty model surfaces as a `missing_model` error when a
+/// chat is attempted.
+pub const DEFAULT_CHAT_MODEL: &str = "";
 /// Empty means "use the provider default base URL" (see
 /// `providers::resolve_base_url`).
 pub const DEFAULT_CHAT_BASE_URL: &str = "";
@@ -59,6 +69,10 @@ pub const DEFAULT_AGENT_PROVIDER: Provider = Provider::OpenAi;
 pub const DEFAULT_AGENT_MODEL: &str = "";
 /// Empty means "use the provider default base URL".
 pub const DEFAULT_AGENT_BASE_URL: &str = "";
+/// Reuse the `[chat]` provider/model/base URL/API key unless the user opts in.
+pub const DEFAULT_AGENT_MODE: AgentMode = AgentMode::SameAsChat;
+/// Safe actions auto-execute; dangerous ones need explicit approval.
+pub const DEFAULT_AGENT_PERMISSION: AgentPermission = AgentPermission::Limited;
 
 /// Authoritative allowlist of `(section, key)` pairs the Settings GUI is
 /// permitted to write via the `set_config_field` Tauri command.
@@ -85,16 +99,22 @@ pub const ALLOWED_FIELDS: &[(&str, &str)] = &[
     ("quote", "max_display_lines"),
     ("quote", "max_display_chars"),
     ("quote", "max_context_length"),
+    // [general]
+    ("general", "hotkey"),
+    ("general", "language"),
+    ("general", "data_dir"),
     // [chat]
     ("chat", "provider"),
     ("chat", "model"),
     ("chat", "base_url"),
     // [agent]
+    ("agent", "mode"),
     ("agent", "provider"),
     ("agent", "model"),
     ("agent", "base_url"),
+    ("agent", "permission"),
 ];
 
 /// Authoritative allowlist of section names accepted by `reset_config`.
 /// Mirrors the top-level structure of `AppConfig`.
-pub const ALLOWED_SECTIONS: &[&str] = &["prompt", "window", "quote", "chat", "agent"];
+pub const ALLOWED_SECTIONS: &[&str] = &["prompt", "window", "quote", "general", "chat", "agent"];

@@ -250,7 +250,7 @@ fn show_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::ActivationCo
             let _ = windows_focus::stop_focus_listener();
             let handle = app_handle.clone();
             let _ = windows_focus::start_focus_listener(Arc::new(move |_hwnd| {
-                if !windows_focus::is_minibar_active() {
+                if windows_focus::should_enter_minibar_on_focus_loss() {
                     windows_focus::enter_minibar();
                     let _ = handle.emit(MINIBAR_EVENT, ());
                 }
@@ -333,17 +333,26 @@ async fn open_settings_window(app_handle: tauri::AppHandle) -> Result<(), String
         WebviewUrl::App("settings.html".into())
     };
 
+    // The settings UI draws its own drag region and close button, so the
+    // native title bar — a light bar with a second, redundant close button — is
+    // disabled. The app icon is set explicitly: a window created after startup
+    // otherwise falls back to a generic Windows taskbar icon.
+    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png"))
+        .expect("failed to load window icon");
+
     let window = WebviewWindowBuilder::new(&app_handle, "settings", url)
         .title("Settings — QuickAI")
         .inner_size(480.0, 700.0)
         .min_inner_size(400.0, 500.0)
         .center()
         .resizable(true)
-        .decorations(true)
+        .decorations(false)
         .always_on_top(true)
         .skip_taskbar(true)
         .visible(true)
         .focused(true)
+        .icon(icon)
+        .map_err(|e| e.to_string())?
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -375,7 +384,7 @@ fn toggle_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::Activation
                 let _ = windows_focus::stop_focus_listener();
                 let h = handle.clone();
                 let _ = windows_focus::start_focus_listener(Arc::new(move |_hwnd| {
-                    if !windows_focus::is_minibar_active() {
+                    if windows_focus::should_enter_minibar_on_focus_loss() {
                         windows_focus::enter_minibar();
                         let _ = h.emit(MINIBAR_EVENT, ());
                     }
@@ -524,13 +533,29 @@ fn exit_minibar_size(app_handle: tauri::AppHandle) {
             let _ = windows_focus::stop_focus_listener();
             let h = handle.clone();
             let _ = windows_focus::start_focus_listener(Arc::new(move |_hwnd| {
-                if !windows_focus::is_minibar_active() {
+                if windows_focus::should_enter_minibar_on_focus_loss() {
                     windows_focus::enter_minibar();
                     let _ = h.emit(MINIBAR_EVENT, ());
                 }
             }));
         }
     });
+}
+
+/// Pins or unpins the overlay open (item 17).
+///
+/// While pinned, the focus listener no longer shrinks the overlay to the
+/// minibar when the user clicks outside, so the chat stays open; unpinning
+/// restores the normal click-away behaviour. Idempotent, so the frontend can
+/// re-send the current value on every overlay open to stay in sync.
+///
+/// The pin is an independent flag: it persists across minibar/restore (an
+/// explicit minimize still works while pinned, and restoring returns to the
+/// pinned state) and is only cleared by an explicit `pinned: false`.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn set_overlay_pinned(pinned: bool) {
+    windows_focus::set_pinned(pinned);
 }
 
 /// Called by the frontend once its visibility event listener is registered.
@@ -674,11 +699,8 @@ fn run_image_cleanup(app_handle: &tauri::AppHandle) {
     let referenced = database::get_all_image_paths(&conn).unwrap_or_default();
     drop(conn);
 
-    let base_dir = match app_handle.path().app_data_dir() {
-        Ok(d) => d,
-        Err(_) => return,
-    };
-    let _ = images::cleanup_orphaned_images(&base_dir, &referenced);
+    let data_dir = app_handle.state::<config::ResolvedDataDir>();
+    let _ = images::cleanup_orphaned_images(data_dir.path(), &referenced);
 }
 
 /// Spawns a background Tokio task that runs the cleanup sweep on a fixed
@@ -777,6 +799,32 @@ pub fn run() {
                 Ok(cfg) => cfg,
                 Err(e) => config::show_fatal_dialog_and_exit(&e),
             };
+            // The activation hook reads the hotkey pair on every key event
+            // (rather than capturing it at install time), so applying the
+            // configured key here — after the hook thread was started above —
+            // takes effect immediately.
+            #[cfg(target_os = "windows")]
+            windows_activator::apply_hotkey(app_config.general.hotkey);
+            // The data directory is resolved once, at startup; a change to
+            // `[general].data_dir` requires a relaunch (the Settings UI says
+            // so).
+            let data_dir = config::resolve_data_dir(app.handle(), &app_config.general.data_dir);
+            // The asset protocol scope in `tauri.conf.json` is pinned to the
+            // default app-data path, but the frontend renders every image via
+            // `convertFileSrc` (the asset protocol). A custom `data_dir` would
+            // therefore be refused by the scope and show broken thumbnails, so
+            // extend the scope to the resolved images root at runtime. On the
+            // default path this only re-adds patterns that already exist.
+            let images_root = images::images_root(data_dir.path());
+            if let Err(e) = app
+                .asset_protocol_scope()
+                .allow_directory(&images_root, true)
+            {
+                eprintln!(
+                    "quickai: [config] could not extend the asset scope to {}: {e}",
+                    images_root.display()
+                );
+            }
             app.manage(parking_lot::RwLock::new(app_config));
 
             // ── Generation + conversation state ─────────────────────
@@ -784,18 +832,17 @@ pub fn run() {
             app.manage(commands::ConversationHistory::new());
 
             // ── Agent state (Windows only) ────────────────────────────
-            // The agent resolves its provider from the `[agent]` config
-            // section at start time; this state holds status, cancellation,
-            // and pending confirmations.
+            // The agent resolves its provider from the `[chat]` or `[agent]`
+            // config section (per `[agent].mode`) at start time; this state
+            // holds status, cancellation, and pending confirmations.
             #[cfg(target_os = "windows")]
             app.manage(Arc::new(agent::AgentState::new()));
 
             // ── SQLite database for conversation history ──────────
-            let app_data_dir = app
-                .path()
-                .app_data_dir()
-                .expect("failed to resolve app data directory");
-            let db_conn = database::open_database(&app_data_dir)
+            // Both the database and the images directory derive from the
+            // startup-resolved data directory.
+            app.manage(data_dir.clone());
+            let db_conn = database::open_database(data_dir.path())
                 .expect("failed to initialise SQLite database");
             app.manage(history::Database(std::sync::Mutex::new(db_conn)));
 
@@ -826,6 +873,8 @@ pub fn run() {
             history::load_conversation,
             #[cfg(not(coverage))]
             history::delete_conversation,
+            #[cfg(not(coverage))]
+            history::rename_conversation,
             #[cfg(not(coverage))]
             history::generate_title,
             #[cfg(not(coverage))]
@@ -862,6 +911,8 @@ pub fn run() {
             enter_minibar_size,
             #[cfg(all(target_os = "windows", not(coverage)))]
             exit_minibar_size,
+            #[cfg(all(target_os = "windows", not(coverage)))]
+            set_overlay_pinned,
             // Settings window
             open_settings_window,
             // Config commands (TOML)

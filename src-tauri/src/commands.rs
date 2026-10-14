@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{ipc::Channel, State};
 use tokio_util::sync::CancellationToken;
 
-use crate::config::AppConfig;
+use crate::config::{AgentMode, AppConfig};
 use crate::providers::{self, ApiError, Provider, ProviderChunk};
 
 /// Payload emitted back to the frontend per stream event.
@@ -136,18 +136,22 @@ pub fn resolve_chat_provider(
     )
 }
 
-/// Resolves the `[agent]` provider from config plus the API key from the
-/// SQLite `app_config` table. Same validation rules as [`resolve_chat_provider`].
+/// Resolves the `[agent]` provider. In the default `same_as_chat` mode the
+/// `[chat]` provider, model, base URL, and API key are reused; `custom` mode
+/// resolves from the `[agent]` section and its own API key.
 pub fn resolve_agent_provider(
     config: &AppConfig,
     conn: &rusqlite::Connection,
 ) -> Result<ChatProviderConfig, ApiError> {
-    resolve_provider(
-        &config.agent.provider,
-        &config.agent.model,
-        &config.agent.base_url,
-        conn,
-    )
+    match config.agent.mode {
+        AgentMode::SameAsChat => resolve_chat_provider(config, conn),
+        AgentMode::Custom => resolve_provider(
+            &config.agent.provider,
+            &config.agent.model,
+            &config.agent.base_url,
+            conn,
+        ),
+    }
 }
 
 /// Shared provider resolution for a config section. Returns a stable
@@ -161,7 +165,7 @@ fn resolve_provider(
     let model = model.trim().to_string();
     if model.is_empty() {
         return Err(ApiError::new(
-            providers::CODE_BAD_REQUEST,
+            providers::CODE_MISSING_MODEL,
             "No model configured for the selected provider.",
         ));
     }
@@ -615,7 +619,7 @@ mod tests {
         let conn = crate::database::open_in_memory().unwrap();
         let config = config_with_chat(Provider::OpenAi, "   ", "");
         let err = resolve_chat_provider(&config, &conn).unwrap_err();
-        assert_eq!(err.code, providers::CODE_BAD_REQUEST);
+        assert_eq!(err.code, providers::CODE_MISSING_MODEL);
     }
 
     #[test]
@@ -669,10 +673,11 @@ mod tests {
     }
 
     #[test]
-    fn resolve_agent_provider_reads_agent_section() {
+    fn resolve_agent_provider_custom_reads_agent_section() {
         let conn = crate::database::open_in_memory().unwrap();
         crate::database::set_config(&conn, "api_key_anthropic", "sk-ant").unwrap();
         let mut config = AppConfig::default();
+        config.agent.mode = AgentMode::Custom;
         config.agent.provider = Provider::Anthropic;
         config.agent.model = "claude-sonnet-4-5".to_string();
         let resolved = resolve_agent_provider(&config, &conn).unwrap();
@@ -683,12 +688,41 @@ mod tests {
     }
 
     #[test]
-    fn resolve_agent_provider_reports_missing_model() {
+    fn resolve_agent_provider_same_as_chat_reuses_chat_config_and_key() {
         let conn = crate::database::open_in_memory().unwrap();
-        // Default agent model is empty.
+        // Only the chat provider's key is set; the agent section is untouched.
+        crate::database::set_config(&conn, "api_key_anthropic", "sk-ant").unwrap();
+        let mut config = AppConfig::default();
+        config.chat.provider = Provider::Anthropic;
+        config.chat.model = "claude-sonnet-4-5".to_string();
+        // Default agent mode is same_as_chat; its own section is left empty.
+        assert_eq!(config.agent.mode, AgentMode::SameAsChat);
+
+        let resolved = resolve_agent_provider(&config, &conn).unwrap();
+        assert_eq!(resolved.provider, Provider::Anthropic);
+        assert_eq!(resolved.model, "claude-sonnet-4-5");
+        assert_eq!(resolved.base_url, "https://api.anthropic.com");
+        assert_eq!(resolved.api_key, "sk-ant");
+    }
+
+    #[test]
+    fn resolve_agent_provider_same_as_chat_reports_missing_chat_model() {
+        let conn = crate::database::open_in_memory().unwrap();
+        // Default chat model is empty; same_as_chat inherits that.
         let config = AppConfig::default();
         let err = resolve_agent_provider(&config, &conn).unwrap_err();
-        assert_eq!(err.code, providers::CODE_BAD_REQUEST);
+        assert_eq!(err.code, providers::CODE_MISSING_MODEL);
+    }
+
+    #[test]
+    fn resolve_agent_provider_custom_reports_missing_model() {
+        let conn = crate::database::open_in_memory().unwrap();
+        crate::database::set_config(&conn, "api_key_openai", "sk-abc").unwrap();
+        let mut config = AppConfig::default();
+        config.agent.mode = AgentMode::Custom;
+        // Default agent model is empty.
+        let err = resolve_agent_provider(&config, &conn).unwrap_err();
+        assert_eq!(err.code, providers::CODE_MISSING_MODEL);
     }
 
     // ─── stream_chat (request shaping + chunk mapping) ────────────────────────

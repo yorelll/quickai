@@ -1,10 +1,12 @@
 /*!
  * Image storage and lifecycle management.
  *
- * Images are stored in a flat directory at `<app_data_dir>/images/` with
- * UUID-based filenames. This follows the industry-standard pattern used by
- * Signal, iMessage, and Slack — media files are independent entities linked
- * to messages through path references, not organized by conversation.
+ * Images are stored in a flat directory at `<data_dir>/images/` with
+ * UUID-based filenames, where `<data_dir>` is the resolved `[general].data_dir`
+ * (the OS app data directory when unset). This follows the industry-standard
+ * pattern used by Signal, iMessage, and Slack — media files are independent
+ * entities linked to messages through path references, not organized by
+ * conversation.
  *
  * Each image is compressed to JPEG (quality 85, max 1920px) on save to keep
  * disk usage and provider upload size low.
@@ -22,7 +24,6 @@ use std::path::{Path, PathBuf};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use image::imageops::FilterType;
-use tauri::Manager;
 
 /// Maximum dimension (width or height) for saved images. Images exceeding this
 /// are downscaled proportionally, preserving aspect ratio.
@@ -179,6 +180,9 @@ pub fn encode_images_as_base64(paths: &[String]) -> Result<Vec<String>, String> 
 /// penalty of JSON-serializing a `Vec<u8>` (millions of individual numbers)
 /// over the Tauri IPC bridge.
 ///
+/// The base directory is the startup-resolved `[general].data_dir` override, or
+/// the OS default when unset.
+///
 /// The command is `async` so Tauri runs it off the main thread. The heavy
 /// work (base64 decode → image decode → Lanczos3 resize → JPEG encode) is
 /// dispatched to `spawn_blocking` to avoid blocking the async runtime,
@@ -186,13 +190,10 @@ pub fn encode_images_as_base64(paths: &[String]) -> Result<Vec<String>, String> 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(not(coverage), tauri::command)]
 pub async fn save_image_command(
-    app_handle: tauri::AppHandle,
+    data_dir: tauri::State<'_, crate::config::ResolvedDataDir>,
     image_data_base64: String,
 ) -> Result<String, String> {
-    let base_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("failed to resolve app data dir: {e}"))?;
+    let base_dir = data_dir.path().to_path_buf();
 
     tokio::task::spawn_blocking(move || {
         let image_data = BASE64
@@ -207,12 +208,11 @@ pub async fn save_image_command(
 /// Deletes a single image file from disk (with path containment check).
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(not(coverage), tauri::command)]
-pub fn remove_image_command(app_handle: tauri::AppHandle, path: String) -> Result<(), String> {
-    let base_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("failed to resolve app data dir: {e}"))?;
-    remove_image(&base_dir, &path)
+pub fn remove_image_command(
+    data_dir: tauri::State<'_, crate::config::ResolvedDataDir>,
+    path: String,
+) -> Result<(), String> {
+    remove_image(data_dir.path(), &path)
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────

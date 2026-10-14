@@ -1,7 +1,8 @@
 //! Windows activation listener, context capture, and permissions.
 //!
 //! This module combines the Windows-specific functionality needed for QuickAI:
-//! - Double-tap Ctrl hotkey detection via SetWindowsHookExW
+//! - Double-tap summon-key detection via SetWindowsHookExW (the key comes from
+//!   the `[general].hotkey` setting)
 //! - Context capture (clipboard fallback for selected text)
 //! - Permission stubs (Windows has no TCC equivalent)
 
@@ -25,6 +26,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL,
 };
 
+use crate::config::Hotkey;
 use crate::context::{ActivationContext, ScreenRect};
 
 use windows::Win32::UI::WindowsAndMessaging::{GetGUIThreadInfo, GetWindowRect, GUITHREADINFO};
@@ -33,10 +35,40 @@ use windows::Win32::UI::WindowsAndMessaging::{GetGUIThreadInfo, GetWindowRect, G
 
 const ACTIVATION_WINDOW: Duration = Duration::from_millis(400);
 const ACTIVATION_COOLDOWN: Duration = Duration::from_millis(600);
+
+// Left/right virtual-key codes for each selectable summon key. Both sides of
+// the modifier count, so a double-tap of either physical key activates.
 const VK_LCONTROL: i32 = 0xA2;
 const VK_RCONTROL: i32 = 0xA3;
+const VK_LMENU: i32 = 0xA4;
+const VK_RMENU: i32 = 0xA5;
+const VK_LSHIFT: i32 = 0xA0;
+const VK_RSHIFT: i32 = 0xA1;
+const VK_LWIN: i32 = 0x5B;
+const VK_RWIN: i32 = 0x5C;
+
+/// Maps a configured hotkey to its `(left, right)` virtual-key codes.
+pub fn hotkey_vk_codes(hotkey: Hotkey) -> (i32, i32) {
+    match hotkey {
+        Hotkey::Ctrl => (VK_LCONTROL, VK_RCONTROL),
+        Hotkey::Alt => (VK_LMENU, VK_RMENU),
+        Hotkey::Shift => (VK_LSHIFT, VK_RSHIFT),
+        Hotkey::Win => (VK_LWIN, VK_RWIN),
+    }
+}
+
+/// Applies the configured summon key to the keyboard hook. Called at startup
+/// and whenever `[general].hotkey` changes; the hook reads the pair on every
+/// key event, so the change takes effect immediately.
+pub fn apply_hotkey(hotkey: Hotkey) {
+    *GLOBAL_HOTKEY_VKS.lock().unwrap() = hotkey_vk_codes(hotkey);
+}
 
 // ─── Global Hook State ─────────────────────────────────────────────────────────
+
+/// Left/right virtual-key pair that triggers activation (default: Ctrl).
+static GLOBAL_HOTKEY_VKS: LazyLock<Mutex<(i32, i32)>> =
+    LazyLock::new(|| Mutex::new(hotkey_vk_codes(Hotkey::Ctrl)));
 
 static GLOBAL_ACTIVATION_STATE: LazyLock<Mutex<ActivationState>> = LazyLock::new(|| {
     Mutex::new(ActivationState {
@@ -133,7 +165,7 @@ fn run_hook_loop(is_active: Arc<AtomicBool>) {
     match hook {
         Ok(hook_handle) => {
             eprintln!(
-                "quickai: [activator] keyboard hook installed — listening for double-tap Ctrl"
+                "quickai: [activator] keyboard hook installed — listening for the double-tap summon key"
             );
 
             let mut msg = MSG::default();
@@ -185,7 +217,8 @@ unsafe extern "system" fn keyboard_hook_callback(
 
     let vk_code = kb_struct.vkCode as i32;
 
-    if vk_code == VK_LCONTROL || vk_code == VK_RCONTROL {
+    let (vk_left, vk_right) = *GLOBAL_HOTKEY_VKS.lock().unwrap();
+    if vk_code == vk_left || vk_code == vk_right {
         let is_release = wparam_val == 0x0101 || wparam_val == 0x0105;
         let key_down = is_press && !is_release;
 
@@ -391,6 +424,27 @@ pub fn capture() -> ActivationContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hotkey_vk_codes_map_every_key() {
+        assert_eq!(hotkey_vk_codes(Hotkey::Ctrl), (VK_LCONTROL, VK_RCONTROL));
+        assert_eq!(hotkey_vk_codes(Hotkey::Alt), (VK_LMENU, VK_RMENU));
+        assert_eq!(hotkey_vk_codes(Hotkey::Shift), (VK_LSHIFT, VK_RSHIFT));
+        assert_eq!(hotkey_vk_codes(Hotkey::Win), (VK_LWIN, VK_RWIN));
+    }
+
+    #[test]
+    fn apply_hotkey_updates_global_pair() {
+        apply_hotkey(Hotkey::Alt);
+        assert_eq!(*GLOBAL_HOTKEY_VKS.lock().unwrap(), (VK_LMENU, VK_RMENU));
+
+        // Restore the default so later tests observe the documented default.
+        apply_hotkey(Hotkey::Ctrl);
+        assert_eq!(
+            *GLOBAL_HOTKEY_VKS.lock().unwrap(),
+            (VK_LCONTROL, VK_RCONTROL)
+        );
+    }
 
     #[test]
     fn validates_activation_sequence() {

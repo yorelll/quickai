@@ -14,12 +14,80 @@
 use serde::{Deserialize, Serialize};
 
 use super::defaults::{
-    DEFAULT_AGENT_BASE_URL, DEFAULT_AGENT_MODEL, DEFAULT_AGENT_PROVIDER, DEFAULT_CHAT_BASE_URL,
-    DEFAULT_CHAT_MODEL, DEFAULT_CHAT_PROVIDER, DEFAULT_MAX_CHAT_HEIGHT, DEFAULT_MAX_IMAGES,
-    DEFAULT_OVERLAY_WIDTH, DEFAULT_QUOTE_MAX_CONTEXT_LENGTH, DEFAULT_QUOTE_MAX_DISPLAY_CHARS,
+    DEFAULT_AGENT_BASE_URL, DEFAULT_AGENT_MODE, DEFAULT_AGENT_MODEL, DEFAULT_AGENT_PERMISSION,
+    DEFAULT_AGENT_PROVIDER, DEFAULT_CHAT_BASE_URL, DEFAULT_CHAT_MODEL, DEFAULT_CHAT_PROVIDER,
+    DEFAULT_GENERAL_DATA_DIR, DEFAULT_GENERAL_HOTKEY, DEFAULT_GENERAL_LANGUAGE,
+    DEFAULT_MAX_CHAT_HEIGHT, DEFAULT_MAX_IMAGES, DEFAULT_OVERLAY_WIDTH,
+    DEFAULT_QUOTE_MAX_CONTEXT_LENGTH, DEFAULT_QUOTE_MAX_DISPLAY_CHARS,
     DEFAULT_QUOTE_MAX_DISPLAY_LINES,
 };
 use crate::providers::Provider;
+
+/// Double-tap summon key for the overlay. Wire values are exactly `"ctrl"`,
+/// `"alt"`, `"shift"`, `"win"`; the activator maps each to its left/right
+/// virtual-key pair.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Hotkey {
+    Ctrl,
+    Alt,
+    Shift,
+    Win,
+}
+
+/// UI language. `Auto` follows the system locale; `En` / `Zh` pin it.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Language {
+    Auto,
+    En,
+    Zh,
+}
+
+/// How the agent resolves its provider, model, base URL, and API key.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentMode {
+    /// Reuse the `[chat]` provider, model, base URL, and API key.
+    SameAsChat,
+    /// Use the `[agent]` provider, model, base URL, and API key.
+    Custom,
+}
+
+/// How the agent treats desktop actions that need user consent.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentPermission {
+    /// Safe actions auto-execute; dangerous ones need explicit approval.
+    Limited,
+    /// Act freely, never ask.
+    Full,
+}
+
+/// General configuration: activation hotkey, UI language, and the app data
+/// directory override. These are the knobs that do not belong to any single
+/// feature section.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct GeneralSection {
+    /// Double-tap key that summons the overlay.
+    pub hotkey: Hotkey,
+    /// UI language selector.
+    pub language: Language,
+    /// Directory holding the database and images. Empty means the OS default
+    /// app data directory; applied at startup only.
+    pub data_dir: String,
+}
+
+impl Default for GeneralSection {
+    fn default() -> Self {
+        Self {
+            hotkey: DEFAULT_GENERAL_HOTKEY,
+            language: DEFAULT_GENERAL_LANGUAGE,
+            data_dir: DEFAULT_GENERAL_DATA_DIR.to_string(),
+        }
+    }
+}
 
 /// Prompt configuration. `system` holds only the user-editable base text.
 /// The slash-command appendix is composed at load time into `resolved_system`
@@ -93,14 +161,15 @@ impl Default for QuoteSection {
 ///
 /// API keys are NOT stored here (they live in the SQLite `app_config` table
 /// under `api_key_openai` / `api_key_anthropic` / `api_key_openai_compatible`).
-/// `base_url` empty means "use the provider default"; `openai_compatible`
-/// requires a user-supplied URL.
+/// `model` is empty by default and surfaces as a `missing_model` error when a
+/// chat is attempted; `base_url` empty means "use the provider default", and
+/// `openai_compatible` requires a user-supplied URL.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ChatSection {
     /// Provider selector: `"openai"`, `"anthropic"`, or `"openai_compatible"`.
     pub provider: Provider,
-    /// Model name sent to the provider.
+    /// Model name sent to the provider. Empty until the user configures one.
     pub model: String,
     /// Base URL for the provider API. Empty means the provider default.
     pub base_url: String,
@@ -118,26 +187,35 @@ impl Default for ChatSection {
 
 /// Agent mode (computer control) configuration, driving `/do`.
 ///
-/// The active provider determines which cloud backend drives the agent loop;
-/// only the OpenAI/Anthropic native tool-calling path is supported. API keys
-/// live in the SQLite `app_config` table, not TOML.
+/// In the default `same_as_chat` mode the `[chat]` provider, model, base URL,
+/// and API key are reused and the fields below are ignored; `custom` mode uses
+/// them instead. API keys live in the SQLite `app_config` table, not TOML.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct AgentSection {
+    /// Whether the agent reuses the chat configuration or its own.
+    pub mode: AgentMode,
     /// Provider selector: `"openai"`, `"anthropic"`, or `"openai_compatible"`.
+    /// Only used when `mode == "custom"`.
     pub provider: Provider,
     /// Model name for the agent provider (e.g. "gpt-4o", "claude-sonnet-4-5").
+    /// Only used when `mode == "custom"`.
     pub model: String,
     /// Base URL for the agent provider API. Empty means the provider default.
+    /// Only used when `mode == "custom"`.
     pub base_url: String,
+    /// Consent policy for desktop actions.
+    pub permission: AgentPermission,
 }
 
 impl Default for AgentSection {
     fn default() -> Self {
         Self {
+            mode: DEFAULT_AGENT_MODE,
             provider: DEFAULT_AGENT_PROVIDER,
             model: DEFAULT_AGENT_MODEL.to_string(),
             base_url: DEFAULT_AGENT_BASE_URL.to_string(),
+            permission: DEFAULT_AGENT_PERMISSION,
         }
     }
 }
@@ -152,6 +230,7 @@ pub struct AppConfig {
     pub prompt: PromptSection,
     pub window: WindowSection,
     pub quote: QuoteSection,
+    pub general: GeneralSection,
     pub chat: ChatSection,
     pub agent: AgentSection,
 }

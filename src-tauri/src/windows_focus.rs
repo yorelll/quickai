@@ -16,9 +16,41 @@ const WINEVENT_OUTOFCONTEXT: u32 = 0;
 /// Whether the minibar mode is currently active.
 static MINIBAR_ACTIVE: AtomicBool = AtomicBool::new(false);
 
+/// Whether the overlay is pinned open. While pinned, losing focus does not
+/// shrink the overlay to the minibar (item 17).
+static OVERLAY_PINNED: AtomicBool = AtomicBool::new(false);
+
 /// Returns whether the minibar is currently active.
 pub fn is_minibar_active() -> bool {
     MINIBAR_ACTIVE.load(Ordering::SeqCst)
+}
+
+/// Returns whether the overlay is pinned open.
+pub fn is_pinned() -> bool {
+    OVERLAY_PINNED.load(Ordering::SeqCst)
+}
+
+/// Sets the pinned state. Idempotent — the frontend re-sends the current value
+/// on every overlay open to stay in sync.
+pub fn set_pinned(pinned: bool) {
+    OVERLAY_PINNED.store(pinned, Ordering::SeqCst);
+}
+
+/// Pure decision: whether losing focus should shrink the overlay to the
+/// minibar.
+///
+/// Suppressed in two cases: the overlay is pinned open (the user pinned it
+/// precisely so that clicking outside would not hide it), or it is already in
+/// minibar (the transition is one-way until the user restores it).
+fn should_enter_minibar(pinned: bool, minibar_active: bool) -> bool {
+    !pinned && !minibar_active
+}
+
+/// Whether losing focus should shrink the overlay to the minibar, for the
+/// current state. Every place that installs the focus listener uses this so the
+/// two guards cannot drift apart.
+pub fn should_enter_minibar_on_focus_loss() -> bool {
+    should_enter_minibar(is_pinned(), is_minibar_active())
 }
 
 /// Enters minibar mode — shrinks the overlay to a thin always-on-top strip.
@@ -126,6 +158,30 @@ mod tests {
     #[test]
     fn minibar_starts_inactive() {
         assert!(!is_minibar_active());
+    }
+
+    #[test]
+    fn set_pinned_round_trips_and_is_idempotent() {
+        set_pinned(true);
+        assert!(is_pinned());
+        set_pinned(true); // Idempotent.
+        assert!(is_pinned());
+        set_pinned(false);
+        assert!(!is_pinned());
+        set_pinned(false); // Idempotent.
+        assert!(!is_pinned());
+    }
+
+    #[test]
+    fn focus_loss_minibar_decision() {
+        // Pinning suppresses the click-away transition.
+        assert!(!should_enter_minibar(true, false));
+        // Already in minibar: the transition is one-way until restored.
+        assert!(!should_enter_minibar(false, true));
+        // Pinned while already in minibar is still suppressed.
+        assert!(!should_enter_minibar(true, true));
+        // Neither guard set: the normal click-away behaviour.
+        assert!(should_enter_minibar(false, false));
     }
 
     #[test]
