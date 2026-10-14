@@ -23,18 +23,24 @@ The pipeline deliberately spans two runner types:
 
 | Job | Runner | Why |
 | :--- | :--- | :--- |
-| `quality` | `ubuntu-latest` | Lint, format, typecheck, and both 100% coverage gates (frontend via `vitest --coverage`, backend via `cargo llvm-cov --fail-under-lines 100`). |
+| `quality` | `ubuntu-latest` | Lint, format, typecheck, and both 100% coverage gates (frontend via `vitest --coverage`; backend from the lcov export — see below). |
 | `windows-backend-tests` | `windows-latest` | Compiles (`cargo check --all-targets`) and runs (`cargo test --lib`) the backend suite on Windows, with **no** coverage gate. |
 | `build-and-release` | `windows-latest` | Builds the NSIS installer and the portable zip, then uploads both. Requires both jobs above to succeed. |
 
-The **backend coverage gate runs on Linux by design**. It was written for a
-runner where the Win32-only `#[cfg(target_os = "windows")]` modules are not
-compiled. On Windows those modules *are* compiled, so `cargo llvm-cov` counts
-them in the report — but they call Win32 APIs (keyboard hooks, GDI `BitBlt`,
-`SendInput`, `schtasks`) that cannot be unit-tested, so the measured line
-coverage is ~86% and the gate can never pass there. The `windows-backend-tests`
-job covers that path instead: it proves the Win32 code compiles and its tests
-pass, while the 100% threshold is enforced on Linux where it is achievable.
+The **backend coverage gate runs on Linux by design**: the Win32-only
+`#[cfg(target_os = "windows")]` modules (keyboard hooks, GDI `BitBlt`,
+`SendInput`, `schtasks`) are not compiled on that runner, so the instrumented set
+is limited to unit-testable code. The `windows-backend-tests` job covers the
+other path — it proves the Win32 code compiles and its tests pass.
+
+The gate is measured from the **lcov export**: it fails if _any_ instrumented
+line has zero executions. It deliberately does **not** use llvm-cov's
+`--fail-under-lines` summary, which counts region entries as lines and can
+disagree with the actual execution data. The check lives in
+`scripts/check-backend-coverage.sh` and is shared by CI and by
+`bun run test:backend:coverage` locally; the "100% of lines" intent is unchanged.
+Alongside it the workflow uploads `backend-lcov`, `backend-coverage-html`, and
+`backend-coverage-json` artifacts for cross-checking.
 
 ## Prerequisites
 
@@ -136,7 +142,8 @@ on the quality gates:
 
 1. On `ubuntu-latest`, the `quality` job runs lint, format check, typecheck, and
    the complete test suite with 100% coverage enforcement (frontend via
-   `vitest --coverage`, backend via `cargo llvm-cov --fail-under-lines 100`).
+   `vitest --coverage`; backend from the lcov export, failing if any
+   instrumented line has zero executions).
 2. In parallel, the `windows-backend-tests` job compiles and runs the backend
    suite on `windows-latest` without a coverage gate (see
    [Which runner does what](#which-runner-does-what)).

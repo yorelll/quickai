@@ -91,9 +91,9 @@ jobs:
           echo "Target tag: $tag"
 
   # Lint / format / typecheck plus the two 100% coverage gates. Runs on Linux:
-  # the backend coverage gate was designed for a runner where the Win32-only
-  # #[cfg(target_os = "windows")] modules are not compiled, so it cannot be
-  # enforced on Windows (see the windows-backend-tests job for that path).
+  # the Win32-only #[cfg(target_os = "windows")] modules are not compiled here,
+  # so the instrumented set is limited to unit-testable code (see the
+  # windows-backend-tests job for the Windows compile/test path).
   quality:
     name: Quality gates (lint, format, typecheck, coverage)
     needs: [release-please, resolve-target]
@@ -152,28 +152,28 @@ jobs:
       - name: Frontend tests with 100% coverage enforcement
         run: bun run test:coverage
 
-      # Produce the report first, so it exists even when the gate below fails.
+      # Produce the report first: it is both the gate's input and an artifact,
+      # so it must exist even when the gate below fails.
       - name: Backend coverage report
         working-directory: src-tauri
         run: cargo +nightly-2026-03-30 llvm-cov --ignore-filename-regex "(lib|main)\.rs" --lcov --output-path lcov.info
 
-      # Region-level view: exposes partially-covered lines, which the
-      # --fail-under-lines metric counts as missed but --show-missing-lines
-      # does not list.
+      # Region-level view (line and region colouring), for cross-checking the
+      # lcov-derived gate.
       - name: Backend coverage HTML report
         working-directory: src-tauri
         run: cargo +nightly-2026-03-30 llvm-cov report --ignore-filename-regex "(lib|main)\.rs" --html --output-dir coverage-html
 
-      # Region-level data (segments), the same basis as the summary metric.
+      # Region-level data (segments), for cross-checking the lcov-derived gate.
       - name: Backend coverage JSON report
         working-directory: src-tauri
         run: cargo +nightly-2026-03-30 llvm-cov report --ignore-filename-regex "(lib|main)\.rs" --json --output-path coverage.json
 
-      # The gate itself, unchanged in strictness. --show-missing-lines prints the
-      # uncovered line numbers in the log, so a failing run is self-diagnosing.
-      - name: Backend coverage gate (100% lines)
-        working-directory: src-tauri
-        run: cargo +nightly-2026-03-30 llvm-cov report --ignore-filename-regex "(lib|main)\.rs" --fail-under-lines 100 --show-missing-lines
+      # Gate on the exported per-line data rather than llvm-cov's summary line
+      # table, which counts region entries as lines and disagrees with every
+      # export (see the coverage JSON/HTML artifacts).
+      - name: Backend coverage gate (every line executed)
+        run: bash scripts/check-backend-coverage.sh src-tauri/lcov.info
 
       # Always upload the report, so a red gate can be diagnosed from the
       # uncovered lines instead of re-running the suite blind.

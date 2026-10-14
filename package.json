@@ -27,9 +27,9 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:backend": "cd src-tauri && cargo test",
-    "test:backend:coverage": "cd src-tauri && cargo +nightly-2026-03-30 llvm-cov --ignore-filename-regex \"(lib|main)\\.rs\" --fail-under-lines 100",
+    "test:backend:coverage": "cd src-tauri && cargo +nightly-2026-03-30 llvm-cov --ignore-filename-regex \"(lib|main)\\.rs\" --lcov --output-path lcov.info && bash ../scripts/check-backend-coverage.sh lcov.info",
     "test:all": "vitest run && cd src-tauri && cargo test",
-    "test:all:coverage": "vitest run --coverage && cd src-tauri && cargo +nightly-2026-03-30 llvm-cov --ignore-filename-regex \"(lib|main)\\.rs\" --fail-under-lines 100",
+    "test:all:coverage": "vitest run --coverage && cd src-tauri && cargo +nightly-2026-03-30 llvm-cov --ignore-filename-regex \"(lib|main)\\.rs\" --lcov --output-path lcov.info && bash ../scripts/check-backend-coverage.sh lcov.info",
     "validate-build": "bun run lint && bun run format:check && bun run typecheck && bun run build:all"
   },
   "dependencies": {
