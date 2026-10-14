@@ -90,4 +90,66 @@ describe('WindowControls', () => {
     );
     expect(onSave).toHaveBeenCalledTimes(1);
   });
+
+  it('renders the conversation title and forwards renames', () => {
+    const onRenameTitle = vi.fn();
+    render(
+      <WindowControls
+        onClose={vi.fn()}
+        onMinimize={vi.fn()}
+        title="Weekly plan"
+        onRenameTitle={onRenameTitle}
+      />,
+    );
+    expect(screen.getByText('Weekly plan')).toBeInTheDocument();
+
+    fireEvent.contextMenu(
+      screen.getByRole('button', { name: 'Rename conversation' }),
+    );
+    const input = screen.getByRole('textbox', { name: 'Conversation name' });
+    fireEvent.change(input, { target: { value: 'Sprint plan' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onRenameTitle).toHaveBeenCalledWith('Sprint plan');
+  });
+
+  it('omits the title when none is provided', () => {
+    render(<WindowControls onClose={vi.fn()} onMinimize={vi.fn()} />);
+    expect(
+      screen.queryByRole('button', { name: 'Rename conversation' }),
+    ).toBeNull();
+  });
+
+  it('renders a pin button that reflects and toggles the pinned state', () => {
+    const onTogglePin = vi.fn();
+    const { rerender } = render(
+      <WindowControls
+        onClose={vi.fn()}
+        onMinimize={vi.fn()}
+        isPinned={false}
+        onTogglePin={onTogglePin}
+      />,
+    );
+
+    const pin = screen.getByRole('button', { name: 'Pin window' });
+    expect(pin).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(pin);
+    expect(onTogglePin).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <WindowControls
+        onClose={vi.fn()}
+        onMinimize={vi.fn()}
+        isPinned
+        onTogglePin={onTogglePin}
+      />,
+    );
+    const unpin = screen.getByRole('button', { name: 'Unpin window' });
+    expect(unpin).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('omits the pin button when no toggle is provided', () => {
+    render(<WindowControls onClose={vi.fn()} onMinimize={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Pin window' })).toBeNull();
+  });
 });

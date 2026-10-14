@@ -252,4 +252,53 @@ describe('useAgentMode', () => {
       expect(result.current.pendingConfirmation).toBeNull();
     });
   });
+
+  describe('dismiss', () => {
+    it('clears a finished run so the panel can be closed', async () => {
+      mockInvoke.mockResolvedValue(undefined);
+      const { result } = renderHook(() => useAgentMode());
+
+      await act(async () => {
+        await result.current.start('open notepad');
+      });
+      await act(async () => {
+        emitTauriEvent(AGENT_EVENT, { kind: 'done', summary: 'All done.' });
+      });
+      expect(result.current.status).toBe('done');
+      expect(result.current.summary).toBe('All done.');
+
+      act(() => {
+        result.current.dismiss();
+      });
+
+      expect(result.current.status).toBe('idle');
+      expect(result.current.summary).toBeNull();
+      expect(result.current.lastAction).toBeNull();
+      expect(result.current.lastResult).toBeNull();
+      expect(result.current.reasoning).toBeNull();
+      expect(result.current.pendingConfirmation).toBeNull();
+    });
+
+    it('clears a pending confirmation', async () => {
+      mockInvoke.mockResolvedValue(undefined);
+      const { result } = renderHook(() => useAgentMode());
+
+      await act(async () => {
+        await result.current.start('task');
+      });
+      await act(async () => {
+        emitTauriEvent(AGENT_EVENT, {
+          kind: 'confirmation_required',
+          action: { type: 'click', x: 1, y: 2 },
+        });
+      });
+      expect(result.current.pendingConfirmation).not.toBeNull();
+
+      act(() => {
+        result.current.dismiss();
+      });
+
+      expect(result.current.pendingConfirmation).toBeNull();
+    });
+  });
 });

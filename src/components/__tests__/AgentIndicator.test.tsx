@@ -37,6 +37,7 @@ function renderIndicator(
       onStop={noop}
       onConfirm={noop}
       onReject={noop}
+      onDismiss={noop}
       {...overrides}
     />,
   );
@@ -137,9 +138,50 @@ describe('AgentIndicator', () => {
         onStop={onStop}
         onConfirm={noop}
         onReject={noop}
+        onDismiss={noop}
       />,
     );
     expect(screen.queryByText('Stop')).toBeNull();
+  });
+
+  it('calls onDismiss from the close control', () => {
+    const onDismiss = vi.fn();
+    renderIndicator({
+      isActive: false,
+      status: 'done',
+      summary: 'All done.',
+      onDismiss,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it('hides the dismiss control while the agent is still running', () => {
+    renderIndicator({ status: 'executing' });
+    expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+    expect(screen.getByText('Stop')).toBeDefined();
+  });
+
+  it('renders the summary as markdown inside a scrollable block', () => {
+    const { container } = renderIndicator({
+      isActive: false,
+      status: 'done',
+      summary: '**Bold** summary',
+    });
+    expect(
+      container.querySelector('[data-streamdown="strong"]'),
+    ).not.toBeNull();
+    expect(container.querySelector('.overflow-y-auto')).not.toBeNull();
+  });
+
+  it('shows the keyboard hint while a confirmation is pending', () => {
+    renderIndicator({
+      status: 'waiting_confirmation',
+      pendingConfirmation: { type: 'click', x: 1, y: 2 },
+    });
+    expect(
+      screen.getByText('Press 1 to allow, 2 to deny, Ctrl+C to abort'),
+    ).toBeDefined();
   });
 
   it('renders the confirmation prompt with the localized action', () => {

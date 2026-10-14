@@ -545,4 +545,360 @@ describe('useConversationHistory', () => {
       expect.anything(),
     );
   });
+
+  // ─── Title tracking (item 12) ─────────────────────────────────────────────
+
+  /** Routes commands to canned responses for the title-tracking tests. */
+  function mockHistory(overrides: {
+    saveId?: string;
+    list?: () => Promise<unknown>;
+  }) {
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'save_conversation') {
+        return { conversation_id: overrides.saveId ?? 'conv-1' };
+      }
+      if (cmd === 'list_conversations' && overrides.list) {
+        return overrides.list();
+      }
+      return undefined;
+    });
+  }
+
+  it('save() adopts the stored title for the active conversation', async () => {
+    mockHistory({
+      list: async () => [
+        {
+          id: 'conv-1',
+          title: 'Stored title',
+          model: MODEL,
+          updated_at: 0,
+          message_count: 2,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useConversationHistory());
+
+    await act(async () => {
+      await result.current.save(MESSAGES, MODEL);
+    });
+    await act(async () => {});
+
+    expect(result.current.conversationTitle).toBe('Stored title');
+  });
+
+  it('save() re-reads the title after the AI title delay', async () => {
+    let reads = 0;
+    mockHistory({
+      list: async () => {
+        reads += 1;
+        return [
+          {
+            id: 'conv-1',
+            title: reads === 1 ? 'Placeholder' : 'AI title',
+            model: MODEL,
+            updated_at: 0,
+            message_count: 2,
+          },
+        ];
+      },
+    });
+
+    const { result } = renderHook(() => useConversationHistory());
+
+    await act(async () => {
+      await result.current.save(MESSAGES, MODEL);
+    });
+    await act(async () => {});
+    expect(result.current.conversationTitle).toBe('Placeholder');
+
+    await act(async () => {
+      vi.advanceTimersByTime(2500);
+    });
+
+    expect(result.current.conversationTitle).toBe('AI title');
+  });
+
+  it('save() leaves the title untouched when the refresh fails', async () => {
+    mockHistory({
+      list: async () => {
+        throw new Error('database unavailable');
+      },
+    });
+
+    const { result } = renderHook(() => useConversationHistory());
+
+    await act(async () => {
+      await result.current.save(MESSAGES, MODEL);
+    });
+    await act(async () => {});
+
+    expect(result.current.conversationTitle).toBeNull();
+  });
+
+  it('save() clears the title when the saved row has none', async () => {
+    mockHistory({
+      list: async () => [
+        {
+          id: 'conv-1',
+          title: null,
+          model: MODEL,
+          updated_at: 0,
+          message_count: 2,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useConversationHistory());
+
+    await act(async () => {
+      await result.current.save(MESSAGES, MODEL);
+    });
+    await act(async () => {});
+
+    expect(result.current.conversationTitle).toBeNull();
+  });
+
+  it('save() survives a failed title generation', async () => {
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'save_conversation') return { conversation_id: 'conv-1' };
+      if (cmd === 'generate_title') throw new Error('provider down');
+      return undefined;
+    });
+
+    const { result } = renderHook(() => useConversationHistory());
+
+    await act(async () => {
+      await result.current.save(MESSAGES, MODEL);
+    });
+    await act(async () => {});
+
+    // The save itself succeeded; only the background title was lost.
+    expect(result.current.conversationId).toBe('conv-1');
+    expect(result.current.isSaved).toBe(true);
+  });
+
+  it('loadConversation() refreshes the title for the loaded conversation', async () => {
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'load_conversation') return [];
+      if (cmd === 'list_conversations') {
+        return [
+          {
+            id: 'conv-9',
+            title: 'Loaded title',
+            model: MODEL,
+            updated_at: 0,
+            message_count: 0,
+          },
+        ];
+      }
+      return undefined;
+    });
+
+    const { result } = renderHook(() => useConversationHistory());
+
+    await act(async () => {
+      await result.current.loadConversation('conv-9');
+    });
+    await act(async () => {});
+
+    expect(result.current.conversationTitle).toBe('Loaded title');
+  });
+
+  it('renameConversation() renames the active conversation and updates the header', async () => {
+    mockHistory({
+      list: async () => [
+        {
+          id: 'conv-1',
+          title: 'Old name',
+          model: MODEL,
+          updated_at: 0,
+          message_count: 2,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useConversationHistory());
+
+    await act(async () => {
+      await result.current.save(MESSAGES, MODEL);
+    });
+    await act(async () => {});
+
+    await act(async () => {
+      await result.current.renameConversation('conv-1', 'New name');
+    });
+
+    expect(invoke).toHaveBeenCalledWith('rename_conversation', {
+      conversationId: 'conv-1',
+      title: 'New name',
+    });
+    expect(result.current.conversationTitle).toBe('New name');
+  });
+
+  it('renameConversation() leaves the header alone for another conversation', async () => {
+    invoke.mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useConversationHistory());
+
+    await act(async () => {
+      await result.current.renameConversation('someone-else', 'New name');
+    });
+
+    expect(invoke).toHaveBeenCalledWith('rename_conversation', {
+      conversationId: 'someone-else',
+      title: 'New name',
+    });
+    expect(result.current.conversationTitle).toBeNull();
+  });
+
+  it('reset() clears the title and any pending refresh', async () => {
+    mockHistory({
+      list: async () => [
+        {
+          id: 'conv-1',
+          title: 'Title',
+          model: MODEL,
+          updated_at: 0,
+          message_count: 2,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useConversationHistory());
+
+    await act(async () => {
+      await result.current.save(MESSAGES, MODEL);
+    });
+    await act(async () => {});
+    expect(result.current.conversationTitle).toBe('Title');
+
+    act(() => {
+      result.current.reset();
+    });
+
+    expect(result.current.conversationTitle).toBeNull();
+  });
+
+  it('reset() is safe when no title refresh is pending', () => {
+    const { result } = renderHook(() => useConversationHistory());
+
+    act(() => {
+      result.current.reset();
+    });
+
+    expect(result.current.conversationTitle).toBeNull();
+  });
+
+  it('keeps a manual rename when the delayed AI title lands later', async () => {
+    mockHistory({
+      list: async () => [
+        {
+          id: 'conv-1',
+          title: 'AI title',
+          model: MODEL,
+          updated_at: 0,
+          message_count: 2,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useConversationHistory());
+
+    await act(async () => {
+      await result.current.save(MESSAGES, MODEL);
+    });
+    await act(async () => {});
+    expect(result.current.conversationTitle).toBe('AI title');
+
+    await act(async () => {
+      await result.current.renameConversation('conv-1', 'My name');
+    });
+    expect(result.current.conversationTitle).toBe('My name');
+
+    // The delayed refresh fires, but a manual name always wins.
+    await act(async () => {
+      vi.advanceTimersByTime(2500);
+    });
+    expect(result.current.conversationTitle).toBe('My name');
+  });
+
+  it('does not adopt the previous conversation title after loading another', async () => {
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'save_conversation') return { conversation_id: 'conv-a' };
+      if (cmd === 'load_conversation') return [];
+      if (cmd === 'list_conversations') {
+        return [
+          {
+            id: 'conv-a',
+            title: 'A title',
+            model: MODEL,
+            updated_at: 0,
+            message_count: 1,
+          },
+        ];
+      }
+      return undefined;
+    });
+
+    const { result } = renderHook(() => useConversationHistory());
+
+    await act(async () => {
+      await result.current.save(MESSAGES, MODEL);
+    });
+    await act(async () => {});
+    expect(result.current.conversationTitle).toBe('A title');
+
+    await act(async () => {
+      await result.current.loadConversation('conv-b');
+    });
+    await act(async () => {});
+
+    // No stored row for conv-b: the header clears rather than keeping A's name.
+    expect(result.current.conversationTitle).toBeNull();
+
+    // The refresh queued for conv-a was cancelled by the load.
+    await act(async () => {
+      vi.advanceTimersByTime(2500);
+    });
+    expect(result.current.conversationTitle).toBeNull();
+  });
+
+  it('ignores a title refresh that resolves after another conversation is loaded', async () => {
+    let resolveList: ((rows: unknown) => void) | undefined;
+    const pendingList = new Promise((resolve) => {
+      resolveList = resolve;
+    });
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'save_conversation') return { conversation_id: 'conv-a' };
+      if (cmd === 'load_conversation') return [];
+      if (cmd === 'list_conversations') return pendingList;
+      return undefined;
+    });
+
+    const { result } = renderHook(() => useConversationHistory());
+
+    await act(async () => {
+      await result.current.save(MESSAGES, MODEL);
+    });
+    await act(async () => {
+      await result.current.loadConversation('conv-b');
+    });
+
+    // The list read started for conv-a resolves only now, when conv-b is active.
+    await act(async () => {
+      resolveList!([
+        {
+          id: 'conv-a',
+          title: 'A title',
+          model: MODEL,
+          updated_at: 0,
+          message_count: 1,
+        },
+      ]);
+      await pendingList;
+    });
+
+    expect(result.current.conversationTitle).toBeNull();
+  });
 });

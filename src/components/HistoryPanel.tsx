@@ -60,6 +60,8 @@ interface HistoryPanelProps {
   onSaveAndLoad: (id: string) => void;
   /** Called when the user clicks the delete button on a row. */
   onDeleteConversation: (id: string) => Promise<void>;
+  /** Called when the user commits a rename from a row's context menu. */
+  onRenameConversation: (id: string, title: string) => Promise<void>;
   /**
    * True when the current session has unsaved messages. Causes a
    * `SwitchConfirmation` to appear before loading.
@@ -108,6 +110,7 @@ export function HistoryPanel({
   onLoadConversation,
   onSaveAndLoad,
   onDeleteConversation,
+  onRenameConversation,
   hasCurrentMessages,
   currentConversationId,
   showNewConversation,
@@ -121,6 +124,8 @@ export function HistoryPanel({
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [search, setSearch] = useState('');
   const [loadError, setLoadError] = useState(false);
+  /** True after a rename was rejected by the backend; cleared on the next try. */
+  const [renameError, setRenameError] = useState(false);
   /** Id of the conversation the user clicked when confirmation is needed. */
   const [pendingId, setPendingId] = useState<string | null>(null);
 
@@ -234,6 +239,37 @@ export function HistoryPanel({
     [onDeleteConversation, conversations],
   );
 
+  /**
+   * Applies a committed rename optimistically and rolls it back if the backend
+   * rejects it, mirroring the delete path so the row never shows a name the
+   * backend did not store.
+   */
+  const handleRename = useCallback(
+    async (id: string, title: string) => {
+      // Capture a snapshot for rollback before the optimistic update.
+      /* v8 ignore start */
+      const snapshot = conversations.find((c) => c.id === id) ?? null;
+      /* v8 ignore stop */
+      setRenameError(false);
+      setConversations((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, title } : c)),
+      );
+      try {
+        await onRenameConversation(id, title);
+      } catch {
+        setRenameError(true);
+        /* v8 ignore start */
+        if (snapshot !== null) {
+          setConversations((prev) =>
+            prev.map((c) => (c.id === id ? snapshot : c)),
+          );
+        }
+        /* v8 ignore stop */
+      }
+    },
+    [onRenameConversation, conversations],
+  );
+
   const groups = groupByDate(conversations);
   const isEmpty = conversations.length === 0 && !loadError;
 
@@ -251,6 +287,13 @@ export function HistoryPanel({
             className="w-full bg-transparent text-xs text-text-primary placeholder:text-text-secondary outline-none"
           />
         </div>
+      )}
+
+      {/* Rename failure — the row has already been rolled back to its old name. */}
+      {renameError && (
+        <p className="px-3 py-2 text-xs text-red-400 text-center border-b border-surface-border">
+          {t('history.renameError')}
+        </p>
       )}
 
       {/* Switch confirmation — overlays the list when pending */}
@@ -293,6 +336,7 @@ export function HistoryPanel({
                   isActive={conv.id === currentConversationId}
                   onSelect={handleSelect}
                   onDelete={handleDelete}
+                  onRename={handleRename}
                 />
               ))}
             </div>

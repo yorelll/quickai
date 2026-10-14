@@ -8,6 +8,7 @@
 /** Stable error keys emitted by the Rust `ApiError` struct. */
 export type ApiErrorCode =
   | 'missing_api_key'
+  | 'missing_model'
   | 'unauthorized'
   | 'forbidden'
   | 'rate_limited'

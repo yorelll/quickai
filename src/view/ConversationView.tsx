@@ -45,6 +45,26 @@ interface ConversationViewProps {
   onNewConversation?: () => void;
   /** Called when the user clicks a thumbnail to preview it. */
   onImagePreview?: (path: string) => void;
+  /** Current conversation name shown in the header. Omit to hide it. */
+  title?: string | null;
+  /** Called with the new name when the user renames from the header. */
+  onRenameTitle?: (title: string) => void;
+  /** True while the window is pinned open against click-away hiding. */
+  isPinned?: boolean;
+  /** Called when the pin button is clicked. Omit to hide the button. */
+  onTogglePin?: () => void;
+  /**
+   * Bumped by the parent to force the message list to the bottom (e.g. after
+   * loading a saved conversation, or on Ctrl+End). Each new value re-enables
+   * auto-scroll and pins the scroller to the latest message.
+   */
+  scrollToBottomSignal?: number;
+  /**
+   * Bumped by the parent on Ctrl+Home to scroll the transcript back to the
+   * top. Undefined until the shortcut is first used, so mounting does not
+   * interfere with the initial scroll-to-bottom.
+   */
+  scrollToTopSignal?: number;
 }
 
 /**
@@ -68,6 +88,12 @@ export function ConversationView({
   onHistoryOpen,
   onNewConversation,
   onImagePreview,
+  title,
+  onRenameTitle,
+  isPinned,
+  onTogglePin,
+  scrollToBottomSignal = 0,
+  scrollToTopSignal,
 }: ConversationViewProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -152,6 +178,41 @@ export function ConversationView({
     return () => cancelAnimationFrame(raf);
   }, [messages, isGenerating]);
 
+  /**
+   * Force the scroller to the latest message when the parent requests it
+   * (conversation load, Ctrl+End). Auto-scroll is re-enabled so the view stays
+   * pinned to the bottom for the messages that follow.
+   */
+  useEffect(() => {
+    shouldAutoScrollRef.current = true;
+    const container = scrollContainerRef.current;
+    /* v8 ignore start -- ref is always set after mount */
+    if (!container) return;
+    /* v8 ignore stop */
+    container.scrollTop = container.scrollHeight;
+  }, [scrollToBottomSignal]);
+
+  /**
+   * Ctrl+Home scrolls the transcript back to the top. Auto-scroll is disabled
+   * so arriving tokens do not immediately pull the view down again.
+   *
+   * The signal value present when this transcript mounted is ignored: a
+   * leftover from a previous session must not open a fresh chat with
+   * auto-scroll already off.
+   */
+  const mountTopSignalRef = useRef(scrollToTopSignal);
+
+  useEffect(() => {
+    if (scrollToTopSignal === undefined) return;
+    if (scrollToTopSignal === mountTopSignalRef.current) return;
+    shouldAutoScrollRef.current = false;
+    const container = scrollContainerRef.current;
+    /* v8 ignore start -- ref is always set after mount */
+    if (!container) return;
+    /* v8 ignore stop */
+    container.scrollTop = 0;
+  }, [scrollToTopSignal]);
+
   return (
     <motion.div
       key="chat-area"
@@ -169,6 +230,10 @@ export function ConversationView({
         canSave={canSave}
         onNewConversation={onNewConversation}
         onHistoryOpen={onHistoryOpen}
+        title={title}
+        onRenameTitle={onRenameTitle}
+        isPinned={isPinned}
+        onTogglePin={onTogglePin}
       />
 
       <div

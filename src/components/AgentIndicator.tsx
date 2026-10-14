@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentStatus } from '../hooks/useAgentMode';
 import type { AgentAction } from '../types/agent';
 import { formatAgentAction } from '../utils/agentAction';
+import { MarkdownRenderer } from './MarkdownRenderer';
 import { useTranslation, type TranslationKey } from '../i18n';
 
 interface AgentIndicatorProps {
@@ -17,6 +18,8 @@ interface AgentIndicatorProps {
   onStop: () => void;
   onConfirm: () => void;
   onReject: () => void;
+  /** Clears the panel once a run has finished or failed. */
+  onDismiss: () => void;
 }
 
 const statusLabels: Record<AgentStatus, TranslationKey> = {
@@ -38,6 +41,25 @@ const statusColors: Record<AgentStatus, string> = {
   done: 'bg-emerald-400',
   error: 'bg-red-400',
 };
+
+/** Hoisted dismiss (X) icon. */
+const CLOSE_ICON = (
+  <svg
+    width="10"
+    height="10"
+    viewBox="0 0 10 10"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    aria-hidden="true"
+  >
+    <path
+      d="M1.5 1.5L8.5 8.5M8.5 1.5L1.5 8.5"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+    />
+  </svg>
+);
 
 const AgentConfirmation = memo(function AgentConfirmation({
   action,
@@ -71,6 +93,7 @@ const AgentConfirmation = memo(function AgentConfirmation({
           {t('agent.deny')}
         </button>
       </div>
+      <p className="text-[10px] text-neutral-500">{t('agent.keyboardHint')}</p>
     </div>
   );
 });
@@ -86,6 +109,7 @@ export function AgentIndicator({
   onStop,
   onConfirm,
   onReject,
+  onDismiss,
 }: AgentIndicatorProps) {
   const { t } = useTranslation();
   // Terminal states keep the panel mounted so the closing summary and the
@@ -119,14 +143,27 @@ export function AgentIndicator({
                 {reasoning}
               </span>
             )}
-            {isActive && (
-              <button
-                onClick={onStop}
-                className="ml-auto text-neutral-400 hover:text-red-400 transition-colors text-xs font-medium"
-              >
-                {t('agent.stop')}
-              </button>
-            )}
+            <div className="ml-auto flex items-center gap-1">
+              {/* A running agent is aborted with Stop; Dismiss only closes a
+                  finished/failed panel. */}
+              {isActive ? (
+                <button
+                  onClick={onStop}
+                  className="text-neutral-400 hover:text-red-400 transition-colors text-xs font-medium cursor-pointer"
+                >
+                  {t('agent.stop')}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onDismiss}
+                  aria-label={t('agent.dismiss')}
+                  className="w-5 h-5 flex items-center justify-center rounded text-neutral-400 hover:text-text-primary hover:bg-white/8 transition-colors duration-150 cursor-pointer"
+                >
+                  {CLOSE_ICON}
+                </button>
+              )}
+            </div>
           </div>
           {status === 'error' && lastResult && (
             <div className="px-3 py-1.5 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-300 leading-relaxed">
@@ -134,8 +171,8 @@ export function AgentIndicator({
             </div>
           )}
           {summary && (
-            <div className="px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-xs text-emerald-200 leading-relaxed">
-              {summary}
+            <div className="px-3 py-2 bg-surface-elevated border border-surface-border rounded-lg text-xs text-text-primary max-h-[200px] overflow-y-auto select-text">
+              <MarkdownRenderer content={summary} />
             </div>
           )}
           {pendingConfirmation && (

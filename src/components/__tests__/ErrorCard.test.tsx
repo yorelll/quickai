@@ -6,6 +6,7 @@ import { en } from '../../i18n/en';
 describe('errorTitleKey', () => {
   it.each([
     ['missing_api_key', 'error.missingApiKey'],
+    ['missing_model', 'error.missingModel'],
     ['unauthorized', 'error.unauthorized'],
     ['forbidden', 'error.forbidden'],
     ['rate_limited', 'error.rateLimited'],
@@ -30,6 +31,11 @@ describe('ErrorCard', () => {
     render(<ErrorCard code="unauthorized" message="401 from provider" />);
     expect(screen.getByText(en['error.unauthorized'])).toBeInTheDocument();
     expect(screen.getByText('401 from provider')).toBeInTheDocument();
+  });
+
+  it('localizes a missing chat model and points the user at Settings', () => {
+    render(<ErrorCard code="missing_model" message="no model configured" />);
+    expect(screen.getByText(en['error.missingModel'])).toBeInTheDocument();
   });
 
   it('omits the subtitle when the message is empty', () => {

@@ -1608,4 +1608,46 @@ describe('AskBarView', () => {
       expect(mirror.scrollTop).toBe(42);
     });
   });
+
+  describe('icon tooltips', () => {
+    it('shows the history tooltip on hover', () => {
+      render(
+        <AskBarView
+          {...IMAGE_DEFAULTS}
+          query=""
+          setQuery={vi.fn()}
+          isChatMode={false}
+          isGenerating={false}
+          onSubmit={vi.fn()}
+          onCancel={vi.fn()}
+          inputRef={makeRef()}
+          onHistoryOpen={vi.fn()}
+        />,
+      );
+      const btn = screen.getByRole('button', { name: 'Open history' });
+      fireEvent.mouseEnter(btn.parentElement!);
+      expect(
+        screen.getByText('Conversation history (Ctrl+H)'),
+      ).toBeInTheDocument();
+    });
+
+    it('shows the settings tooltip on hover', () => {
+      render(
+        <AskBarView
+          {...IMAGE_DEFAULTS}
+          query=""
+          setQuery={vi.fn()}
+          isChatMode={false}
+          isGenerating={false}
+          onSubmit={vi.fn()}
+          onCancel={vi.fn()}
+          inputRef={makeRef()}
+          onSettingsOpen={vi.fn()}
+        />,
+      );
+      const btn = screen.getByRole('button', { name: 'Open settings' });
+      fireEvent.mouseEnter(btn.parentElement!);
+      expect(screen.getByText('Open settings')).toBeInTheDocument();
+    });
+  });
 });

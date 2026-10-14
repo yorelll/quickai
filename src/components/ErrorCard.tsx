@@ -9,6 +9,8 @@ export function errorTitleKey(code: string): TranslationKey | null {
   switch (code) {
     case 'missing_api_key':
       return 'error.missingApiKey';
+    case 'missing_model':
+      return 'error.missingModel';
     case 'unauthorized':
       return 'error.unauthorized';
     case 'forbidden':
@@ -52,6 +54,7 @@ export function ErrorCard({ code, message }: ErrorCardProps) {
   const muted = titleKey === null || code === 'cancelled';
   const warning =
     code === 'missing_api_key' ||
+    code === 'missing_model' ||
     code === 'model_not_found' ||
     code === 'bad_request' ||
     code === 'rate_limited' ||

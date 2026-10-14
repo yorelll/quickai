@@ -2,6 +2,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { HistoryPanel } from '../HistoryPanel';
 import type { ConversationSummary } from '../../types/history';
+import { en } from '../../i18n/en';
 
 const NOW = Date.now();
 const YESTERDAY = NOW - 86_400_000;
@@ -39,6 +40,7 @@ function makeProps(
     onLoadConversation: vi.fn(),
     onSaveAndLoad: vi.fn(),
     onDeleteConversation: vi.fn(),
+    onRenameConversation: vi.fn(),
     hasCurrentMessages: false,
     showNewConversation: false,
     onNewConversation: vi.fn(),
@@ -384,5 +386,51 @@ describe('HistoryPanel', () => {
     await act(async () => {});
 
     expect(screen.getByText(/couldn't load history/i)).toBeInTheDocument();
+  });
+
+  it('renames a conversation from the row context menu', async () => {
+    const props = makeProps();
+    render(<HistoryPanel {...props} />);
+
+    await act(async () => {});
+
+    fireEvent.contextMenu(screen.getByText('React basics'));
+    fireEvent.click(screen.getByText('Rename'));
+
+    const input = screen.getByRole('textbox', { name: 'Rename' });
+    fireEvent.change(input, { target: { value: 'React advanced' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    // Optimistic update keeps the row correct without a refetch.
+    expect(screen.getByText('React advanced')).toBeInTheDocument();
+    expect(props.onRenameConversation).toHaveBeenCalledWith(
+      'c1',
+      'React advanced',
+    );
+  });
+
+  it('rolls a rejected rename back and reports it', async () => {
+    const props = makeProps({
+      onRenameConversation: vi.fn(async () => {
+        throw new Error('rename failed');
+      }),
+    });
+    render(<HistoryPanel {...props} />);
+
+    await act(async () => {});
+
+    fireEvent.contextMenu(screen.getByText('React basics'));
+    fireEvent.click(screen.getByText('Rename'));
+
+    const input = screen.getByRole('textbox', { name: 'Rename' });
+    fireEvent.change(input, { target: { value: 'Rejected name' } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+
+    // The row is restored to the name the backend still holds.
+    expect(screen.getByText('React basics')).toBeInTheDocument();
+    expect(screen.queryByText('Rejected name')).toBeNull();
+    expect(screen.getByText(en['history.renameError'])).toBeInTheDocument();
   });
 });

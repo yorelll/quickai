@@ -609,4 +609,217 @@ describe('ConversationView', () => {
       expect(screen.getByText(`Message ${i}`)).toBeInTheDocument();
     }
   });
+
+  it('pins the transcript to the bottom when scrollToBottomSignal changes', () => {
+    const messages = [
+      { id: '1', role: 'user' as const, content: 'first' },
+      { id: '2', role: 'assistant' as const, content: 'reply' },
+    ];
+    const { container, rerender } = render(
+      <ConversationView
+        messages={messages}
+        isGenerating={false}
+        onClose={vi.fn()}
+        onMinimize={vi.fn()}
+        scrollToBottomSignal={0}
+      />,
+    );
+
+    const scrollEl = container.querySelector(
+      '.chat-messages-scroll',
+    ) as HTMLElement;
+    Object.defineProperty(scrollEl, 'scrollHeight', {
+      value: 500,
+      configurable: true,
+    });
+    Object.defineProperty(scrollEl, 'scrollTop', {
+      value: 0,
+      configurable: true,
+      writable: true,
+    });
+
+    rerender(
+      <ConversationView
+        messages={messages}
+        isGenerating={false}
+        onClose={vi.fn()}
+        onMinimize={vi.fn()}
+        scrollToBottomSignal={1}
+      />,
+    );
+
+    expect(scrollEl.scrollTop).toBe(500);
+  });
+
+  it('scrolls the transcript to the top when scrollToTopSignal changes', () => {
+    const messages = [
+      { id: '1', role: 'user' as const, content: 'first' },
+      { id: '2', role: 'assistant' as const, content: 'reply' },
+    ];
+    const { container, rerender } = render(
+      <ConversationView
+        messages={messages}
+        isGenerating={false}
+        onClose={vi.fn()}
+        onMinimize={vi.fn()}
+      />,
+    );
+
+    const scrollEl = container.querySelector(
+      '.chat-messages-scroll',
+    ) as HTMLElement;
+    Object.defineProperty(scrollEl, 'scrollTop', {
+      value: 300,
+      configurable: true,
+      writable: true,
+    });
+
+    rerender(
+      <ConversationView
+        messages={messages}
+        isGenerating={false}
+        onClose={vi.fn()}
+        onMinimize={vi.fn()}
+        scrollToTopSignal={1}
+      />,
+    );
+    expect(scrollEl.scrollTop).toBe(0);
+
+    // Auto-scroll stays off, so arriving tokens do not pull the view back down.
+    Object.defineProperty(scrollEl, 'scrollHeight', {
+      value: 800,
+      configurable: true,
+    });
+    rerender(
+      <ConversationView
+        messages={[
+          ...messages,
+          { id: '3', role: 'assistant' as const, content: 'more tokens' },
+        ]}
+        isGenerating
+        onClose={vi.fn()}
+        onMinimize={vi.fn()}
+        scrollToTopSignal={1}
+      />,
+    );
+    expect(scrollEl.scrollTop).toBe(0);
+  });
+
+  it('ignores a scroll-to-top signal left over from a previous session', () => {
+    const messages = [
+      { id: '1', role: 'user' as const, content: 'first' },
+      { id: '2', role: 'assistant' as const, content: 'reply' },
+    ];
+    const { container, rerender } = render(
+      <ConversationView
+        messages={messages}
+        isGenerating={false}
+        onClose={vi.fn()}
+        onMinimize={vi.fn()}
+        scrollToTopSignal={1}
+      />,
+    );
+
+    const scrollEl = container.querySelector(
+      '.chat-messages-scroll',
+    ) as HTMLElement;
+    Object.defineProperty(scrollEl, 'scrollHeight', {
+      value: 500,
+      configurable: true,
+    });
+    Object.defineProperty(scrollEl, 'scrollTop', {
+      value: 0,
+      configurable: true,
+      writable: true,
+    });
+
+    // A fresh transcript must still auto-scroll: the stale signal present at
+    // mount did not switch auto-scroll off.
+    rerender(
+      <ConversationView
+        messages={[
+          ...messages,
+          { id: '3', role: 'assistant' as const, content: 'more tokens' },
+        ]}
+        isGenerating
+        onClose={vi.fn()}
+        onMinimize={vi.fn()}
+        scrollToTopSignal={1}
+      />,
+    );
+
+    expect(scrollEl.scrollTop).toBe(500);
+  });
+
+  describe('header conversation title', () => {
+    it('renders the title and forwards renames', () => {
+      const onRenameTitle = vi.fn();
+      render(
+        <ConversationView
+          messages={[]}
+          isGenerating={false}
+          onClose={vi.fn()}
+          onMinimize={vi.fn()}
+          title="Weekly plan"
+          onRenameTitle={onRenameTitle}
+        />,
+      );
+
+      fireEvent.contextMenu(
+        screen.getByRole('button', { name: 'Rename conversation' }),
+      );
+      const input = screen.getByRole('textbox', { name: 'Conversation name' });
+      fireEvent.change(input, { target: { value: 'Sprint plan' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+
+      expect(onRenameTitle).toHaveBeenCalledWith('Sprint plan');
+    });
+
+    it('renders no title when none is given', () => {
+      render(
+        <ConversationView
+          messages={[]}
+          isGenerating={false}
+          onClose={vi.fn()}
+          onMinimize={vi.fn()}
+        />,
+      );
+      expect(
+        screen.queryByRole('button', { name: 'Rename conversation' }),
+      ).toBeNull();
+    });
+  });
+
+  describe('pin control', () => {
+    it('forwards the pin toggle and reflects the pinned state', () => {
+      const onTogglePin = vi.fn();
+      const { rerender } = render(
+        <ConversationView
+          messages={[]}
+          isGenerating={false}
+          onClose={vi.fn()}
+          onMinimize={vi.fn()}
+          isPinned={false}
+          onTogglePin={onTogglePin}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Pin window' }));
+      expect(onTogglePin).toHaveBeenCalledOnce();
+
+      rerender(
+        <ConversationView
+          messages={[]}
+          isGenerating={false}
+          onClose={vi.fn()}
+          onMinimize={vi.fn()}
+          isPinned
+          onTogglePin={onTogglePin}
+        />,
+      );
+      expect(
+        screen.getByRole('button', { name: 'Unpin window' }),
+      ).toBeInTheDocument();
+    });
+  });
 });

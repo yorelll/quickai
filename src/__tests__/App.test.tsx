@@ -4509,6 +4509,34 @@ describe('App', () => {
       await act(async () => {});
     });
 
+    it('opens Settings on Ctrl+,', async () => {
+      render(<App />);
+      await act(async () => {});
+
+      await showOverlay();
+
+      act(() => {
+        fireEvent.keyDown(window, { key: ',', ctrlKey: true });
+      });
+      await act(async () => {});
+
+      expect(invoke).toHaveBeenCalledWith('open_settings_window');
+    });
+
+    it('opens Settings on Cmd+,', async () => {
+      render(<App />);
+      await act(async () => {});
+
+      await showOverlay();
+
+      act(() => {
+        fireEvent.keyDown(window, { key: ',', metaKey: true });
+      });
+      await act(async () => {});
+
+      expect(invoke).toHaveBeenCalledWith('open_settings_window');
+    });
+
     it('copies last response on Ctrl+Shift+C', async () => {
       const writeText = vi.fn().mockResolvedValue(undefined);
       Object.assign(navigator, { clipboard: { writeText } });
@@ -4559,6 +4587,483 @@ describe('App', () => {
       await act(async () => {});
 
       expect(writeText).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('chat header', () => {
+    it('shows the conversation name and renames it from the header', async () => {
+      enableChannelCaptureWithResponses({
+        save_conversation: { conversation_id: 'conv-1' },
+        list_conversations: [
+          {
+            id: 'conv-1',
+            title: 'My chat',
+            model: 'gpt-4o',
+            updated_at: Date.now(),
+            message_count: 2,
+          },
+        ],
+      });
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.change(textarea, { target: { value: 'hello' } });
+      act(() => {
+        fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      });
+      await act(async () => {});
+      act(() => {
+        getLastChannel()?.simulateMessage({ type: 'Token', data: 'Hi' });
+      });
+      await act(async () => {
+        getLastChannel()?.simulateMessage({ type: 'Done' });
+      });
+
+      // Ctrl+S saves and the stored placeholder title lands in the header.
+      act(() => {
+        fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+      });
+      await act(async () => {});
+      await act(async () => {});
+
+      expect(screen.getByText('My chat')).toBeInTheDocument();
+
+      fireEvent.contextMenu(
+        screen.getByRole('button', { name: 'Rename conversation' }),
+      );
+      const input = screen.getByRole('textbox', { name: 'Conversation name' });
+      fireEvent.change(input, { target: { value: 'Renamed' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+
+      expect(invoke).toHaveBeenCalledWith('rename_conversation', {
+        conversationId: 'conv-1',
+        title: 'Renamed',
+      });
+    });
+
+    it('keeps the previous name when a header rename is rejected', async () => {
+      enableChannelCaptureWithResponses({
+        save_conversation: { conversation_id: 'conv-1' },
+        list_conversations: [
+          {
+            id: 'conv-1',
+            title: 'My chat',
+            model: 'gpt-4o',
+            updated_at: Date.now(),
+            message_count: 2,
+          },
+        ],
+      });
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.change(textarea, { target: { value: 'hello' } });
+      act(() => {
+        fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      });
+      await act(async () => {});
+      act(() => {
+        getLastChannel()?.simulateMessage({ type: 'Done' });
+      });
+      await act(async () => {});
+
+      act(() => {
+        fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+      });
+      await act(async () => {});
+      await act(async () => {});
+      expect(screen.getByText('My chat')).toBeInTheDocument();
+
+      invoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'rename_conversation') throw new Error('nope');
+      });
+
+      fireEvent.contextMenu(
+        screen.getByRole('button', { name: 'Rename conversation' }),
+      );
+      const input = screen.getByRole('textbox', { name: 'Conversation name' });
+      fireEvent.change(input, { target: { value: 'Rejected' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      await act(async () => {});
+
+      // The header keeps the name that is actually stored.
+      expect(screen.getByText('My chat')).toBeInTheDocument();
+    });
+
+    it('renders no title for an unsaved conversation', async () => {
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.change(textarea, { target: { value: 'hello' } });
+      act(() => {
+        fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      });
+      await act(async () => {});
+
+      expect(
+        screen.queryByRole('button', { name: 'Rename conversation' }),
+      ).toBeNull();
+    });
+
+    it('renames a conversation from the history panel', async () => {
+      enableChannelCaptureWithResponses({
+        list_conversations: [
+          {
+            id: 'c1',
+            title: 'Old name',
+            model: 'gpt-4o',
+            updated_at: Date.now(),
+            message_count: 2,
+          },
+        ],
+      });
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.change(textarea, { target: { value: 'hi' } });
+      act(() => {
+        fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      });
+      await act(async () => {});
+      act(() => {
+        getLastChannel()?.simulateMessage({ type: 'Done' });
+      });
+      await act(async () => {});
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open history' }));
+      await act(async () => {});
+
+      fireEvent.contextMenu(screen.getByText('Old name'));
+      fireEvent.click(screen.getByText('Rename'));
+      const input = screen.getByRole('textbox', { name: 'Rename' });
+      fireEvent.change(input, { target: { value: 'New name' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+
+      expect(invoke).toHaveBeenCalledWith('rename_conversation', {
+        conversationId: 'c1',
+        title: 'New name',
+      });
+    });
+  });
+
+  describe('window pin', () => {
+    it('toggles the pin and starts unpinned on reopen', async () => {
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      // Opening the overlay clears any previous pin.
+      expect(invoke).toHaveBeenCalledWith('set_overlay_pinned', {
+        pinned: false,
+      });
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.change(textarea, { target: { value: 'hi' } });
+      act(() => {
+        fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      });
+      await act(async () => {});
+
+      fireEvent.click(screen.getByRole('button', { name: 'Pin window' }));
+      expect(invoke).toHaveBeenCalledWith('set_overlay_pinned', {
+        pinned: true,
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Unpin window' }));
+      expect(invoke).toHaveBeenCalledWith('set_overlay_pinned', {
+        pinned: false,
+      });
+    });
+
+    it('rolls the pin back when the backend rejects the change', async () => {
+      render(<App />);
+      await act(async () => {});
+
+      invoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'set_overlay_pinned') throw new Error('refused');
+      });
+      await showOverlay();
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.change(textarea, { target: { value: 'hi' } });
+      act(() => {
+        fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      });
+      await act(async () => {});
+
+      fireEvent.click(screen.getByRole('button', { name: 'Pin window' }));
+      await act(async () => {});
+
+      // The failed toggle is undone, so the button still offers to pin.
+      expect(
+        screen.getByRole('button', { name: 'Pin window' }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe('agent keyboard control', () => {
+    async function startAgentAwaitingConfirmation() {
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.change(textarea, { target: { value: '/do open notepad' } });
+      await act(async () => {
+        fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      });
+      await act(async () => {
+        emitTauriEvent('quickai://agent', {
+          kind: 'confirmation_required',
+          action: { type: 'click', x: 10, y: 20 },
+        });
+      });
+    }
+
+    it('allows the pending action with 1', async () => {
+      await startAgentAwaitingConfirmation();
+
+      act(() => {
+        fireEvent.keyDown(window, { key: '1' });
+      });
+      await act(async () => {});
+
+      expect(invoke).toHaveBeenCalledWith('confirm_agent_action', {
+        actionId: null,
+      });
+    });
+
+    it('denies the pending action with 2', async () => {
+      await startAgentAwaitingConfirmation();
+
+      act(() => {
+        fireEvent.keyDown(window, { key: '2' });
+      });
+      await act(async () => {});
+
+      expect(invoke).toHaveBeenCalledWith('reject_agent_action', {
+        actionId: null,
+      });
+    });
+
+    it('aborts the run with Ctrl+C', async () => {
+      await startAgentAwaitingConfirmation();
+
+      act(() => {
+        fireEvent.keyDown(window, { key: 'c', ctrlKey: true });
+      });
+      await act(async () => {});
+
+      expect(invoke).toHaveBeenCalledWith('stop_agent_mode');
+    });
+
+    it('aborts the run with Cmd+C', async () => {
+      await startAgentAwaitingConfirmation();
+
+      act(() => {
+        fireEvent.keyDown(window, { key: 'C', metaKey: true });
+      });
+      await act(async () => {});
+
+      expect(invoke).toHaveBeenCalledWith('stop_agent_mode');
+    });
+
+    it('ignores other keys while a confirmation is pending', async () => {
+      await startAgentAwaitingConfirmation();
+
+      act(() => {
+        fireEvent.keyDown(window, { key: '3' });
+      });
+      await act(async () => {});
+
+      expect(invoke).not.toHaveBeenCalledWith(
+        'confirm_agent_action',
+        expect.anything(),
+      );
+      expect(invoke).not.toHaveBeenCalledWith(
+        'reject_agent_action',
+        expect.anything(),
+      );
+    });
+
+    it('does not act on keys typed into the input box', async () => {
+      await startAgentAwaitingConfirmation();
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      act(() => {
+        fireEvent.keyDown(textarea, { key: '1' });
+      });
+      await act(async () => {});
+
+      expect(invoke).not.toHaveBeenCalledWith(
+        'confirm_agent_action',
+        expect.anything(),
+      );
+    });
+
+    it('does not act on keys typed into a contenteditable field', async () => {
+      await startAgentAwaitingConfirmation();
+
+      const editable = document.createElement('div');
+      Object.defineProperty(editable, 'isContentEditable', { value: true });
+      document.body.appendChild(editable);
+
+      act(() => {
+        fireEvent.keyDown(editable, { key: '1' });
+      });
+      await act(async () => {});
+
+      expect(invoke).not.toHaveBeenCalledWith(
+        'confirm_agent_action',
+        expect.anything(),
+      );
+      editable.remove();
+    });
+
+    it('ignores agent shortcuts when no confirmation is pending', async () => {
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      act(() => {
+        fireEvent.keyDown(window, { key: '1' });
+      });
+      await act(async () => {});
+
+      expect(invoke).not.toHaveBeenCalledWith(
+        'confirm_agent_action',
+        expect.anything(),
+      );
+    });
+  });
+
+  describe('agent panel dismissal', () => {
+    it('clears the panel when Dismiss is clicked', async () => {
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.change(textarea, { target: { value: '/do open notepad' } });
+      await act(async () => {
+        fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      });
+      await act(async () => {
+        emitTauriEvent('quickai://agent', {
+          kind: 'done',
+          summary: 'Opened Notepad and typed the note.',
+        });
+      });
+      expect(screen.getByText('Done')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+
+      expect(screen.queryByText('Done')).toBeNull();
+      expect(
+        screen.queryByText('Opened Notepad and typed the note.'),
+      ).toBeNull();
+    });
+  });
+
+  describe('Ctrl+End', () => {
+    it('moves focus to the input box on Ctrl+End', async () => {
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      textarea.blur();
+      expect(document.activeElement).not.toBe(textarea);
+
+      act(() => {
+        fireEvent.keyDown(window, { key: 'End', ctrlKey: true });
+      });
+
+      expect(document.activeElement).toBe(textarea);
+    });
+
+    it('moves focus to the input box on Cmd+End', async () => {
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      textarea.blur();
+
+      act(() => {
+        fireEvent.keyDown(window, { key: 'End', metaKey: true });
+      });
+
+      expect(document.activeElement).toBe(textarea);
+    });
+
+    it('leaves Ctrl+End to the input box when it already has focus', async () => {
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const notCancelled = fireEvent.keyDown(textarea, {
+        key: 'End',
+        ctrlKey: true,
+      });
+
+      // The native caret-to-end behaviour is preserved inside the field.
+      expect(notCancelled).toBe(true);
+    });
+  });
+
+  describe('Ctrl+Home', () => {
+    it('scrolls the transcript to the top on Ctrl+Home', async () => {
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      textarea.blur();
+
+      // The handler consumes the key (preventDefault) and can fire repeatedly.
+      expect(fireEvent.keyDown(window, { key: 'Home', ctrlKey: true })).toBe(
+        false,
+      );
+      expect(fireEvent.keyDown(window, { key: 'Home', ctrlKey: true })).toBe(
+        false,
+      );
+    });
+
+    it('scrolls the transcript to the top on Cmd+Home', async () => {
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      textarea.blur();
+
+      expect(fireEvent.keyDown(window, { key: 'Home', metaKey: true })).toBe(
+        false,
+      );
+    });
+
+    it('leaves Ctrl+Home to the input box when it already has focus', async () => {
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const notCancelled = fireEvent.keyDown(textarea, {
+        key: 'Home',
+        ctrlKey: true,
+      });
+
+      expect(notCancelled).toBe(true);
     });
   });
 });

@@ -31,6 +31,8 @@ interface UseAgentModeReturn {
   stop: () => Promise<void>;
   confirmAction: () => Promise<void>;
   rejectAction: () => Promise<void>;
+  /** Clears a finished/failed run so the panel disappears. */
+  dismiss: () => void;
 }
 
 /**
@@ -144,6 +146,19 @@ export function useAgentMode(): UseAgentModeReturn {
     }
   }, []);
 
+  /**
+   * Clears the panel after a run finished or failed. Terminal state is a
+   * display-only concern, so this only resets the local status/fields.
+   */
+  const dismiss = useCallback(() => {
+    setStatus('idle');
+    setLastAction(null);
+    setLastResult(null);
+    setReasoning(null);
+    setSummary(null);
+    setPendingConfirmation(null);
+  }, []);
+
   return {
     isActive,
     status,
@@ -156,5 +171,6 @@ export function useAgentMode(): UseAgentModeReturn {
     stop,
     confirmAction,
     rejectAction,
+    dismiss,
   };
 }

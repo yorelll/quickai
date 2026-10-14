@@ -13,6 +13,7 @@
 
 import { memo } from 'react';
 import { Tooltip } from './Tooltip';
+import { ConversationTitle } from './ConversationTitle';
 import { useTranslation } from '../i18n';
 
 /** Hoisted bookmark icon — save/saved state toggled via fill class. */
@@ -84,6 +85,24 @@ const HISTORY_ICON = (
   </svg>
 );
 
+/** Hoisted pin icon — the pinned state is signalled by colour, not fill. */
+const PIN_ICON = (
+  <svg
+    width="13"
+    height="13"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M12 17v5" />
+    <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+  </svg>
+);
+
 interface WindowControlsProps {
   /** Triggers the overlay hide animation sequence. */
   onClose: () => void;
@@ -114,6 +133,17 @@ interface WindowControlsProps {
    * Omit to hide the button entirely.
    */
   onNewConversation?: () => void;
+  /**
+   * Current conversation name shown in the header. When omitted (or null)
+   * no title is rendered.
+   */
+  title?: string | null;
+  /** Called with the new name when the user renames via the header title. */
+  onRenameTitle?: (title: string) => void;
+  /** True while the window is pinned open against click-away hiding. */
+  isPinned?: boolean;
+  /** Called when the pin button is clicked. Omit to hide the button. */
+  onTogglePin?: () => void;
 }
 
 export const WindowControls = memo(function WindowControls({
@@ -124,6 +154,10 @@ export const WindowControls = memo(function WindowControls({
   canSave = false,
   onHistoryOpen,
   onNewConversation,
+  title,
+  onRenameTitle,
+  isPinned = false,
+  onTogglePin,
 }: WindowControlsProps) {
   const { t } = useTranslation();
   const saveDisabled = !isSaved && !canSave;
@@ -182,7 +216,33 @@ export const WindowControls = memo(function WindowControls({
               </button>
             </Tooltip>
           )}
+
+          {onTogglePin !== undefined && (
+            <Tooltip
+              label={isPinned ? t('window.unpinTip') : t('window.pinTip')}
+            >
+              <button
+                type="button"
+                onClick={onTogglePin}
+                aria-label={isPinned ? t('window.unpin') : t('window.pin')}
+                aria-pressed={isPinned}
+                className={`w-7 h-7 flex items-center justify-center rounded-lg transition-colors duration-150 cursor-pointer ${
+                  isPinned
+                    ? 'text-primary bg-primary/10'
+                    : 'text-text-secondary hover:text-text-primary hover:bg-white/5'
+                }`}
+              >
+                {PIN_ICON}
+              </button>
+            </Tooltip>
+          )}
         </div>
+
+        {title && onRenameTitle !== undefined && (
+          <div className="flex-1 min-w-0 px-2">
+            <ConversationTitle title={title} onRename={onRenameTitle} />
+          </div>
+        )}
 
         {/* Right side: Windows window controls */}
         <div className="ml-auto flex items-center">

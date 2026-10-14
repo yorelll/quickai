@@ -603,39 +603,43 @@ export function AskBarView({
           {/* Compact history entry point: ask-bar mode only. In chat mode the
             history button lives in the ConversationView header. */}
           {!isChatMode && onHistoryOpen && (
-            <button
-              type="button"
-              onClick={onHistoryOpen}
-              aria-label={t('ask.openHistory')}
-              className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-white/8 transition-colors duration-150 cursor-pointer outline-none"
-            >
-              {HISTORY_ICON}
-            </button>
+            <Tooltip label={t('window.historyTip')}>
+              <button
+                type="button"
+                onClick={onHistoryOpen}
+                aria-label={t('ask.openHistory')}
+                className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-white/8 transition-colors duration-150 cursor-pointer outline-none"
+              >
+                {HISTORY_ICON}
+              </button>
+            </Tooltip>
           )}
 
           {/* Settings gear icon. */}
           {onSettingsOpen && (
-            <button
-              type="button"
-              onClick={onSettingsOpen}
-              aria-label={t('ask.openSettings')}
-              className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-white/8 transition-colors duration-150 cursor-pointer outline-none"
-            >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 20 20"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
+            <Tooltip label={t('ask.openSettings')}>
+              <button
+                type="button"
+                onClick={onSettingsOpen}
+                aria-label={t('ask.openSettings')}
+                className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-white/8 transition-colors duration-150 cursor-pointer outline-none"
               >
-                <path
-                  fillRule="evenodd"
-                  clipRule="evenodd"
-                  d="M8.257 3.099A1 1 0 019.26 2h1.48a1 1 0 01.997.917l.082.827a6.073 6.073 0 011.387.8l.696-.442a1 1 0 011.244.206l1.045 1.045a1 1 0 01.206 1.244l-.442.696a6.073 6.073 0 01.8 1.387l.827.082A1 1 0 0118 9.26v1.48a1 1 0 01-.917.997l-.827.082a6.073 6.073 0 01-.8 1.387l.442.696a1 1 0 01-.206 1.244l-1.045 1.045a1 1 0 01-1.244.206l-.696-.442a6.073 6.073 0 01-1.387.8l-.082.827A1 1 0 0110.74 18H9.26a1 1 0 01-.997-.917l-.082-.827a6.073 6.073 0 01-1.387-.8l-.696.442a1 1 0 01-1.244-.206l-1.045-1.045a1 1 0 01-.206-1.244l.442-.696a6.073 6.073 0 01-.8-1.387l-.827-.082A1 1 0 012 10.74V9.26a1 1 0 01.917-.997l.827-.082a6.073 6.073 0 01.8-1.387l-.442-.696a1 1 0 01.206-1.244l1.045-1.045a1 1 0 011.244-.206l.696.442a6.073 6.073 0 011.387-.8l.082-.827zM10 13a3 3 0 100-6 3 3 0 000 6z"
-                  fill="currentColor"
-                />
-              </svg>
-            </button>
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    fillRule="evenodd"
+                    clipRule="evenodd"
+                    d="M8.257 3.099A1 1 0 019.26 2h1.48a1 1 0 01.997.917l.082.827a6.073 6.073 0 011.387.8l.696-.442a1 1 0 011.244.206l1.045 1.045a1 1 0 01.206 1.244l-.442.696a6.073 6.073 0 01.8 1.387l.827.082A1 1 0 0118 9.26v1.48a1 1 0 01-.917.997l-.827.082a6.073 6.073 0 01-.8 1.387l.442.696a1 1 0 01-.206 1.244l-1.045 1.045a1 1 0 01-1.244.206l-.696-.442a6.073 6.073 0 01-1.387.8l-.082.827A1 1 0 0110.74 18H9.26a1 1 0 01-.997-.917l-.082-.827a6.073 6.073 0 01-1.387-.8l-.696.442a1 1 0 01-1.244-.206l-1.045-1.045a1 1 0 01-.206-1.244l.442-.696a6.073 6.073 0 01-.8-1.387l-.827-.082A1 1 0 012 10.74V9.26a1 1 0 01.917-.997l.827-.082a6.073 6.073 0 01.8-1.387l-.442-.696a1 1 0 01.206-1.244l1.045-1.045a1 1 0 011.244-.206l.696.442a6.073 6.073 0 011.387-.8l.082-.827zM10 13a3 3 0 100-6 3 3 0 000 6z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </button>
+            </Tooltip>
           )}
 
           <div className="relative flex-1 min-w-0">

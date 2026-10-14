@@ -83,6 +83,21 @@ export function parseCommands(text: string): {
   return { found, strippedMessage: remaining.join(' ') };
 }
 
+/**
+ * True when a key event originated in a text field the user could be typing
+ * in, so global single-key shortcuts must not hijack their keystrokes.
+ */
+function isEditableTarget(target: EventTarget | null): boolean {
+  /* v8 ignore next -- a window-level keydown always carries a target */
+  if (target === null) return false;
+  const el = target as HTMLElement;
+  return (
+    el.tagName === 'INPUT' ||
+    el.tagName === 'TEXTAREA' ||
+    el.isContentEditable === true
+  );
+}
+
 type OverlayVisibilityPayload =
   | {
       state: 'show';
@@ -120,6 +135,27 @@ function App() {
    */
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   /**
+   * Bumped to force the message list back to the bottom: on loading a saved
+   * conversation, and on Ctrl+End. Consumed by `ConversationView`.
+   */
+  const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
+  /**
+   * Bumped on Ctrl+Home to scroll the transcript back to the top. Stays
+   * undefined until first use so mounting does not disturb the initial
+   * scroll-to-bottom.
+   */
+  const [scrollToTopSignal, setScrollToTopSignal] = useState<
+    number | undefined
+  >(undefined);
+  /**
+   * True while the window is pinned open. While pinned the overlay must not
+   * hide when the user clicks outside; the backend enforces this from the
+   * `set_overlay_pinned` command.
+   */
+  const [isPinned, setIsPinned] = useState(false);
+  /** Mirror of `isPinned` so the toggle callback stays referentially stable. */
+  const isPinnedRef = useRef(false);
+  /**
    * True when the user clicked + while an unsaved conversation is active.
    * Causes the history dropdown to show a SwitchConfirmation prompt instead
    * of the conversation list.
@@ -135,6 +171,7 @@ function App() {
 
   const {
     conversationId,
+    conversationTitle,
     isSaved,
     save,
     unsave,
@@ -142,6 +179,7 @@ function App() {
     loadConversation,
     deleteConversation,
     listConversations,
+    renameConversation,
     reset: resetHistory,
   } = useConversationHistory();
 
@@ -231,6 +269,14 @@ function App() {
   const agentMode = useAgentMode();
   /** Stable callback: used as an effect dependency when the overlay hides. */
   const stopAgentMode = agentMode.stop;
+  /**
+   * Stable agent callbacks and the pending confirmation, hoisted so the
+   * global-hotkey effect can depend on them without re-subscribing on every
+   * render (`agentMode` itself is a fresh object each render).
+   */
+  const agentPendingConfirmation = agentMode.pendingConfirmation;
+  const confirmAgentAction = agentMode.confirmAction;
+  const rejectAgentAction = agentMode.rejectAction;
 
   /**
    * True when the window is near the screen bottom and should grow upward.
@@ -288,6 +334,74 @@ function App() {
   const maxHeightRef = useRef(0);
 
   /**
+   * Sizes the native window to the morphing container's current content
+   * height. Shared by the ResizeObserver and the focus/visibility resync so
+   * there is a single source of truth for the sizing rule.
+   *
+   * The size is applied directly rather than deferred into
+   * requestAnimationFrame: the WebView throttles rAF while the window is not
+   * the key window, which during streaming left the window short of the
+   * growing container and clipped the bottom input bar until the user
+   * stretched the window.
+   */
+  const syncWindowSize = useCallback(() => {
+    /* v8 ignore start -- requires a real browser layout and native window */
+    const node = morphingContainerNodeRef.current;
+    if (!node || overlayStateRef.current === 'minibar') return;
+
+    const rect = node.getBoundingClientRect();
+    // Total vertical room: 8px (pt-2) + 24px (pb-6) + 16px (motion py-2) = 48px.
+    // This ensures the tightened drop shadows aren't clipped by the native window edge.
+    let targetHeight = Math.ceil(rect.height) + CONTAINER_VERTICAL_PADDING;
+
+    // During streaming, only allow the window to grow (never shrink) to
+    // prevent jitter from Streamdown block reflows.
+    if (isGeneratingRef.current) {
+      if (targetHeight > maxHeightRef.current) {
+        maxHeightRef.current = targetHeight;
+      } else {
+        targetHeight = maxHeightRef.current;
+      }
+    }
+
+    if (growsUpwardRef.current) {
+      // Grow upward: pin the window bottom and expand the top edge.
+      // Clamp Y so the window never extends above the menu bar.
+      const { x, bottomY } = windowPosRef.current;
+      const newY = Math.max(0, bottomY - targetHeight);
+      void invoke('set_window_frame', {
+        x,
+        y: newY,
+        width: OVERLAY_WIDTH,
+        height: targetHeight,
+      });
+    } else {
+      void getCurrentWindow().setSize(
+        new LogicalSize(OVERLAY_WIDTH, targetHeight),
+      );
+    }
+    /* v8 ignore stop */
+  }, []);
+
+  /**
+   * Re-applies the window size when the window regains focus or becomes
+   * visible again. The ResizeObserver is edge-triggered, so if a size change
+   * were ever missed the bottom input bar could stay clipped; this is cheap
+   * insurance that it cannot.
+   */
+  useEffect(() => {
+    /* v8 ignore start -- window focus/visibility events require a real browser */
+    const resync = () => syncWindowSize();
+    window.addEventListener('focus', resync);
+    document.addEventListener('visibilitychange', resync);
+    return () => {
+      window.removeEventListener('focus', resync);
+      document.removeEventListener('visibilitychange', resync);
+    };
+    /* v8 ignore stop */
+  }, [syncWindowSize]);
+
+  /**
    * Callback ref to reliably attach the ResizeObserver when the conditionally
    * rendered Framer Motion container actually mounts in the DOM. This fixes
    * the bug where a standard useEffect would run before the DOM node was ready,
@@ -297,63 +411,28 @@ function App() {
    * also repositions the window upward to keep its bottom pinned as the
    * conversation grows.
    */
-  const setContainerRef = useCallback((node: HTMLDivElement | null) => {
-    morphingContainerNodeRef.current = node;
+  const setContainerRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      morphingContainerNodeRef.current = node;
 
-    if (observerRef.current) {
-      observerRef.current.disconnect();
-      observerRef.current = null;
-    }
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+        observerRef.current = null;
+      }
 
-    if (node) {
-      const observer = new ResizeObserver(
-        /* v8 ignore start -- ResizeObserver callback requires a native browser resize event */
-        (entries) => {
-          requestAnimationFrame(() => {
-            if (overlayStateRef.current === 'minibar') return;
-            for (const entry of entries) {
-              const rect = entry.target.getBoundingClientRect();
-              // Total vertical room: 8px (pt-2) + 24px (pb-6) + 16px (motion py-2) = 48px.
-              // This ensures the tightened drop shadows aren't clipped by the native window edge.
-              let targetHeight =
-                Math.ceil(rect.height) + CONTAINER_VERTICAL_PADDING;
+      if (node) {
+        const observer = new ResizeObserver(
+          /* v8 ignore start -- ResizeObserver callback requires a native browser resize event */
+          () => syncWindowSize(),
+          /* v8 ignore stop */
+        );
 
-              // During streaming, only allow the window to grow (never
-              // shrink) to prevent jitter from Streamdown block reflows.
-              if (isGeneratingRef.current) {
-                if (targetHeight > maxHeightRef.current) {
-                  maxHeightRef.current = targetHeight;
-                } else {
-                  targetHeight = maxHeightRef.current;
-                }
-              }
-
-              if (growsUpwardRef.current) {
-                // Grow upward: pin the window bottom and expand the top edge.
-                // Clamp Y so the window never extends above the menu bar.
-                const { x, bottomY } = windowPosRef.current;
-                const newY = Math.max(0, bottomY - targetHeight);
-                void invoke('set_window_frame', {
-                  x,
-                  y: newY,
-                  width: OVERLAY_WIDTH,
-                  height: targetHeight,
-                });
-              } else {
-                void getCurrentWindow().setSize(
-                  new LogicalSize(OVERLAY_WIDTH, targetHeight),
-                );
-              }
-            }
-          });
-        },
-        /* v8 ignore stop */
-      );
-
-      observer.observe(node);
-      observerRef.current = observer;
-    }
-  }, []);
+        observer.observe(node);
+        observerRef.current = observer;
+      }
+    },
+    [syncWindowSize],
+  );
 
   /**
    * Reset the high-water mark when streaming finishes so the window can
@@ -406,6 +485,13 @@ function App() {
 
       reset();
       resetHistory();
+      // A fresh session starts unpinned so a pin never outlives the summons
+      // that set it.
+      isPinnedRef.current = false;
+      setIsPinned(false);
+      void invoke('set_overlay_pinned', { pinned: false }).catch(() => {
+        // Pinning is best-effort on open; the backend keeps its own default.
+      });
       // A fresh session starts with no agent panel: without this, a finished
       // run's summary/error would still be mounted after reopening the overlay.
       void stopAgentMode();
@@ -447,6 +533,21 @@ function App() {
   /** Toggles the history panel open/closed. */
   const handleHistoryToggle = useCallback(() => {
     setIsHistoryOpen((prev) => !prev);
+  }, []);
+
+  /**
+   * Toggles the window pin. While pinned the backend keeps the overlay open
+   * when the user clicks outside; unpinning restores click-away hiding.
+   */
+  const handleTogglePin = useCallback(() => {
+    const next = !isPinnedRef.current;
+    isPinnedRef.current = next;
+    setIsPinned(next);
+    void invoke('set_overlay_pinned', { pinned: next }).catch(() => {
+      // The backend refused: roll the toggle back so the icon matches reality.
+      isPinnedRef.current = !next;
+      setIsPinned(!next);
+    });
   }, []);
 
   /**
@@ -590,6 +691,31 @@ function App() {
   }, [isSaved, unsave, save, messages, chatModel]);
 
   /**
+   * Renames the active conversation from the chat header. The header title is
+   * only rendered for a saved conversation, so an unsaved session is a no-op.
+   */
+  const handleRenameTitle = useCallback(
+    (title: string) => {
+      /* v8 ignore next -- header title only renders once a conversation is saved */
+      if (conversationId === null) return;
+      void renameConversation(conversationId, title).catch(() => {
+        // The header keeps its previous name, so a failed rename simply "does
+        // nothing" there; the history panel surfaces its own error.
+      });
+    },
+    [conversationId, renameConversation],
+  );
+
+  /**
+   * Renames a conversation chosen from the history panel. The promise is
+   * returned so the panel can roll its optimistic row update back on failure.
+   */
+  const handleRenameConversation = useCallback(
+    (id: string, title: string) => renameConversation(id, title),
+    [renameConversation],
+  );
+
+  /**
    * Loads a conversation from history, replacing the current session.
    *
    * Closes the history panel regardless of success or failure: on success the
@@ -602,6 +728,10 @@ function App() {
       try {
         const loaded = await loadConversation(id);
         loadMessages(loaded);
+        // Land at the bottom of the transcript so the input bar (below the
+        // scroller) is in view; the user scrolls up to re-read.
+        setScrollToBottomSignal((n) => n + 1);
+        requestAnimationFrame(() => inputRef.current?.focus());
       } catch {
         // Load failed — current session is preserved intact.
       } finally {
@@ -630,6 +760,9 @@ function App() {
       try {
         const loaded = await loadConversation(id);
         loadMessages(loaded);
+        // Land at the bottom of the transcript so the input bar is in view.
+        setScrollToBottomSignal((n) => n + 1);
+        requestAnimationFrame(() => inputRef.current?.focus());
       } catch {
         // Load failed — save already committed; dismiss panel, keep current view.
       } finally {
@@ -1371,6 +1504,26 @@ function App() {
   /** Global keyboard shortcuts: Escape/Ctrl+W hides overlay; Ctrl+N/S/H/Ctrl+Shift+C for actions. */
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // Agent confirmation is mouse-only by default, which is unusable while
+      // the agent is driving the mouse. While a confirmation is pending, 1
+      // allows, 2 denies and Ctrl+C aborts — never while the user is typing.
+      if (agentPendingConfirmation && !isEditableTarget(e.target)) {
+        if (e.key === '1') {
+          e.preventDefault();
+          void confirmAgentAction();
+          return;
+        }
+        if (e.key === '2') {
+          e.preventDefault();
+          void rejectAgentAction();
+          return;
+        }
+        if ((e.metaKey || e.ctrlKey) && (e.key === 'c' || e.key === 'C')) {
+          e.preventDefault();
+          void stopAgentMode();
+          return;
+        }
+      }
       if (((e.metaKey || e.ctrlKey) && e.key === 'w') || e.key === 'Escape') {
         e.preventDefault();
         handleCloseOverlay();
@@ -1391,9 +1544,40 @@ function App() {
         handleHistoryToggle();
         return;
       }
+      // Ctrl+, is the conventional "open preferences" shortcut. The settings
+      // window's own Ctrl+, handler keeps focusing the window once it is open.
+      if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+        e.preventDefault();
+        void invoke('open_settings_window');
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'C') {
         e.preventDefault();
         handleCopyLastResponse();
+        return;
+      }
+      // Ctrl+End jumps to the input bar below the transcript, matching the
+      // landing position when a saved conversation is opened. Inside the input
+      // box the native caret-to-end behaviour is left untouched.
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.key === 'End' &&
+        !isEditableTarget(e.target)
+      ) {
+        e.preventDefault();
+        setScrollToBottomSignal((n) => n + 1);
+        inputRef.current?.focus();
+        return;
+      }
+      // Ctrl+Home returns to the top of the transcript. Native caret-to-start
+      // behaviour is likewise preserved inside the input box.
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.key === 'Home' &&
+        !isEditableTarget(e.target)
+      ) {
+        e.preventDefault();
+        setScrollToTopSignal((n) => (n ?? 0) + 1);
         return;
       }
     };
@@ -1405,6 +1589,10 @@ function App() {
     handleSave,
     handleHistoryToggle,
     handleCopyLastResponse,
+    agentPendingConfirmation,
+    confirmAgentAction,
+    rejectAgentAction,
+    stopAgentMode,
   ]);
 
   /** Programmatic focus when the overlay becomes visible. */
@@ -1551,6 +1739,12 @@ function App() {
                       onNewConversation={handleNewConversation}
                       onHistoryOpen={handleHistoryToggle}
                       onImagePreview={handleChatImagePreview}
+                      title={conversationTitle}
+                      onRenameTitle={handleRenameTitle}
+                      isPinned={isPinned}
+                      onTogglePin={handleTogglePin}
+                      scrollToBottomSignal={scrollToBottomSignal}
+                      scrollToTopSignal={scrollToTopSignal}
                     />
                   ) : null}
                 </AnimatePresence>
@@ -1587,6 +1781,7 @@ function App() {
                           onLoadConversation={handleLoadConversation}
                           onSaveAndLoad={handleSaveAndLoad}
                           onDeleteConversation={handleDeleteConversation}
+                          onRenameConversation={handleRenameConversation}
                           hasCurrentMessages={false}
                           showNewConversation={false}
                           currentConversationId={conversationId}
@@ -1618,6 +1813,7 @@ function App() {
                   onStop={agentMode.stop}
                   onConfirm={agentMode.confirmAction}
                   onReject={agentMode.rejectAction}
+                  onDismiss={agentMode.dismiss}
                 />
 
                 {/* Tip Bar — shown in chat mode */}
@@ -1670,6 +1866,7 @@ function App() {
                       onLoadConversation={handleLoadConversation}
                       onSaveAndLoad={handleSaveAndLoad}
                       onDeleteConversation={handleDeleteConversation}
+                      onRenameConversation={handleRenameConversation}
                       hasCurrentMessages={messages.length > 0 && !isSaved}
                       currentConversationId={conversationId}
                       showNewConversation={false}
