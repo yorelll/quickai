@@ -4,8 +4,8 @@ QuickAI is configured in three places:
 
 1. **Environment variables** (`.env`) — build/dev-time defaults, read by the
    Vite frontend via `import.meta.env`.
-2. **The Settings window** — provider, model, base URL, API keys, language, and
-   window/quote options, edited in the app.
+2. **The Settings window** — provider, model, base URL, API keys, language,
+   hotkey, data directory, and window/quote options, edited in the app.
 3. **`config.toml`** — the on-disk configuration file, editable by hand or
    through the Settings window.
 
@@ -69,7 +69,19 @@ ones):
 
 ## Settings window
 
-Open Settings from the gear icon in the overlay. Tabs:
+Open Settings from the gear icon in the overlay, or press <kbd>Ctrl</kbd>+<kbd>,</kbd>.
+The window has five tabs, in this order:
+
+### General
+
+The settings that do not belong to a single feature.
+
+| Setting | Description |
+| :--- | :--- |
+| **Summon hotkey** | The key you double-tap to summon the overlay: `ctrl` (default), `alt`, `shift`, or `win`. Pick one that does not clash with your other shortcuts. |
+| **Interface language** | `auto` (follow the Windows display language), `en` (English), or `zh` (Simplified Chinese). Defaults to `auto` (`zh*` → Chinese, otherwise English). |
+| **Data directory** | Where QuickAI keeps its database and saved images. Empty means the default per-user app-data directory. **A restart is required** for a change to take effect. |
+| **Start on boot** | Register QuickAI to launch when you sign in (a Windows Task Scheduler entry, not a `config.toml` field). |
 
 ### AI
 
@@ -78,17 +90,17 @@ The provider used for the main chat, vision, and `/think`.
 | Setting | Description |
 | :--- | :--- |
 | **Provider** | `openai`, `anthropic`, or `openai_compatible`. |
-| **Model** | Provider-specific model name. Suggested values include `gpt-4o`, `gpt-4o-mini`, `o4-mini`, `gpt-4.1` (OpenAI) and `claude-sonnet-4-5`, `claude-opus-4-1`, `claude-haiku-4-5` (Anthropic). The field is editable, so you can enter any model your account can access. |
+| **Model** | Provider-specific model name. **There is no default** — the field starts empty and shows a placeholder (`e.g. gpt-4o`) only. Suggested values include `gpt-4o`, `gpt-4o-mini`, `o4-mini`, `gpt-4.1` (OpenAI) and `claude-sonnet-4-5`, `claude-opus-4-1`, `claude-haiku-4-5` (Anthropic). The field is editable, so you can enter any model your account can access. Starting a chat with no model set surfaces the error "No chat model selected. Set one in Settings." |
+| **Base URL** | API endpoint. **Empty by default**; empty means the provider default: `https://api.openai.com/v1` (OpenAI) or `https://api.anthropic.com` (Anthropic). The field shows the default as a placeholder only. Required for `openai_compatible`. |
 | **API key** | Your provider API key. Stored locally in the SQLite `app_config` table (`api_key_openai`, `api_key_anthropic`, `api_key_openai_compatible`). |
-| **Base URL** | API endpoint. Empty means the provider default: `https://api.openai.com/v1` (OpenAI) or `https://api.anthropic.com` (Anthropic). Required for `openai_compatible`. |
+| **System prompt** | Optional persona override; empty uses the built-in assistant persona. |
 
 ### Display
 
-Window geometry, quote display limits, and the interface language.
+Window geometry and quote display limits.
 
 | Setting | Description |
 | :--- | :--- |
-| **Language** | English or Simplified Chinese. Defaults to your system language (`zh*` → Chinese, otherwise English). |
 | **Overlay width** | Logical width of the overlay window. |
 | **Max chat height** | Maximum height the expanded chat window grows to. |
 | **Max images** | Maximum manually attached images per message (a `/screen` capture adds one on top). |
@@ -96,19 +108,20 @@ Window geometry, quote display limits, and the interface language.
 
 ### Agent
 
-The provider used for `/do` computer control. It can differ from the chat
-provider and needs a vision-capable model.
+How `/do` computer control gets its model and how much it may do without asking.
 
 | Setting | Description |
 | :--- | :--- |
-| **Provider** | `openai`, `anthropic`, or `openai_compatible`. |
-| **Model** | Model used for agent mode (e.g. `gpt-4o`). |
-| **API key** | Key for the agent provider (uses the same keys as the AI tab when the provider matches). |
-| **Base URL** | API endpoint; empty means the provider default. |
+| **Configuration** | `Same as AI configuration` (default) reuses the AI tab's provider, model, base URL, and API key. `Custom` reveals the agent's own provider, model, base URL, and API key. |
+| **Provider / Model / Base URL / API key** | Shown only in `Custom` mode. The agent needs a vision-capable model. |
+| **Agent permissions** | `Limited` (default) runs safe actions automatically and asks before dangerous ones (launching a program or a system-level key press such as <kbd>Win</kbd>+<kbd>R</kbd>, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Esc</kbd>, or <kbd>Alt</kbd>+<kbd>F4</kbd>). `Full` never asks — the agent may act freely. |
 
 ### About
 
-Version and build information.
+App identity, version, links, a **Shortcuts and commands** list (every keyboard
+shortcut and slash command), a **Help** section (features, usage, and the tray
+icon), and file actions (reveal app data, refresh `config.toml`, reset all
+settings to defaults).
 
 ---
 
@@ -133,19 +146,38 @@ max_display_lines = 4
 max_display_chars = 300
 max_context_length = 4096
 
+[general]                    # activation and app-wide settings
+hotkey = "ctrl"              # double-tap key: "ctrl" | "alt" | "shift" | "win"
+language = "auto"            # "auto" | "en" | "zh"
+data_dir = ""                # empty → default app data dir (applied at startup)
+
 [chat]                       # drives main chat, vision, and /think
 provider = "openai"          # openai | anthropic | openai_compatible
-model = "gpt-4o"
-base_url = ""                # empty → provider default
+model = ""                   # NO default — set one in Settings (placeholder "gpt-4o")
+base_url = ""                # NO default — empty → provider default
 
 [agent]                      # drives /do computer control
-provider = "openai"
-model = ""
-base_url = ""
+mode = "same_as_chat"        # "same_as_chat" | "custom"
+provider = "openai"          # only used when mode == "custom"
+model = ""                   # only used when mode == "custom"
+base_url = ""                # only used when mode == "custom"
+permission = "limited"       # "limited" | "full"
 ```
 
 Notes:
 
+- **`[chat].model` has no default.** The Settings field shows only a placeholder
+  (`gpt-4o`); starting a chat while it is empty surfaces a `missing_model` error
+  ("No chat model selected. Set one in Settings."). `[chat].base_url` is likewise
+  empty by default — an empty value resolves to the provider's default URL at
+  request time, and the UI shows that default as a placeholder.
+- **`[general].data_dir`** is read once at **startup**, so changing it requires a
+  restart. Empty (or whitespace) means the default per-user app-data directory.
+- **`[agent].mode = "same_as_chat"`** (the default) makes the agent reuse the
+  `[chat]` provider, model, base URL, **and** the chat provider's API key;
+  `"custom"` uses the `[agent]` provider/model/base URL and its own API key.
+- **`[agent].permission = "limited"`** runs safe actions automatically and asks
+  for approval before dangerous ones; `"full"` never asks.
 - API keys are **not** stored in `config.toml`; it is a plain-text file. Keys
   live in the local SQLite `app_config` table.
 - A missing section or field falls back to the compiled default.

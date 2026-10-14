@@ -42,21 +42,23 @@
 ## What it is
 
 QuickAI is a lightweight Windows overlay that puts an AI assistant on top of
-whatever you are doing. Double-tap <kbd>Ctrl</kbd> to summon it from any app —
-including fullscreen ones — ask, get an answer, and dismiss. Highlight text
-first and QuickAI opens with it pre-filled as a quote.
+whatever you are doing. Double-tap your summon key (<kbd>Ctrl</kbd> by default,
+customizable) to summon it from any app — including fullscreen ones — ask, get
+an answer, and dismiss. Highlight text first and QuickAI opens with it
+pre-filled as a quote.
 
 It is **cloud-only**: you bring an OpenAI, Anthropic, or OpenAI-compatible API
-key, and every request goes straight to that provider. Your conversations and
-API keys are stored locally in a SQLite database; nothing is sent anywhere
-except to the provider you configured.
+key, configure a model, and every request goes straight to that provider. Your
+conversations and API keys are stored locally in a SQLite database; nothing is
+sent anywhere except to the provider you configured.
 
 ## Features
 
-- **Summon from anywhere:** double-tap <kbd>Ctrl</kbd> to show the overlay over
-  any app, including fullscreen apps.
-- **Context-aware quotes:** highlight text, then double-tap <kbd>Ctrl</kbd>, to
-  open QuickAI with the selection pre-filled as a quote.
+- **Summon from anywhere:** double-tap your summon key (<kbd>Ctrl</kbd>,
+  <kbd>Alt</kbd>, <kbd>Shift</kbd>, or <kbd>Win</kbd> — your choice) to show the
+  overlay over any app, including fullscreen apps.
+- **Context-aware quotes:** highlight text, then summon QuickAI, to open it with
+  the selection pre-filled as a quote.
 - **Cloud providers:** OpenAI, Anthropic, and any OpenAI-compatible endpoint
   (custom base URL, model, and API key). Configure them in Settings.
 - **Bilingual interface:** English and Simplified Chinese, auto-detected from
@@ -66,14 +68,19 @@ except to the provider you configured.
 - **Extended reasoning:** type `/think` to have the model reason step by step
   before answering.
 - **Computer control (`/do`):** let the AI take over your desktop and complete a
-  task autonomously, using native OpenAI / Anthropic tool calling.
+  task autonomously, using native OpenAI / Anthropic tool calling. Choose
+  **Limited** permissions (safe actions run automatically, dangerous ones ask
+  first) or **Full** (never asks), and allow, deny, or abort from the keyboard.
 - **Utility commands:** `/translate`, `/rewrite`, `/tldr`, `/refine`,
   `/bullets`, `/todos`.
+- **Conversation history:** persisted locally and reopenable across sessions;
+  rename a conversation from the chat header or rename/delete entries in the
+  history list.
+- **Pin the window:** keep the overlay open when you click away.
 - **Minibar mode:** when you switch windows the overlay shrinks to a slim
   always-on-top strip so you never lose track of it.
 - **Desktop notifications:** get a toast when a response finishes while you are
   in another window.
-- **Conversation history:** persisted locally and reopenable across sessions.
 - **Multi-monitor support:** screenshots and overlay positioning work across all
   monitors.
 
@@ -89,6 +96,7 @@ except to the provider you configured.
 | **RAM** | 4 GB | Inference runs in the cloud |
 | **Disk** | ~200 MB (app) | Plus space for your local conversation database |
 | **API key** | Required | OpenAI, Anthropic, or an OpenAI-compatible provider |
+| **Model** | Required | No default model — set one on the Settings → AI tab before chatting |
 
 ### Build requirements (for building from source)
 
@@ -124,16 +132,22 @@ directory as the installer build, so you can switch between the two freely.
 
 ## Getting Started
 
-On first launch, open **Settings** (the gear icon) and configure a provider on
-the **AI** tab:
+On first launch, open **Settings** (the gear icon, or press
+<kbd>Ctrl</kbd>+<kbd>,</kbd>) and configure a provider on the **AI** tab:
 
 1. Choose a provider: **OpenAI**, **Anthropic**, or **OpenAI-compatible**.
 2. Enter your **API key** (stored locally in QuickAI's SQLite database).
-3. Pick a model, and for the OpenAI-compatible provider also enter a base URL.
-4. Optionally configure a separate provider/model for **agent mode** on the
-   **Agent** tab.
+3. **Enter a model** — there is no default, so the field starts empty (it shows
+   a placeholder only). For the OpenAI-compatible provider, also enter a base
+   URL.
+4. Optionally tune the **General** tab: the summon hotkey, interface language,
+   data directory, and start-on-boot.
+5. Optionally configure **agent mode** on the **Agent** tab: keep it on
+   *Same as AI configuration*, or switch to *Custom* for its own
+   provider/model/base URL/key, and pick **Limited** or **Full** permissions.
 
-Then double-tap <kbd>Ctrl</kbd> and start asking.
+Then double-tap your summon key and start asking. The **About** tab lists every
+shortcut and command, plus help.
 
 ## Build from Source
 
@@ -158,6 +172,10 @@ Output:
 - Installer: `src-tauri/target/release/bundle/nsis/QuickAI_<version>_x64-setup.exe`
 - Standalone executable: `src-tauri/target/release/quickai.exe`
 
+> This local build is for development only. Publishable release artifacts are
+> produced by CI, not by `bun run build:all` — see
+> [RELEASING.md](RELEASING.md#release-artifacts).
+
 ## Configuration
 
 QuickAI reads a small set of environment variables. Copy `.env.example` to
@@ -169,8 +187,9 @@ QuickAI reads a small set of environment variables. Copy `.env.example` to
 | `VITE_QUOTE_MAX_DISPLAY_CHARS` | Maximum characters shown in the quote preview. | `300` |
 | `VITE_QUOTE_MAX_CONTEXT_LENGTH` | Maximum characters of selected context sent as prompt context. | `4096` |
 
-Provider settings (provider, model, base URL), API keys, and the system prompt
-are configured in the in-app **Settings** window (and its `config.toml`), not via
+Provider settings (provider, model, base URL), API keys, the system prompt, and
+the General-tab options (hotkey, language, data directory, start-on-boot) are
+configured in the in-app **Settings** window (and its `config.toml`), not via
 environment variables.
 
 See [docs/configurations.md](docs/configurations.md) for the full reference and
@@ -181,11 +200,13 @@ See [docs/configurations.md](docs/configurations.md) for the full reference and
 ### Hotkey
 
 QuickAI uses a low-level Windows keyboard hook (`SetWindowsHookExW` with
-`WH_KEYBOARD_LL`) to detect a double-tap of <kbd>Ctrl</kbd> globally. This works
+`WH_KEYBOARD_LL`) to detect a double-tap of your summon key globally. This works
 in all applications, including fullscreen apps and elevated (admin) windows on
-Windows 10 1809+.
+Windows 10 1809+. The summon key is configurable on the Settings → **General**
+tab: <kbd>Ctrl</kbd> (default), <kbd>Alt</kbd>, <kbd>Shift</kbd>, or
+<kbd>Win</kbd>.
 
-- **Activation window:** 400 ms between the two Ctrl presses
+- **Activation window:** 400 ms between the two presses
 - **Cooldown:** 600 ms after each activation to prevent accidental re-triggers
 
 ### Overlay window
@@ -202,10 +223,10 @@ from the capture.
 
 ### Context capture
 
-When you double-tap <kbd>Ctrl</kbd> with text selected, QuickAI uses clipboard
-simulation (Ctrl+C via `SendInput`) to capture the selection, then restores the
-original clipboard contents. The cursor position is read via `GetCursorPos` to
-position the overlay near your cursor.
+When you summon QuickAI (double-tap your hotkey) with text selected, QuickAI
+uses clipboard simulation (Ctrl+C via `SendInput`) to capture the selection, then
+restores the original clipboard contents. The cursor position is read via
+`GetCursorPos` to position the overlay near your cursor.
 
 ### Computer control (agent mode)
 
@@ -225,9 +246,14 @@ autonomously control your desktop:
 
 - A maximum of 30 iterations prevents infinite loops.
 - A 500 ms delay between actions lets you follow along.
-- Click **Stop** to cancel at any time.
-- A confirmation flow asks you to approve early agent actions; potentially
-  destructive actions always require confirmation.
+- Click **Stop**, or press <kbd>Ctrl</kbd>+<kbd>C</kbd>, to abort at any time.
+- The consent policy comes from **Agent permissions** on the Settings → Agent
+  tab: **Limited** (default) runs safe actions automatically and asks before
+  dangerous ones (launching a program, or a system-level key press such as
+  <kbd>Win</kbd>+<kbd>R</kbd> or <kbd>Alt</kbd>+<kbd>F4</kbd>); **Full** never
+  asks.
+- While a confirmation is pending, press <kbd>1</kbd> to allow, <kbd>2</kbd> to
+  deny, or <kbd>Ctrl</kbd>+<kbd>C</kbd> to abort — no mouse required.
 
 ### Minibar mode
 

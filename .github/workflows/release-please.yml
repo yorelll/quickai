@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to (re)build and upload release assets for (e.g. v0.0.1)'
+        description: 'Existing tag to (re)build and upload release assets for (e.g. v0.0.2)'
         required: true
         type: string
 

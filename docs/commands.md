@@ -11,10 +11,13 @@ Commands that operate on text follow a consistent input priority:
    appended as an additional instruction
 
 This means you can highlight a paragraph anywhere on screen, summon QuickAI with
-double-tap Control, type a command, and hit Enter without typing anything else.
+your hotkey (<kbd>Ctrl</kbd> by default), type a command, and hit Enter without
+typing anything else.
 
 > All commands run against the cloud provider configured in Settings. There is
-> no local model server.
+> no local model server. Set a **chat model** on the AI tab first — it has no
+> default, and a chat without one reports "No chat model selected. Set one in
+> Settings."
 
 ---
 
@@ -199,8 +202,8 @@ provider, and executes mouse/keyboard actions in a loop until the task is done.
 **Behavior:**
 
 1. A screenshot is captured (QuickAI's own window is excluded)
-2. The screenshot and your task are sent to the agent provider configured in
-   Settings (OpenAI / Anthropic / OpenAI-compatible)
+2. The screenshot and your task are sent to the agent provider (see
+   **Requirements** below)
 3. The model returns structured tool calls (click, double-click, right-click,
    drag, type, key press, scroll, launch app, done)
 4. Actions are executed via Win32 `SendInput` with a 500 ms delay between each
@@ -212,19 +215,37 @@ provider, and executes mouse/keyboard actions in a loop until the task is done.
 - Maximum 30 iterations per task (prevents infinite loops)
 - 500 ms delay between actions so you can follow along
 - Click the **Stop** button to cancel at any time
-- A confirmation flow asks you to approve early agent actions; potentially
-  destructive actions always require confirmation
+- The confirmation policy comes from **Agent permissions** on the Settings →
+  Agent tab:
+  - **Limited** (default) — safe actions (clicks, drags, scrolling, plain
+    typing) run automatically; **dangerous** actions require your explicit
+    approval. Dangerous means anything that can start or terminate arbitrary
+    software: launching a program/file/URL, or a system-level key press such as
+    <kbd>Win</kbd>+<kbd>R</kbd>, <kbd>Win</kbd>, <kbd>Ctrl</kbd>+<kbd>Esc</kbd>,
+    <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Esc</kbd>, or <kbd>Alt</kbd>+<kbd>F4</kbd>.
+  - **Full** — the agent acts freely and never asks.
 - A status indicator (amber banner with pulsing dot) shows the current phase:
   Capturing, Analyzing, or Executing
+
+**Keyboard control:** while a confirmation is pending you do not need the mouse
+— useful when the agent is driving it. Press <kbd>1</kbd> to **allow**,
+<kbd>2</kbd> to **deny**, or <kbd>Ctrl</kbd>+<kbd>C</kbd> to **abort** the run.
+The confirmation panel shows this hint, and the shortcuts are ignored while you
+are typing in a text field.
 
 **Minibar integration:** When you switch away from QuickAI while an agent task is
 running, the overlay shrinks to a minibar. The minibar shows a status dot (amber
 = running) and the last action. Click it to restore the full overlay and monitor
 progress.
 
-**Requirements:** Agent mode needs a vision-capable model on the configured agent
-provider (for example `gpt-4o` on OpenAI). Configure the agent provider and model
-on the **Agent** tab in Settings.
+**Completion panel:** when a run finishes, the panel shows the closing summary
+rendered as markdown with a dismiss (×) control to clear it.
+
+**Requirements:** Agent mode needs a vision-capable model. By default it uses
+your AI configuration (the provider, model, base URL, and API key from the
+Settings → AI tab); set the Agent tab's **Configuration** to **Custom** to give
+it its own provider, model, base URL, and API key instead. Configure this on the
+**Agent** tab in Settings.
 
 **Not composable:** `/do` does not combine with other commands. It is a
 standalone mode that takes over the input.

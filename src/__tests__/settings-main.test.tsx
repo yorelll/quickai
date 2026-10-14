@@ -4,6 +4,7 @@ import { invoke } from '../testUtils/mocks/tauri';
 
 /** Raw config as returned by `get_config`. */
 const RAW = {
+  general: { hotkey: 'ctrl', language: 'auto', data_dir: '' },
   prompt: { system: '' },
   window: { overlay_width: 600, max_chat_height: 648, max_images: 3 },
   quote: {
@@ -11,8 +12,14 @@ const RAW = {
     max_display_chars: 300,
     max_context_length: 4096,
   },
-  chat: { provider: 'openai', model: 'gpt-4o', base_url: '' },
-  agent: { provider: 'openai', model: '', base_url: '' },
+  chat: { provider: 'openai', model: '', base_url: '' },
+  agent: {
+    mode: 'same_as_chat',
+    provider: 'openai',
+    model: '',
+    base_url: '',
+    permission: 'limited',
+  },
 };
 
 describe('settings-main.tsx', () => {
@@ -37,6 +44,6 @@ describe('settings-main.tsx', () => {
     await act(async () => {});
 
     expect(root.childNodes.length).toBeGreaterThan(0);
-    expect(root.textContent).toContain('Chat provider');
+    expect(root.textContent).toContain('Summon hotkey');
   });
 });
