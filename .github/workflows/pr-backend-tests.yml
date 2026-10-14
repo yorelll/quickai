@@ -56,20 +56,9 @@ jobs:
         working-directory: src-tauri
         run: cargo +nightly-2026-03-30 llvm-cov --ignore-filename-regex "(lib|main)\.rs" --lcov --output-path lcov.info
 
-      # Region-level view (line and region colouring), for cross-checking the
-      # lcov-derived gate.
-      - name: Backend coverage HTML report
-        working-directory: src-tauri
-        run: cargo +nightly-2026-03-30 llvm-cov report --ignore-filename-regex "(lib|main)\.rs" --html --output-dir coverage-html
-
-      # Region-level data (segments), for cross-checking the lcov-derived gate.
-      - name: Backend coverage JSON report
-        working-directory: src-tauri
-        run: cargo +nightly-2026-03-30 llvm-cov report --ignore-filename-regex "(lib|main)\.rs" --json --output-path coverage.json
-
       # Gate on the exported per-line data rather than llvm-cov's summary line
-      # table, which counts region entries as lines and disagrees with every
-      # export (see the coverage JSON/HTML artifacts).
+      # table, which counts region entries as lines and can disagree with the
+      # actual execution data.
       - name: Backend coverage gate (every line executed)
         run: bash scripts/check-backend-coverage.sh src-tauri/lcov.info
 
@@ -81,20 +70,6 @@ jobs:
         with:
           name: backend-lcov
           path: src-tauri/lcov.info
-
-      - name: Upload coverage HTML report
-        if: always()
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
-        with:
-          name: backend-coverage-html
-          path: src-tauri/coverage-html
-
-      - name: Upload coverage JSON report
-        if: always()
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08  # v4.6.0
-        with:
-          name: backend-coverage-json
-          path: src-tauri/coverage.json
 
   # Compiles and runs the backend suite on Windows itself so the Win32-only
   # modules are actually built and their tests executed. Deliberately NO

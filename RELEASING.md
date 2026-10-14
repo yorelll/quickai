@@ -39,8 +39,8 @@ line has zero executions. It deliberately does **not** use llvm-cov's
 disagree with the actual execution data. The check lives in
 `scripts/check-backend-coverage.sh` and is shared by CI and by
 `bun run test:backend:coverage` locally; the "100% of lines" intent is unchanged.
-Alongside it the workflow uploads `backend-lcov`, `backend-coverage-html`, and
-`backend-coverage-json` artifacts for cross-checking.
+The workflow uploads the lcov report as the `backend-lcov` artifact, so a
+genuine future failure can be diagnosed from the uncovered lines.
 
 ## Prerequisites
 
