@@ -7,12 +7,12 @@
 </p>
 
 <p align="center">
-  A bilingual (English + 简体中文) AI assistant overlay for Windows, powered by cloud models.
+  面向 Windows 的双语（English + 简体中文）AI 助手浮层，由云端模型驱动。
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License" /></a>
-  <img src="https://img.shields.io/badge/platform-Windows-0078D4?logo=windows11&logoColor=white" alt="Platform: Windows" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="许可证" /></a>
+  <img src="https://img.shields.io/badge/platform-Windows-0078D4?logo=windows11&logoColor=white" alt="平台：Windows" />
 </p>
 
 <p align="center">
@@ -26,130 +26,107 @@
 
 ---
 
-> ## This is a fork
+> ## 这是 QuickAI 的一个分支
 >
-> **QuickAI is a fork of [ThukiWin](https://github.com/ayzekhdawy/thukiwin) by
-> [ayzekhdawy](https://github.com/ayzekhdawy)** (itself a Windows port of
-> [Thuki](https://github.com/quiet-node/thuki) by Logan Nguyen). All original
-> design and code credit belongs to the upstream authors.
+> **QuickAI 是 [ayzekhdawy](https://github.com/ayzekhdawy) 的
+> [ThukiWin](https://github.com/ayzekhdawy/thukiwin) 的分支**（ThukiWin 本身是
+> Logan Nguyen 的 [Thuki](https://github.com/quiet-node/thuki) 的 Windows 移植版）。
+> 所有原始设计与代码的版权归上游作者所有。
 >
-> QuickAI reworks that foundation into a **cloud-only**, **bilingual** assistant:
-> local Ollama inference, the self-hosted web-search pipeline, the local
-> gateway, and the text-to-speech / sound features have been removed. Bug
-> reports and feature requests for this fork belong in
-> [this repository](https://github.com/yorelll/quickai/issues), not upstream.
+> QuickAI 在此基础上改造为一个**纯云端**、**双语**的助手：本地 Ollama 推理、
+> 自建网页搜索管线、本地网关，以及语音朗读 / 音效功能都已被移除。本分支的缺陷
+> 反馈与功能建议请提交到[本仓库](https://github.com/yorelll/quickai/issues)，而非上游。
 
-## What it is
+## QuickAI 是什么
 
-QuickAI is a lightweight Windows overlay that puts an AI assistant on top of
-whatever you are doing. Double-tap your summon key (<kbd>Ctrl</kbd> by default,
-customizable) to summon it from any app — including fullscreen ones — ask, get
-an answer, and dismiss. Highlight text first and QuickAI opens with it
-pre-filled as a quote.
+QuickAI 是一个轻量的 Windows 浮层，把 AI 助手悬浮在你正在做的事情之上。双击你的
+召唤键（默认 <kbd>Ctrl</kbd>，可自定义）即可从任意应用中唤起它——包括全屏应用——
+提问、得到回答、随即收起。先选中一段文字，QuickAI 打开时会把它作为引用预填好。
 
-It is **cloud-only**: you bring an OpenAI, Anthropic, or OpenAI-compatible API
-key, configure a model, and every request goes straight to that provider. Your
-conversations and API keys are stored locally in a SQLite database; nothing is
-sent anywhere except to the provider you configured.
+它是**纯云端**的：你自带 OpenAI、Anthropic 或 OpenAI 兼容服务的 API Key，并配置
+一个模型，所有请求都直接发往该服务商。你的对话与 API Key 都保存在本地 SQLite
+数据库中；除了你配置的服务商之外，不会发送到任何其他地方。
 
-## Features
+## 功能
 
-- **Summon from anywhere:** double-tap your summon key (<kbd>Ctrl</kbd>,
-  <kbd>Alt</kbd>, <kbd>Shift</kbd>, or <kbd>Win</kbd> — your choice) to show the
-  overlay over any app, including fullscreen apps.
-- **Context-aware quotes:** highlight text, then summon QuickAI, to open it with
-  the selection pre-filled as a quote.
-- **Cloud providers:** OpenAI, Anthropic, and any OpenAI-compatible endpoint
-  (custom base URL, model, and API key). Configure them in Settings.
-- **Bilingual interface:** English and Simplified Chinese, auto-detected from
-  your system language, with a switcher in Settings.
-- **Main chat & vision:** streamed responses; attach images or capture your
-  screen and they are sent to the model as vision input.
-- **Extended reasoning:** type `/think` to have the model reason step by step
-  before answering.
-- **Computer control (`/do`):** let the AI take over your desktop and complete a
-  task autonomously, using native OpenAI / Anthropic tool calling. Choose
-  **Limited** permissions (safe actions run automatically, dangerous ones ask
-  first) or **Full** (never asks), and allow, deny, or abort from the keyboard.
-- **Utility commands:** `/translate`, `/rewrite`, `/tldr`, `/refine`,
-  `/bullets`, `/todos`.
-- **Conversation history:** persisted locally and reopenable across sessions;
-  rename a conversation from the chat header or rename/delete entries in the
-  history list.
-- **Pin the window:** keep the overlay open when you click away.
-- **Minibar mode:** when you switch windows the overlay shrinks to a slim
-  always-on-top strip so you never lose track of it.
-- **Desktop notifications:** get a toast when a response finishes while you are
-  in another window.
-- **Multi-monitor support:** screenshots and overlay positioning work across all
-  monitors.
+- **随处唤起：** 双击你的召唤键（<kbd>Ctrl</kbd>、<kbd>Alt</kbd>、<kbd>Shift</kbd>
+  或 <kbd>Win</kbd>，任你选择）即可在任意应用（包括全屏应用）之上显示浮层。
+- **结合上下文的引用：** 选中文字后唤起 QuickAI，它会以引用形式预填选中的内容。
+- **云端服务商：** OpenAI、Anthropic，以及任意 OpenAI 兼容端点（自定义 Base URL、
+  模型与 API Key）。在设置中配置。
+- **双语界面：** 英文与简体中文，根据系统语言自动检测，并可在设置中切换。
+- **主对话与视觉：** 流式回复；附加图片或截取屏幕，都会作为视觉输入发送给模型。
+- **扩展推理：** 输入 `/think`，让模型在作答前逐步推理。
+- **电脑操控（`/do`）：** 让 AI 接管你的桌面并自主完成任务，使用 OpenAI / Anthropic
+  原生工具调用。权限可选 **Limited**（安全操作自动执行，危险操作先询问）或
+  **Full**（从不询问），并且可以用键盘允许、拒绝或中止。
+- **实用命令：** `/translate`、`/rewrite`、`/tldr`、`/refine`、`/bullets`、`/todos`。
+- **对话历史：** 本地持久化，可跨会话重新打开；可在对话标题处重命名，也可在历史
+  列表中重命名 / 删除条目。
+- **固定窗口：** 点击窗口之外时保持浮层不隐藏。
+- **迷你栏模式：** 当你切换窗口时，浮层会收缩为一条细长的置顶条，让你始终能掌握它。
+- **桌面通知：** 当你在其他窗口时，回复完成后会弹出通知。
+- **多显示器支持：** 截图与浮层定位在所有显示器上都能正常工作。
 
-> **Removed from upstream:** local Ollama inference, the agentic web-search
-> pipeline (`/search`), the local OpenAI-compatible gateway, text-to-speech
-> (read aloud), and the notification-sound option.
+> **相对上游已移除：** 本地 Ollama 推理、自建网页搜索管线（`/search`）、本地
+> OpenAI 兼容网关、语音朗读，以及通知音效选项。
 
-## Requirements
+## 系统要求
 
-| Requirement | Minimum | Notes |
+| 要求 | 最低配置 | 说明 |
 |---|---|---|
-| **OS** | Windows 10 64-bit (1809+) | Windows 11 recommended |
-| **RAM** | 4 GB | Inference runs in the cloud |
-| **Disk** | ~200 MB (app) | Plus space for your local conversation database |
-| **API key** | Required | OpenAI, Anthropic, or an OpenAI-compatible provider |
-| **Model** | Required | No default model — set one on the Settings → AI tab before chatting |
+| **操作系统** | Windows 10 64 位（1809+） | 推荐 Windows 11 |
+| **内存** | 4 GB | 推理在云端进行 |
+| **磁盘** | 约 200 MB（应用） | 另需本地对话数据库的存储空间 |
+| **API Key** | 必需 | OpenAI、Anthropic 或 OpenAI 兼容服务商 |
+| **模型** | 必需 | 没有默认模型——开始对话前需在设置 → AI 标签页中设置 |
 
-### Build requirements (for building from source)
+### 构建要求（从源码构建）
 
 - [Bun](https://bun.sh) v1.3+
-- [Rust](https://rustup.rs) stable toolchain
+- [Rust](https://rustup.rs) 稳定版工具链
 - [Microsoft Visual Studio Build Tools 2022](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
-  (C++ build tools with MSVC v143 + Windows 10/11 SDK)
+  （含 MSVC v143 的 C++ 构建工具 + Windows 10/11 SDK）
 
-## Download
+## 下载
 
-Every release publishes two assets. Pick whichever suits you:
+每个版本都会发布两个安装包，任选其一：
 
-### Option 1 — NSIS installer (recommended)
+### 方式一 —— NSIS 安装程序（推荐）
 
-1. Download `QuickAI_<version>_x64-setup.exe` from the
-   [latest release](https://github.com/yorelll/quickai/releases/latest).
-2. Run the installer.
-3. Launch QuickAI from the Start Menu or desktop shortcut. It appears in your
-   system tray.
+1. 从[最新版本](https://github.com/yorelll/quickai/releases/latest)下载
+   `QuickAI_<version>_x64-setup.exe`。
+2. 运行安装程序。
+3. 从开始菜单或桌面快捷方式启动 QuickAI。它会出现在系统托盘中。
 
-### Option 2 — Portable zip (no installation)
+### 方式二 —— 便携版 zip（免安装）
 
-1. Download `QuickAI_<version>_x64_portable.zip` from the
-   [latest release](https://github.com/yorelll/quickai/releases/latest).
-2. Extract the zip anywhere and run `quickai.exe`.
+1. 从[最新版本](https://github.com/yorelll/quickai/releases/latest)下载
+   `QuickAI_<version>_x64_portable.zip`。
+2. 解压到任意位置，运行 `quickai.exe`。
 
-The portable build keeps all of its data in the same per-user app-data
-directory as the installer build, so you can switch between the two freely.
+便携版与安装版使用同一个按用户区分的应用数据目录，因此你可以在两者之间自由切换。
 
-> **No special permissions needed on Windows.** The global hotkey and screen
-> capture work out of the box; there is no Accessibility or Screen Recording
-> permission gate.
+> **Windows 上无需任何特殊权限。** 全局热键与屏幕截图开箱即用，不存在辅助功能或
+> 屏幕录制之类的权限门槛。
 
-## Getting Started
+## 快速上手
 
-On first launch, open **Settings** (the gear icon, or press
-<kbd>Ctrl</kbd>+<kbd>,</kbd>) and configure a provider on the **AI** tab:
+首次启动时，打开**设置**（齿轮图标，或按 <kbd>Ctrl</kbd>+<kbd>,</kbd>），在 **AI**
+标签页中配置服务商：
 
-1. Choose a provider: **OpenAI**, **Anthropic**, or **OpenAI-compatible**.
-2. Enter your **API key** (stored locally in QuickAI's SQLite database).
-3. **Enter a model** — there is no default, so the field starts empty (it shows
-   a placeholder only). For the OpenAI-compatible provider, also enter a base
-   URL.
-4. Optionally tune the **General** tab: the summon hotkey, interface language,
-   data directory, and start-on-boot.
-5. Optionally configure **agent mode** on the **Agent** tab: keep it on
-   *Same as AI configuration*, or switch to *Custom* for its own
-   provider/model/base URL/key, and pick **Limited** or **Full** permissions.
+1. 选择服务商：**OpenAI**、**Anthropic** 或 **OpenAI-compatible**。
+2. 填入你的 **API Key**（保存在 QuickAI 本地的 SQLite 数据库中）。
+3. **填入模型**——没有默认值，该字段初始为空（只显示占位提示）。若使用
+   OpenAI-compatible 服务商，还需填入 Base URL。
+4. 可选：在 **General** 标签页中调整召唤热键、界面语言、数据目录与开机自启。
+5. 可选：在 **Agent** 标签页中配置 **agent 模式**：保持 *Same as AI
+   configuration*，或切换为 *Custom* 以使用独立的服务商 / 模型 / Base URL / Key，
+   并选择 **Limited** 或 **Full** 权限。
 
-Then double-tap your summon key and start asking. The **About** tab lists every
-shortcut and command, plus help.
+然后双击你的召唤键即可开始提问。**About** 标签页列出了所有快捷键与命令，以及帮助。
 
-## Build from Source
+## 从源码构建
 
 ```powershell
 # Clone and install dependencies
@@ -161,165 +138,144 @@ bun install
 bun run dev
 ```
 
-To produce a release build (frontend + NSIS installer):
+生成发布构建（前端 + NSIS 安装程序）：
 
 ```powershell
 bun run build:all
 ```
 
-Output:
+产物：
 
-- Installer: `src-tauri/target/release/bundle/nsis/QuickAI_<version>_x64-setup.exe`
-- Standalone executable: `src-tauri/target/release/quickai.exe`
+- 安装程序：`src-tauri/target/release/bundle/nsis/QuickAI_<version>_x64-setup.exe`
+- 独立可执行文件：`src-tauri/target/release/quickai.exe`
 
-> This local build is for development only. Publishable release artifacts are
-> produced by CI, not by `bun run build:all` — see
-> [RELEASING.md](RELEASING.md#release-artifacts).
+> 该本地构建仅供开发使用。可发布的正式产物由 CI 生成，而非 `bun run build:all`
+> —— 参见 [RELEASING.md](RELEASING.md#release-artifacts)。
 
-## Configuration
+## 配置
 
-QuickAI reads a small set of environment variables. Copy `.env.example` to
-`.env` (gitignored) and adjust as needed.
+QuickAI 会读取少量环境变量。把 `.env.example` 复制为 `.env`（已被 git 忽略）并按需
+调整。
 
-| Variable | Description | Default |
+| 变量 | 说明 | 默认值 |
 |---|---|---|
-| `VITE_QUOTE_MAX_DISPLAY_LINES` | Maximum lines shown in the quote preview. | `4` |
-| `VITE_QUOTE_MAX_DISPLAY_CHARS` | Maximum characters shown in the quote preview. | `300` |
-| `VITE_QUOTE_MAX_CONTEXT_LENGTH` | Maximum characters of selected context sent as prompt context. | `4096` |
+| `VITE_QUOTE_MAX_DISPLAY_LINES` | 引用预览显示的最大行数。 | `4` |
+| `VITE_QUOTE_MAX_DISPLAY_CHARS` | 引用预览显示的最大字符数。 | `300` |
+| `VITE_QUOTE_MAX_CONTEXT_LENGTH` | 作为提示上下文发送的选中文本最大字符数。 | `4096` |
 
-Provider settings (provider, model, base URL), API keys, the system prompt, and
-the General-tab options (hotkey, language, data directory, start-on-boot) are
-configured in the in-app **Settings** window (and its `config.toml`), not via
-environment variables.
+服务商设置（服务商、模型、Base URL）、API Key、系统提示词，以及 General 标签页中
+的选项（热键、语言、数据目录、开机自启），都在应用内的**设置**窗口（及其
+`config.toml`）中配置，而不是通过环境变量。
 
-See [docs/configurations.md](docs/configurations.md) for the full reference and
-[docs/commands.md](docs/commands.md) for the slash-command reference.
+完整参考见 [docs/configurations.md](docs/configurations.md)，斜杠命令参考见
+[docs/commands.md](docs/commands.md)。
 
-## Windows-Specific Details
+## Windows 相关细节
 
-### Hotkey
+### 热键
 
-QuickAI uses a low-level Windows keyboard hook (`SetWindowsHookExW` with
-`WH_KEYBOARD_LL`) to detect a double-tap of your summon key globally. This works
-in all applications, including fullscreen apps and elevated (admin) windows on
-Windows 10 1809+. The summon key is configurable on the Settings → **General**
-tab: <kbd>Ctrl</kbd> (default), <kbd>Alt</kbd>, <kbd>Shift</kbd>, or
-<kbd>Win</kbd>.
+QuickAI 使用 Windows 底层键盘钩子（`SetWindowsHookExW` 配合 `WH_KEYBOARD_LL`）来
+全局检测召唤键的双击。这在所有应用中都能工作，包括全屏应用，以及 Windows 10
+1809+ 上的提权（管理员）窗口。召唤键可在设置 → **General** 标签页中配置：
+<kbd>Ctrl</kbd>（默认）、<kbd>Alt</kbd>、<kbd>Shift</kbd> 或 <kbd>Win</kbd>。
 
-- **Activation window:** 400 ms between the two presses
-- **Cooldown:** 600 ms after each activation to prevent accidental re-triggers
+- **触发窗口：** 两次按下之间 400 毫秒
+- **冷却时间：** 每次触发后 600 毫秒，以避免误触发
 
-### Overlay window
+### 浮层窗口
 
-QuickAI uses Tauri's `always_on_top` and `skip_taskbar` APIs combined with Win32
-window styles to float above all other windows without appearing in the taskbar
-or stealing focus.
+QuickAI 结合 Tauri 的 `always_on_top`、`skip_taskbar` API 与 Win32 窗口样式，使其
+悬浮于所有其他窗口之上，既不显示在任务栏中，也不抢走焦点。
 
-### Screen capture
+### 屏幕截图
 
-Full-screen capture uses the Windows GDI `BitBlt` API. Type `/screen` in the chat
-to capture your screen and attach it as context; QuickAI's own window is excluded
-from the capture.
+全屏截图使用 Windows GDI 的 `BitBlt` API。在对话中输入 `/screen` 即可截取屏幕并
+作为上下文附加；QuickAI 自身的窗口会被排除在截图之外。
 
-### Context capture
+### 上下文捕获
 
-When you summon QuickAI (double-tap your hotkey) with text selected, QuickAI
-uses clipboard simulation (Ctrl+C via `SendInput`) to capture the selection, then
-restores the original clipboard contents. The cursor position is read via
-`GetCursorPos` to position the overlay near your cursor.
+当你在选中文字的状态下召唤 QuickAI（双击热键）时，QuickAI 会通过剪贴板模拟（经
+`SendInput` 发送 Ctrl+C）捕获选中内容，然后恢复剪贴板原有内容。光标位置通过
+`GetCursorPos` 读取，以便把浮层定位在光标附近。
 
-### Computer control (agent mode)
+### 电脑操控（agent 模式）
 
-QuickAI's `/do` command (or natural language such as "open notepad") lets the AI
-autonomously control your desktop:
+QuickAI 的 `/do` 命令（或诸如“打开记事本”这样的自然语言）让 AI 自主控制你的桌面：
 
-1. **Capture** — a screenshot of your screen is taken (excluding QuickAI's own
-   window).
-2. **Analyze** — the screenshot and your task are sent to the configured agent
-   provider.
-3. **Execute** — the model returns structured tool calls which are carried out
-   via Win32 `SendInput` (click, type, key press, scroll, launch).
-4. **Repeat** — a new screenshot is taken and the loop continues until the task
-   is done or you stop it.
+1. **截屏** —— 截取你的屏幕（排除 QuickAI 自身的窗口）。
+2. **分析** —— 把截图与你的任务发送给已配置的 agent 服务商。
+3. **执行** —— 模型返回结构化的工具调用，经 Win32 `SendInput` 执行（点击、输入、
+   按键、滚动、启动）。
+4. **重复** —— 再次截屏，循环持续，直到任务完成或你将其停止。
 
-**Safety:**
+**安全：**
 
-- A maximum of 30 iterations prevents infinite loops.
-- A 500 ms delay between actions lets you follow along.
-- Click **Stop**, or press <kbd>Ctrl</kbd>+<kbd>C</kbd>, to abort at any time.
-- The consent policy comes from **Agent permissions** on the Settings → Agent
-  tab: **Limited** (default) runs safe actions automatically and asks before
-  dangerous ones (launching a program, or a system-level key press such as
-  <kbd>Win</kbd>+<kbd>R</kbd> or <kbd>Alt</kbd>+<kbd>F4</kbd>); **Full** never
-  asks.
-- While a confirmation is pending, press <kbd>1</kbd> to allow, <kbd>2</kbd> to
-  deny, or <kbd>Ctrl</kbd>+<kbd>C</kbd> to abort — no mouse required.
+- 最多 30 次迭代，防止死循环。
+- 每个操作之间间隔 500 毫秒，便于你跟进。
+- 点击 **Stop**，或按 <kbd>Ctrl</kbd>+<kbd>C</kbd>，可随时中止。
+- 授权策略来自设置 → Agent 标签页中的 **Agent permissions**：**Limited**（默认）
+  自动执行安全操作，危险操作则先询问（启动程序，或诸如 <kbd>Win</kbd>+<kbd>R</kbd>
+  或 <kbd>Alt</kbd>+<kbd>F4</kbd> 之类的系统级按键）；**Full** 从不询问。
+- 当有待确认的操作时，按 <kbd>1</kbd> 允许、<kbd>2</kbd> 拒绝，或按
+  <kbd>Ctrl</kbd>+<kbd>C</kbd> 中止——无需鼠标。
 
-### Minibar mode
+### 迷你栏模式
 
-When you switch away from QuickAI while it is generating a response or running
-an agent task, the overlay shrinks to a **minibar** — a thin always-on-top strip.
-The minibar shows a status dot (green = idle/done, amber = working, red = error)
-and a preview of the last message or action. Click it to restore the full
-overlay. When a response finishes while you are in another window, a desktop
-notification is sent.
+当 QuickAI 正在生成回复或运行 agent 任务时你切换到别的窗口，浮层会收缩为一条
+**迷你栏**——一条细长的置顶条。迷你栏显示一个状态点（绿色 = 空闲 / 完成，琥珀色
+= 工作中，红色 = 出错）以及最近一条消息或操作的预览。点击它可恢复完整浮层。当你在
+其他窗口时回复完成，会发送一条桌面通知。
 
-## Architecture & Security
+## 架构与安全
 
 <details>
-<summary>Click to expand</summary>
+<summary>点击展开</summary>
 
-QuickAI is a **Tauri v2** app (Rust backend + React/TypeScript frontend). It has
-no backend service of its own: inference happens entirely at the cloud provider
-you configure.
+QuickAI 是一个 **Tauri v2** 应用（Rust 后端 + React/TypeScript 前端）。它没有自己
+的后端服务：推理完全发生在你所配置的云端服务商处。
 
-### Stack
+### 技术栈
 
-- **Frontend:** React 19 + TypeScript + Tailwind CSS 4 + Vite
-- **Backend:** Rust with Tauri v2 + Win32 API (windows crate)
-- **Database:** SQLite (bundled, local only)
-- **AI:** OpenAI / Anthropic / OpenAI-compatible HTTP APIs
+- **前端：** React 19 + TypeScript + Tailwind CSS 4 + Vite
+- **后端：** Rust 搭配 Tauri v2 + Win32 API（windows crate）
+- **数据库：** SQLite（内置，仅本地）
+- **AI：** OpenAI / Anthropic / OpenAI 兼容 HTTP API
 
-### Security model
+### 安全模型
 
-1. **Frontend (Tauri/React):** runs in a secure system webview (WebView2 on
-   Windows) with restricted IPC. Streaming uses Tauri's Channel API; the Rust
-   backend sends typed `StreamChunk` variants and the frontend accumulates
-   tokens into React state.
+1. **前端（Tauri/React）：** 运行在安全的系统 WebView 中（Windows 上为 WebView2），
+   IPC 受限。流式传输使用 Tauri 的 Channel API；Rust 后端发送带类型的
+   `StreamChunk` 变体，前端把 token 累积进 React 状态。
 
-2. **Network egress:** the only network calls are requests to the AI provider
-   you configure (OpenAI, Anthropic, or your custom OpenAI-compatible endpoint).
-   There is no telemetry and no first-party server.
+2. **网络出口：** 唯一的网络请求发往你所配置的 AI 服务商（OpenAI、Anthropic 或你
+   自定义的 OpenAI 兼容端点）。没有遥测，也没有第一方服务器。
 
-3. **Local storage only:** conversations and API keys are stored in a local
-   SQLite database in the app-data directory. Keys are never sent to anyone
-   except the provider they belong to.
+3. **仅本地存储：** 对话与 API Key 保存在应用数据目录中的本地 SQLite 数据库里。
+   Key 除了发往其所属的服务商之外，不会发送给任何人。
 
-4. **Agent-mode input simulation:** when `/do` is invoked, QuickAI uses Win32
-   `SendInput` to simulate mouse and keyboard events. Screenshots are captured
-   via GDI `BitBlt` and sent as base64 images to the configured provider. No
-   remote-control or screen-sharing service is involved.
+4. **agent 模式输入模拟：** 调用 `/do` 时，QuickAI 使用 Win32 `SendInput` 模拟鼠标
+   与键盘事件。截图通过 GDI `BitBlt` 捕获，并以 base64 图片发送给已配置的服务商。
+   不涉及任何远程控制或屏幕共享服务。
 
-### Window lifecycle
+### 窗口生命周期
 
-The app starts hidden. The hotkey or tray menu shows it. The window close button
-hides (not quits); quit is available from the tray.
+应用启动时是隐藏的。热键或托盘菜单可显示它。窗口的关闭按钮只是隐藏（而非退出）；
+退出可从托盘中操作。
 
 </details>
 
-## Contributing
+## 参与贡献
 
-Contributions are welcome! Read [CONTRIBUTING.md](CONTRIBUTING.md) to get
-started, and please follow the [Code of Conduct](CODE_OF_CONDUCT.md). See
-[RELEASING.md](RELEASING.md) for how releases are cut.
+欢迎贡献！请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 上手，并遵守[行为准则](CODE_OF_CONDUCT.md)。
+发布流程见 [RELEASING.md](RELEASING.md)。
 
-## License
+## 许可证
 
-Licensed under the [Apache License, Version 2.0](LICENSE).
+基于 [Apache License, Version 2.0](LICENSE) 授权。
 
-## Acknowledgments
+## 致谢
 
-- [ThukiWin](https://github.com/ayzekhdawy/thukiwin) by
-  [ayzekhdawy](https://github.com/ayzekhdawy) — the direct upstream of this fork.
-- [Thuki](https://github.com/quiet-node/thuki) by Logan Nguyen — the original
-  macOS app that ThukiWin was ported from.
+- [ThukiWin](https://github.com/ayzekhdawy/thukiwin) —— 由
+  [ayzekhdawy](https://github.com/ayzekhdawy) 开发，是本分支的直接上游。
+- [Thuki](https://github.com/quiet-node/thuki) —— 由 Logan Nguyen 开发，是 ThukiWin
+  移植所基于的原始 macOS 应用。
