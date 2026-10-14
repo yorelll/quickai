@@ -511,6 +511,22 @@ mod tests {
         assert!(!wrote);
     }
 
+    /// A failing statement must surface as `Err`, not a panic. Dropping the
+    /// table makes the UPDATE fail, exercising the `?` error arm — the same
+    /// technique `set_config_returns_error_when_table_missing` uses.
+    #[test]
+    fn update_conversation_title_if_unchanged_propagates_statement_errors() {
+        let conn = open_in_memory().unwrap();
+        conn.execute_batch("DROP TABLE conversations").unwrap();
+
+        let err = super::update_conversation_title_if_unchanged(&conn, "id", Some("a"), "b")
+            .expect_err("a missing table must produce an error, not a panic");
+        assert!(
+            err.to_string().contains("no such table"),
+            "unexpected error: {err}"
+        );
+    }
+
     #[test]
     fn delete_conversation_cascades_messages() {
         let conn = open_in_memory().unwrap();
