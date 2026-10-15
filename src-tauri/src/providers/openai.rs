@@ -926,13 +926,21 @@ mod tests {
     /// Returns the port and the server task's handle; callers await the handle
     /// so the trailing terminator is always written.
     async fn serve_chunks(chunks: Vec<Vec<u8>>) -> (u16, tokio::task::JoinHandle<()>) {
-        use tokio::io::AsyncWriteExt;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
         use tokio::net::TcpListener;
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let handle = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
+            // Drain the HTTP request before responding. Closing a socket that
+            // still has unread inbound data makes the OS send a TCP RST, which
+            // discards response bytes the client has not read yet and surfaces
+            // as a transport error. Reading the request first makes the close a
+            // graceful FIN, so the test no longer depends on the client winning
+            // a race against the RST (it could lose on a slow CI runner).
+            let mut request = [0u8; 8192];
+            let _ = stream.read(&mut request).await;
             let _ = stream
                 .write_all(
                     b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n",
