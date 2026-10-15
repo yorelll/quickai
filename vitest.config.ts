@@ -23,19 +23,19 @@ export default defineConfig({
     alias: {
       // Test-only module aliases: replace Tauri/Framer Motion with mocks
       // These do NOT affect production code — only tests use this config
-      '@tauri-apps/api/core': resolve(__dirname, 'src/testUtils/mocks/tauri.ts'),
-      '@tauri-apps/api/event': resolve(__dirname, 'src/testUtils/mocks/tauri.ts'),
+      '@tauri-apps/api/core': resolve(import.meta.dirname, 'src/testUtils/mocks/tauri.ts'),
+      '@tauri-apps/api/event': resolve(import.meta.dirname, 'src/testUtils/mocks/tauri.ts'),
       '@tauri-apps/api/window': resolve(
-        __dirname,
+        import.meta.dirname,
         'src/testUtils/mocks/tauri-window.ts',
       ),
       '@tauri-apps/api/dpi': resolve(
-        __dirname,
+        import.meta.dirname,
         'src/testUtils/mocks/tauri-window.ts',
       ),
-      'framer-motion': resolve(__dirname, 'src/testUtils/mocks/framer-motion.tsx'),
+      'framer-motion': resolve(import.meta.dirname, 'src/testUtils/mocks/framer-motion.tsx'),
       '@tauri-apps/plugin-notification': resolve(
-        __dirname,
+        import.meta.dirname,
         'src/testUtils/mocks/tauri-notification.ts',
       ),
     },
