@@ -8,7 +8,7 @@ import type { RawAppConfig } from '../../types';
 const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>;
 
 const RAW: RawAppConfig = {
-  general: { hotkey: 'ctrl', language: 'auto', data_dir: '' },
+  general: { hotkey: 'ctrl', language: 'auto', data_dir: '', theme: 'dark' },
   prompt: { system: '' },
   window: { overlay_width: 600, max_chat_height: 648, max_images: 3 },
   quote: {
@@ -36,10 +36,16 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+const DEFAULT_DATA_DIR = 'C:\\Users\\me\\AppData\\Roaming\\quickai';
+
 /** Installs a backend mock that echoes config edits back like the backend. */
 function installBackend(
   autoStart: boolean | 'reject' | Promise<boolean> = false,
-  options: { toggleFails?: boolean } = {},
+  options: {
+    toggleFails?: boolean;
+    defaultDir?: string | 'reject';
+    pick?: string | null | 'reject';
+  } = {},
 ) {
   mockInvoke.mockImplementation(
     async (cmd: string, args?: Record<string, unknown>) => {
@@ -52,6 +58,12 @@ function installBackend(
         case 'disable_auto_start_command':
           if (options.toggleFails) throw new Error('schtasks failed');
           return undefined;
+        case 'get_default_data_dir':
+          if (options.defaultDir === 'reject') throw new Error('no app data');
+          return options.defaultDir ?? DEFAULT_DATA_DIR;
+        case 'pick_folder':
+          if (options.pick === 'reject') throw new Error('no picker');
+          return options.pick ?? null;
         case 'set_config_field': {
           const section = args?.section as keyof typeof RAW;
           const key = args?.key as string;
@@ -70,7 +82,11 @@ function installBackend(
 function renderTab(
   config: RawAppConfig = RAW,
   autoStart: boolean | 'reject' | Promise<boolean> = false,
-  options: { toggleFails?: boolean } = {},
+  options: {
+    toggleFails?: boolean;
+    defaultDir?: string | 'reject';
+    pick?: string | null | 'reject';
+  } = {},
 ) {
   installBackend(autoStart, options);
   return render(
@@ -199,6 +215,106 @@ describe('GeneralTab', () => {
       key: 'data_dir',
       value: 'D:\\QuickAI',
     });
+  });
+
+  it('shows the resolved default data directory', async () => {
+    renderTab();
+    await act(async () => {});
+
+    expect(
+      screen.getByLabelText('Data directory', { selector: 'input' }),
+    ).toHaveAttribute('placeholder', DEFAULT_DATA_DIR);
+    expect(
+      screen.getByText(`Default: ${DEFAULT_DATA_DIR}`),
+    ).toBeInTheDocument();
+  });
+
+  it('falls back to a generic placeholder when the default path is unavailable', async () => {
+    renderTab(RAW, false, { defaultDir: 'reject' });
+    await act(async () => {});
+
+    expect(
+      screen.getByLabelText('Data directory', { selector: 'input' }),
+    ).toHaveAttribute('placeholder', 'Default location');
+    expect(screen.queryByText(/^Default: /)).toBeNull();
+  });
+
+  it('fills the data directory from the folder picker', async () => {
+    renderTab(RAW, false, { pick: 'D:\\QuickAI' });
+    await act(async () => {});
+
+    fireEvent.click(screen.getByRole('button', { name: 'Browse…' }));
+    await act(async () => {});
+    await flushDebounce();
+
+    expect(
+      screen.getByLabelText('Data directory', { selector: 'input' }),
+    ).toHaveValue('D:\\QuickAI');
+    expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
+      section: 'general',
+      key: 'data_dir',
+      value: 'D:\\QuickAI',
+    });
+  });
+
+  it('leaves the field untouched when the picker is cancelled', async () => {
+    renderTab(RAW, false, { pick: null });
+    await act(async () => {});
+
+    fireEvent.click(screen.getByRole('button', { name: 'Browse…' }));
+    await flushDebounce();
+
+    expect(
+      screen.getByLabelText('Data directory', { selector: 'input' }),
+    ).toHaveValue('');
+    expect(mockInvoke).not.toHaveBeenCalledWith(
+      'set_config_field',
+      expect.objectContaining({ key: 'data_dir' }),
+    );
+  });
+
+  it('ignores a picker that fails', async () => {
+    renderTab(RAW, false, { pick: 'reject' });
+    await act(async () => {});
+
+    fireEvent.click(screen.getByRole('button', { name: 'Browse…' }));
+    await flushDebounce();
+
+    expect(
+      screen.getByLabelText('Data directory', { selector: 'input' }),
+    ).toHaveValue('');
+  });
+
+  it('renders the theme selector and applies a change immediately', async () => {
+    renderTab();
+    const select = screen.getByLabelText('Theme', { selector: 'select' });
+    expect(select).toHaveValue('dark');
+
+    fireEvent.change(select, { target: { value: 'light' } });
+    expect(document.documentElement.dataset.theme).toBe('light');
+
+    await flushDebounce();
+    expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
+      section: 'general',
+      key: 'theme',
+      value: 'light',
+    });
+  });
+
+  it('shows the language actually in effect, not a stale config value', () => {
+    const { unmount } = renderTab();
+    fireEvent.change(
+      screen.getByLabelText('Interface language', { selector: 'select' }),
+      { target: { value: 'en' } },
+    );
+    unmount();
+
+    // The write never reached config.toml, so config still says `auto`; the box
+    // must reflect the choice that is actually applied.
+    renderTab();
+    expect(
+      screen.getByLabelText('Interface language', { selector: 'select' }),
+    ).toHaveValue('en');
   });
 
   describe('start-on-boot', () => {

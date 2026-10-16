@@ -1,6 +1,6 @@
 /**
- * General tab - summon hotkey, interface language, data directory, and the
- * Windows start-on-boot toggle.
+ * General tab - summon hotkey, interface language, theme, data directory, and
+ * the Windows start-on-boot toggle.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -16,10 +16,12 @@ import {
 import { SaveField } from '../components/SaveField';
 import { configHelp } from '../configHelpers';
 import { HOTKEYS, normalizeHotkey, hotkeyLabelKey } from '../hotkeys';
+import { THEMES, applyTheme, normalizeTheme, themeLabelKey } from '../theme';
 import {
   useTranslation,
   getLanguageSetting,
   setLanguageSetting,
+  LANGUAGE_STORAGE_KEY,
   SUPPORTED_LANGUAGE_SETTINGS,
   type LanguageSetting,
   type TranslationKey,
@@ -40,6 +42,18 @@ function normalizeLanguage(value: string): LanguageSetting {
     : 'auto';
 }
 
+/**
+ * The language actually in effect. `setLanguageSetting` writes an explicit
+ * choice to localStorage synchronously, so that is the authoritative source
+ * for what the interface is showing; `config.general.language` is the
+ * persisted mirror and only catches up once the write lands. An absent entry
+ * means "follow the system", which defers to whatever the config pins.
+ */
+function effectiveLanguage(configured: LanguageSetting): LanguageSetting {
+  const stored = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+  return stored === null ? configured : normalizeLanguage(stored);
+}
+
 interface GeneralTabProps {
   config: RawAppConfig;
   resyncToken: number;
@@ -51,6 +65,8 @@ export function GeneralTab({ config, resyncToken, onSaved }: GeneralTabProps) {
   /** null until the OS reports whether a startup task is registered. */
   const [autoStart, setAutoStart] = useState<boolean | null>(null);
   const [autoStartError, setAutoStartError] = useState(false);
+  /** Resolved OS default data directory, shown when the field is empty. */
+  const [defaultDataDir, setDefaultDataDir] = useState('');
 
   const configuredLanguage = normalizeLanguage(config.general.language);
 
@@ -65,6 +81,22 @@ export function GeneralTab({ config, resyncToken, onSaved }: GeneralTabProps) {
     if (pinned !== 'auto' && getLanguageSetting() === 'auto') {
       setLanguageSetting(pinned);
     }
+  }, []);
+
+  // The resolved default is the value an empty data_dir falls back to; the
+  // field shows it as its placeholder so the user never has to guess.
+  useEffect(() => {
+    let cancelled = false;
+    void invoke<string>('get_default_data_dir')
+      .then((path) => {
+        if (!cancelled) setDefaultDataDir(path);
+      })
+      .catch(() => {
+        // Command unavailable: keep the generic placeholder.
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Start-on-boot is an OS registration (Task Scheduler), not a config field,
@@ -96,6 +128,15 @@ export function GeneralTab({ config, resyncToken, onSaved }: GeneralTabProps) {
     }
   }, []);
 
+  const handleBrowse = useCallback(async (setValue: (next: string) => void) => {
+    try {
+      const picked = await invoke<string | null>('pick_folder');
+      if (picked) setValue(picked);
+    } catch {
+      // Picker unavailable: leave the field untouched.
+    }
+  }, []);
+
   return (
     <>
       <Section heading={t('settings.section.hotkey')}>
@@ -112,7 +153,9 @@ export function GeneralTab({ config, resyncToken, onSaved }: GeneralTabProps) {
               value={normalizeHotkey(value)}
               options={HOTKEYS}
               onChange={setValue}
-              formatOption={(key) => t(hotkeyLabelKey(key))}
+              formatOption={(key) =>
+                t('hotkey.doubleTap', { key: t(hotkeyLabelKey(key)) })
+              }
               ariaLabel={t('settings.general.hotkey')}
             />
           )}
@@ -128,9 +171,9 @@ export function GeneralTab({ config, resyncToken, onSaved }: GeneralTabProps) {
           initialValue={config.general.language}
           resyncToken={resyncToken}
           onSaved={onSaved}
-          render={(value, setValue) => (
+          render={(_value, setValue) => (
             <Dropdown
-              value={normalizeLanguage(value)}
+              value={effectiveLanguage(configuredLanguage)}
               options={SUPPORTED_LANGUAGE_SETTINGS}
               onChange={(next) => {
                 setValue(next);
@@ -138,6 +181,30 @@ export function GeneralTab({ config, resyncToken, onSaved }: GeneralTabProps) {
               }}
               formatOption={(setting) => t(LANGUAGE_LABEL_KEYS[setting])}
               ariaLabel={t('settings.general.language')}
+            />
+          )}
+        />
+      </Section>
+
+      <Section heading={t('settings.section.appearance')}>
+        <SaveField
+          section="general"
+          fieldKey="theme"
+          label={t('settings.general.theme')}
+          helper={t(configHelp('general', 'theme'))}
+          initialValue={config.general.theme}
+          resyncToken={resyncToken}
+          onSaved={onSaved}
+          render={(value, setValue) => (
+            <Dropdown
+              value={normalizeTheme(value)}
+              options={THEMES}
+              onChange={(next) => {
+                setValue(next);
+                applyTheme(next);
+              }}
+              formatOption={(theme) => t(themeLabelKey(theme))}
+              ariaLabel={t('settings.general.theme')}
             />
           )}
         />
@@ -153,15 +220,31 @@ export function GeneralTab({ config, resyncToken, onSaved }: GeneralTabProps) {
           resyncToken={resyncToken}
           onSaved={onSaved}
           render={(value, setValue, errored) => (
-            <TextField
-              value={value}
-              onChange={setValue}
-              placeholder={t('settings.general.dataDirPlaceholder')}
-              errored={errored}
-              ariaLabel={t('settings.general.dataDir')}
-            />
+            <div className={styles.fieldWithButton}>
+              <TextField
+                value={value}
+                onChange={setValue}
+                placeholder={
+                  defaultDataDir || t('settings.general.dataDirPlaceholder')
+                }
+                errored={errored}
+                ariaLabel={t('settings.general.dataDir')}
+              />
+              <button
+                type="button"
+                className={`${styles.button} ${styles.buttonGhost}`}
+                onClick={() => void handleBrowse(setValue)}
+              >
+                {t('settings.general.dataDirBrowse')}
+              </button>
+            </div>
           )}
         />
+        {defaultDataDir ? (
+          <p className={styles.rowHelper}>
+            {t('settings.general.dataDirDefault', { path: defaultDataDir })}
+          </p>
+        ) : null}
         <p className={styles.rowHelper}>{t('settings.general.dataDirNote')}</p>
       </Section>
 

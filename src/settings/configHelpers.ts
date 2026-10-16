@@ -12,9 +12,7 @@ const HELP_KEYS = {
     hotkey: 'help.general.hotkey',
     language: 'help.general.language',
     data_dir: 'help.general.data_dir',
-  },
-  prompt: {
-    system: 'help.prompt.system',
+    theme: 'help.general.theme',
   },
   window: {
     overlay_width: 'help.window.overlay_width',

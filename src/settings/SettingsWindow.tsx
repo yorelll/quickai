@@ -15,10 +15,9 @@ import {
 } from 'react';
 
 import { invoke } from '@tauri-apps/api/core';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
 
 import { useConfigSync } from './hooks/useConfigSync';
-import { useSettingsAutoResize } from './hooks/useSettingsAutoResize';
 import { GeneralTab } from './tabs/GeneralTab';
 import { AiTab } from './tabs/AiTab';
 import { DisplayTab } from './tabs/DisplayTab';
@@ -129,8 +128,30 @@ const TABS: ReadonlyArray<{
 ];
 
 const SAVED_PILL_DURATION_MS = 1500;
-const CHROME_HEIGHT = 148;
-const BANNER_HEIGHT = 56;
+/**
+ * The Settings window is a fixed size: the body scrolls instead. Resizing it
+ * per tab meant the window grew on the General→AI / General→Display switches,
+ * and each growth re-rasterises the window's backdrop blur — the lag the user
+ * reported. One size, set once, keeps every switch cheap and every tab usable.
+ */
+const SETTINGS_WIDTH = 580;
+const SETTINGS_HEIGHT = 700;
+
+/**
+ * Tags that must never start a window drag. The drag region is limited to the
+ * title row and the tab bar, so this only has to catch the controls in those
+ * two bars (the close button and the tabs) and anything inside them.
+ */
+const INTERACTIVE_TAGS = new Set([
+  'TEXTAREA',
+  'INPUT',
+  'BUTTON',
+  'A',
+  'SELECT',
+  'SVG',
+  'PATH',
+  'LABEL',
+]);
 
 export function SettingsWindow() {
   const { t } = useTranslation();
@@ -143,14 +164,12 @@ export function SettingsWindow() {
   const [resyncToken, setResyncToken] = useState(0);
 
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [contentEl, setContentEl] = useState<HTMLDivElement | null>(null);
 
-  const bannerVisible = Boolean(marker && !markerDismissed);
-  const bodyShouldScroll = useSettingsAutoResize(
-    contentEl,
-    CHROME_HEIGHT + (bannerVisible ? BANNER_HEIGHT : 0),
-    activeTab,
-  );
+  useEffect(() => {
+    void getCurrentWindow().setSize(
+      new LogicalSize(SETTINGS_WIDTH, SETTINGS_HEIGHT),
+    );
+  }, []);
 
   const handleSaved = useCallback(
     (next: RawAppConfig) => {
@@ -201,34 +220,11 @@ export function SettingsWindow() {
 
   const handleDragStart = useCallback((e: MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
-    const el = e.target as HTMLElement;
-
-    const INTERACTIVE_TAGS = new Set([
-      'TEXTAREA',
-      'INPUT',
-      'BUTTON',
-      'A',
-      'SELECT',
-      'PATH',
-      'SVG',
-      'LABEL',
-    ]);
-    let current: HTMLElement | null = el;
+    let current: HTMLElement | null = e.target as HTMLElement;
     while (current) {
       if (INTERACTIVE_TAGS.has(current.tagName.toUpperCase())) return;
       current = current.parentElement;
     }
-
-    for (const node of Array.from(el.childNodes)) {
-      if (
-        node.nodeType === Node.TEXT_NODE &&
-        node.textContent &&
-        node.textContent.trim().length > 0
-      ) {
-        return;
-      }
-    }
-
     e.preventDefault();
     void getCurrentWindow().startDragging();
   }, []);
@@ -236,32 +232,15 @@ export function SettingsWindow() {
   if (!config) return null;
 
   return (
-    <div className={styles.window} onMouseDown={handleDragStart}>
-      {/* Close button for Windows */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          padding: '4px 8px 0',
-          flexShrink: 0,
-        }}
-      >
+    <div className={styles.window}>
+      {/* Close button for Windows. This title row and the tab bar are the drag
+          region: the body below scrolls, so a drag started there (or on the
+          scrollbar) would move the window instead of scrolling it. */}
+      <div className={styles.closeRow} onMouseDown={handleDragStart}>
         <button
           type="button"
           onClick={handleHide}
-          style={{
-            width: 28,
-            height: 28,
-            border: 'none',
-            background: 'transparent',
-            color: 'var(--color-text-secondary)',
-            cursor: 'pointer',
-            borderRadius: 4,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 14,
-          }}
+          className={styles.closeBtn}
           aria-label={t('settings.close')}
         >
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
@@ -310,6 +289,7 @@ export function SettingsWindow() {
         role="tablist"
         aria-label={t('settings.sections')}
         className={styles.tabBar}
+        onMouseDown={handleDragStart}
       >
         {TABS.map((tab) => {
           const active = tab.id === activeTab;
@@ -344,44 +324,38 @@ export function SettingsWindow() {
         })}
       </div>
 
-      <div
-        className={`${styles.body} ${bodyShouldScroll ? styles.bodyScrollable : ''}`}
-        id={`panel-${activeTab}`}
-        role="tabpanel"
-      >
-        <div ref={setContentEl}>
-          {activeTab === 'general' ? (
-            <GeneralTab
-              config={config}
-              resyncToken={resyncToken}
-              onSaved={handleSaved}
-            />
-          ) : null}
-          {activeTab === 'ai' ? (
-            <AiTab
-              config={config}
-              resyncToken={resyncToken}
-              onSaved={handleSaved}
-            />
-          ) : null}
-          {activeTab === 'display' ? (
-            <DisplayTab
-              config={config}
-              resyncToken={resyncToken}
-              onSaved={handleSaved}
-            />
-          ) : null}
-          {activeTab === 'agent' ? (
-            <AgentTab
-              config={config}
-              resyncToken={resyncToken}
-              onSaved={handleSaved}
-            />
-          ) : null}
-          {activeTab === 'about' ? (
-            <AboutTab config={config} onSaved={handleSaved} onReload={reload} />
-          ) : null}
-        </div>
+      <div className={styles.body} id={`panel-${activeTab}`} role="tabpanel">
+        {activeTab === 'general' ? (
+          <GeneralTab
+            config={config}
+            resyncToken={resyncToken}
+            onSaved={handleSaved}
+          />
+        ) : null}
+        {activeTab === 'ai' ? (
+          <AiTab
+            config={config}
+            resyncToken={resyncToken}
+            onSaved={handleSaved}
+          />
+        ) : null}
+        {activeTab === 'display' ? (
+          <DisplayTab
+            config={config}
+            resyncToken={resyncToken}
+            onSaved={handleSaved}
+          />
+        ) : null}
+        {activeTab === 'agent' ? (
+          <AgentTab
+            config={config}
+            resyncToken={resyncToken}
+            onSaved={handleSaved}
+          />
+        ) : null}
+        {activeTab === 'about' ? (
+          <AboutTab config={config} onSaved={handleSaved} onReload={reload} />
+        ) : null}
       </div>
 
       <SavedPill visible={savedVisible} />

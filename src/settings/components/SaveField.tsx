@@ -15,7 +15,6 @@ interface SaveFieldProps<TValue extends Primitive> {
   fieldKey: string;
   label: string;
   helper?: string;
-  vertical?: boolean;
   initialValue: TValue;
   resyncToken: number;
   onSaved: (next: RawAppConfig) => void;
@@ -31,7 +30,6 @@ export function SaveField<TValue extends Primitive>({
   fieldKey,
   label,
   helper,
-  vertical,
   initialValue,
   resyncToken,
   onSaved,
@@ -51,7 +49,7 @@ export function SaveField<TValue extends Primitive>({
   }
 
   return (
-    <SettingRow label={label} helper={helper} vertical={vertical} error={error}>
+    <SettingRow label={label} helper={helper} error={error}>
       {render(value, setValue, error !== null)}
     </SettingRow>
   );

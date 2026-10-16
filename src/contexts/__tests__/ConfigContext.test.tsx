@@ -14,7 +14,7 @@ const mockListen = listen as unknown as ReturnType<typeof vi.fn>;
 
 /** Raw (snake_case) config payload as returned by the Rust `get_config`. */
 const RAW = {
-  general: { hotkey: 'ctrl', language: 'auto', data_dir: '' },
+  general: { hotkey: 'ctrl', language: 'auto', data_dir: '', theme: 'dark' },
   prompt: { system: '' },
   window: { overlay_width: 600, max_chat_height: 648, max_images: 3 },
   quote: {
@@ -68,6 +68,36 @@ describe('ConfigProvider', () => {
     await act(async () => {});
 
     expect(screen.getByTestId('model').textContent).toBe('custom-model');
+  });
+
+  it('applies the persisted theme to the document root', async () => {
+    mockInvoke.mockResolvedValue({
+      ...RAW,
+      general: { ...RAW.general, theme: 'light' },
+    });
+
+    render(
+      <ConfigProvider>
+        <Probe />
+      </ConfigProvider>,
+    );
+    await act(async () => {});
+
+    expect(document.documentElement.dataset.theme).toBe('light');
+  });
+
+  it('falls back to the dark theme while the config is unavailable', async () => {
+    delete document.documentElement.dataset.theme;
+    mockInvoke.mockRejectedValue(new Error('ipc down'));
+
+    render(
+      <ConfigProvider>
+        <Probe />
+      </ConfigProvider>,
+    );
+    await act(async () => {});
+
+    expect(document.documentElement.dataset.theme).toBe('dark');
   });
 
   it('falls back to defaults when get_config returns null', async () => {

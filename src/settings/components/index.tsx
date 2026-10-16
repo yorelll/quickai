@@ -23,7 +23,7 @@ export function Section({
   children,
 }: {
   heading: string;
-  children: ReactNode;
+  children?: ReactNode;
 }) {
   return (
     <section className={styles.section}>
@@ -37,13 +37,11 @@ export function SettingRow({
   label,
   helper,
   error,
-  vertical = false,
   children,
 }: {
   label: string;
   helper?: string;
   error?: ConfigError | null;
-  vertical?: boolean;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -52,11 +50,7 @@ export function SettingRow({
   const infoBtnRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <div
-      className={vertical ? `${styles.row} ${styles.rowVertical}` : styles.row}
-      role="group"
-      aria-labelledby={labelId}
-    >
+    <div className={styles.row} role="group" aria-labelledby={labelId}>
       <div className={styles.rowLabelGroup}>
         <label id={labelId} className={styles.rowLabel}>
           {label}
@@ -125,35 +119,6 @@ export function TextField({
       autoComplete="off"
       autoCorrect="off"
       autoCapitalize="off"
-    />
-  );
-}
-
-export function Textarea({
-  value,
-  onChange,
-  placeholder,
-  maxLength,
-  ariaLabel,
-}: {
-  value: string;
-  onChange: (next: string) => void;
-  placeholder?: string;
-  maxLength?: number;
-  ariaLabel?: string;
-}) {
-  return (
-    <textarea
-      className={styles.textarea}
-      value={value}
-      onChange={(e: ChangeEvent<HTMLTextAreaElement>) =>
-        onChange(e.target.value)
-      }
-      placeholder={placeholder}
-      maxLength={maxLength}
-      aria-label={ariaLabel}
-      rows={4}
-      spellCheck={false}
     />
   );
 }
@@ -412,6 +377,66 @@ export function ConfirmDialog({
             autoFocus
           >
             {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Info dialog ────────────────────────────────────────────────────────
+
+/**
+ * Scrollable read-only popup used for long reference content (shortcuts,
+ * help). Escape and the Close button dismiss it.
+ */
+export function InfoDialog({
+  open,
+  title,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  const titleId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <div
+      className={styles.dialogBackdrop}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+    >
+      <div className={`${styles.dialog} ${styles.dialogWide}`}>
+        <h2 id={titleId} className={styles.dialogTitle}>
+          {title}
+        </h2>
+        <div className={styles.dialogBody}>{children}</div>
+        <div className={styles.dialogActions}>
+          <button
+            type="button"
+            className={`${styles.button} ${styles.buttonGhost}`}
+            onClick={onClose}
+            autoFocus
+          >
+            {t('common.close')}
           </button>
         </div>
       </div>

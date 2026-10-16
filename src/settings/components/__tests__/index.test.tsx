@@ -4,12 +4,12 @@ import {
   Section,
   SettingRow,
   TextField,
-  Textarea,
   NumberSlider,
   NumberStepper,
   Dropdown,
   SavedPill,
   ConfirmDialog,
+  InfoDialog,
 } from '../index';
 
 describe('Section', () => {
@@ -21,6 +21,11 @@ describe('Section', () => {
     );
     expect(screen.getByText('Window')).toBeInTheDocument();
     expect(screen.getByText('body')).toBeInTheDocument();
+  });
+
+  it('renders a heading-only section', () => {
+    render(<Section heading="Skills" />);
+    expect(screen.getByText('Skills')).toBeInTheDocument();
   });
 });
 
@@ -89,26 +94,6 @@ describe('TextField', () => {
 
     fireEvent.change(input, { target: { value: 'o4-mini' } });
     expect(onChange).toHaveBeenCalledWith('o4-mini');
-  });
-});
-
-describe('Textarea', () => {
-  it('reports changes and caps the length', () => {
-    const onChange = vi.fn();
-    render(
-      <Textarea
-        value="hello"
-        onChange={onChange}
-        placeholder="Persona"
-        maxLength={10}
-        ariaLabel="System prompt"
-      />,
-    );
-    const area = screen.getByLabelText('System prompt');
-    expect(area).toHaveAttribute('maxlength', '10');
-
-    fireEvent.change(area, { target: { value: 'hi' } });
-    expect(onChange).toHaveBeenCalledWith('hi');
   });
 });
 
@@ -464,5 +449,38 @@ describe('ConfirmDialog', () => {
 
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onCancel).toHaveBeenCalledOnce();
+  });
+});
+
+describe('InfoDialog', () => {
+  it('renders nothing while closed', () => {
+    render(
+      <InfoDialog open={false} title="Help" onClose={vi.fn()}>
+        <p>body</p>
+      </InfoDialog>,
+    );
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('renders a titled, scrollable body and closes on the button and Escape', () => {
+    const onClose = vi.fn();
+    render(
+      <InfoDialog open title="Help" onClose={onClose}>
+        <p>body</p>
+      </InfoDialog>,
+    );
+
+    expect(screen.getByRole('dialog')).toHaveAttribute('aria-modal', 'true');
+    expect(screen.getByText('Help')).toBeInTheDocument();
+    expect(screen.getByText('body')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(document, { key: 'a' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(2);
   });
 });

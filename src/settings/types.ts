@@ -13,6 +13,7 @@ export interface RawAppConfig {
     hotkey: string;
     language: string;
     data_dir: string;
+    theme: string;
   };
   prompt: {
     system: string;

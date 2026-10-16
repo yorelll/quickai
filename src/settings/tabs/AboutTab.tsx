@@ -1,6 +1,8 @@
 /**
- * About tab - app identity, version, links, shortcuts and commands, help,
- * and file actions.
+ * About tab - app identity, version, links, and file actions.
+ *
+ * The shortcut/command reference and the help text are long, so each lives in
+ * a scrollable popup opened from a compact row instead of stretching the page.
  *
  * Windows-adapted: no macOS permissions (Accessibility/Screen Recording),
  * uses Windows-style file reveal.
@@ -14,7 +16,7 @@ import quickaiLogo from '../../../src-tauri/icons/128x128.png';
 import pkg from '../../../package.json';
 import { COMMANDS } from '../../config/commands';
 import { normalizeHotkey, hotkeyLabelKey } from '../hotkeys';
-import { Section, ConfirmDialog } from '../components';
+import { Section, ConfirmDialog, InfoDialog } from '../components';
 import { useTranslation } from '../../i18n';
 import styles from '../../styles/settings.module.css';
 import type { RawAppConfig } from '../types';
@@ -27,12 +29,16 @@ interface AboutTabProps {
 
 const REPO_URL = 'https://github.com/yorelll/quickai';
 
+/** Which reference popup is open, if any. */
+type ReferenceDialog = 'shortcuts' | 'help';
+
 export function AboutTab({ config, onSaved, onReload }: AboutTabProps) {
   const { t } = useTranslation();
   const sha = import.meta.env.VITE_GIT_COMMIT_SHA?.slice(0, 7);
   const APP_VERSION = sha ? `${pkg.version}+nightly.${sha}` : pkg.version;
   const releaseUrl = `${REPO_URL}/releases/tag/v${pkg.version}`;
   const [confirmResetAll, setConfirmResetAll] = useState(false);
+  const [openDialog, setOpenDialog] = useState<ReferenceDialog | null>(null);
   const hotkey = t(hotkeyLabelKey(normalizeHotkey(config.general.hotkey)));
 
   return (
@@ -80,7 +86,64 @@ export function AboutTab({ config, onSaved, onReload }: AboutTabProps) {
         </div>
       </div>
 
-      <Section heading={t('settings.section.shortcuts')}>
+      <div className={styles.aboutRefList}>
+        <button
+          type="button"
+          className={styles.aboutRefRow}
+          onClick={() => setOpenDialog('shortcuts')}
+        >
+          <span className={styles.aboutRefLabel}>
+            {t('settings.section.shortcuts')}
+          </span>
+          <ChevronIcon />
+        </button>
+        <button
+          type="button"
+          className={styles.aboutRefRow}
+          onClick={() => setOpenDialog('help')}
+        >
+          <span className={styles.aboutRefLabel}>
+            {t('settings.section.help')}
+          </span>
+          <ChevronIcon />
+        </button>
+      </div>
+
+      <Section heading={t('settings.section.file')}>
+        <div className={styles.aboutLinkRow}>
+          <button
+            type="button"
+            className={`${styles.button} ${styles.buttonGhost}`}
+            onClick={() => void invoke('reveal_config_in_explorer')}
+          >
+            {t('about.revealData')}
+          </button>
+          <button
+            type="button"
+            className={`${styles.button} ${styles.buttonGhost}`}
+            onClick={() => void onReload()}
+          >
+            {t('about.refreshConfig')}
+          </button>
+          <button
+            type="button"
+            className={`${styles.button} ${styles.buttonDestructive}`}
+            onClick={() => setConfirmResetAll(true)}
+          >
+            {t('about.resetAll')}
+          </button>
+        </div>
+      </Section>
+
+      <Section heading={t('settings.section.danger')}>
+        <p className={styles.helpText}>{t('about.license')}</p>
+      </Section>
+
+      <InfoDialog
+        open={openDialog === 'shortcuts'}
+        title={t('settings.section.shortcuts')}
+        onClose={() => setOpenDialog(null)}
+      >
         <InfoRow
           keys={t('about.keys.summon', { key: hotkey })}
           label={t('about.shortcut.summon')}
@@ -126,9 +189,13 @@ export function AboutTab({ config, onSaved, onReload }: AboutTabProps) {
             label={t(command.descriptionKey)}
           />
         ))}
-      </Section>
+      </InfoDialog>
 
-      <Section heading={t('settings.section.help')}>
+      <InfoDialog
+        open={openDialog === 'help'}
+        title={t('settings.section.help')}
+        onClose={() => setOpenDialog(null)}
+      >
         <h4 className={styles.helpHeading}>{t('about.help.featuresTitle')}</h4>
         <p className={styles.helpText}>{t('about.help.features')}</p>
         <h4 className={styles.helpHeading}>{t('about.help.usageTitle')}</h4>
@@ -137,37 +204,7 @@ export function AboutTab({ config, onSaved, onReload }: AboutTabProps) {
         </p>
         <h4 className={styles.helpHeading}>{t('about.help.trayTitle')}</h4>
         <p className={styles.helpText}>{t('about.help.tray')}</p>
-      </Section>
-
-      <Section heading={t('settings.section.file')}>
-        <div className={styles.aboutLinkRow}>
-          <button
-            type="button"
-            className={`${styles.button} ${styles.buttonGhost}`}
-            onClick={() => void invoke('reveal_config_in_explorer')}
-          >
-            {t('about.revealData')}
-          </button>
-          <button
-            type="button"
-            className={`${styles.button} ${styles.buttonGhost}`}
-            onClick={() => void onReload()}
-          >
-            {t('about.refreshConfig')}
-          </button>
-          <button
-            type="button"
-            className={`${styles.button} ${styles.buttonDestructive}`}
-            onClick={() => setConfirmResetAll(true)}
-          >
-            {t('about.resetAll')}
-          </button>
-        </div>
-      </Section>
-
-      <Section heading={t('settings.section.danger')}>
-        <p className={styles.helpText}>{t('about.license')}</p>
-      </Section>
+      </InfoDialog>
 
       <ConfirmDialog
         open={confirmResetAll}
@@ -194,6 +231,24 @@ function InfoRow({ keys, label }: { keys: string; label: string }) {
       <kbd className={styles.infoKeys}>{keys}</kbd>
       <span className={styles.infoLabel}>{label}</span>
     </div>
+  );
+}
+
+function ChevronIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M9 6l6 6-6 6" />
+    </svg>
   );
 }
 

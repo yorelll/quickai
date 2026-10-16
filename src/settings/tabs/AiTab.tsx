@@ -1,11 +1,12 @@
 /**
- * AI tab - chat provider, model, base URL, API key, and system prompt.
+ * AI tab - chat provider, model, base URL, API key, and the Skills editor.
  */
 
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
-import { Section, TextField, Textarea, Dropdown } from '../components';
+import { Section, TextField, Dropdown } from '../components';
+import { SkillsSection } from '../components/SkillsSection';
 import { SaveField } from '../components/SaveField';
 import { configHelp } from '../configHelpers';
 import { useTranslation } from '../../i18n';
@@ -19,7 +20,6 @@ import {
 import styles from '../../styles/settings.module.css';
 import type { RawAppConfig } from '../types';
 
-const PROMPT_MAX_CHARS = 8000;
 const MODEL_LIST_ID = 'chat-model-options';
 
 interface AiTabProps {
@@ -163,35 +163,7 @@ export function AiTab({ config, resyncToken, onSaved }: AiTabProps) {
         </div>
       </Section>
 
-      <Section heading={t('settings.section.prompt')}>
-        <SaveField
-          section="prompt"
-          fieldKey="system"
-          label={t('settings.ai.systemPrompt')}
-          helper={t(configHelp('prompt', 'system'))}
-          vertical
-          initialValue={config.prompt.system}
-          resyncToken={resyncToken}
-          onSaved={onSaved}
-          render={(value, setValue) => (
-            <>
-              <Textarea
-                value={value}
-                onChange={setValue}
-                placeholder={t('settings.ai.systemPromptPlaceholder')}
-                maxLength={PROMPT_MAX_CHARS}
-                ariaLabel={t('settings.ai.systemPrompt')}
-              />
-              <div className={styles.charCounter}>
-                {t('settings.ai.charCounter', {
-                  count: value.length,
-                  max: PROMPT_MAX_CHARS,
-                })}
-              </div>
-            </>
-          )}
-        />
-      </Section>
+      <SkillsSection />
     </>
   );
 }

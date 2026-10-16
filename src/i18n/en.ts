@@ -232,7 +232,6 @@ export const en = {
   'settings.section.model': 'Model',
   'settings.section.connection': 'Connection',
   'settings.section.apiKey': 'API Key',
-  'settings.section.prompt': 'Prompt',
   'settings.section.window': 'Window',
   'settings.section.input': 'Input',
   'settings.section.language': 'Language',
@@ -249,10 +248,6 @@ export const en = {
   'settings.ai.apiKeyPlaceholder': 'Paste your API key',
   'settings.ai.apiKeyHelper':
     'Stored in the local database, never in config.toml.',
-  'settings.ai.systemPrompt': 'System prompt',
-  'settings.ai.systemPromptPlaceholder':
-    'Use the built-in assistant persona...',
-  'settings.ai.charCounter': '{count} / {max}',
 
   // ─── Settings: Agent tab ─────────────────────────────────────────────────
   'settings.agent.provider': 'Agent provider',
@@ -290,8 +285,6 @@ export const en = {
   'about.license': 'Apache-2.0 · Fork of thukiwin by ayzekhdawy',
 
   // ─── Settings: field helpers ─────────────────────────────────────────────
-  'help.prompt.system':
-    'Your custom personality or instructions for the AI. Leave this empty to use the built-in assistant persona. The list of slash commands is always added on top.',
   'help.window.overlay_width':
     'How wide the floating QuickAI window is, in pixels. Raise for wider input and chat at the cost of more screen space.',
   'help.window.max_chat_height':
@@ -418,6 +411,49 @@ export const en = {
   'about.help.trayTitle': 'Tray icon',
   'about.help.tray':
     'QuickAI lives in the system tray. The tray icon always shows the QuickAI logo — it has no separate states while the app runs. Left-click it to open its menu (Open QuickAI, Quit); right-click it to show or hide the overlay.',
+
+  // ─── Batch 3: settings theme, data dir, skills, About popups (T11) ──────
+  'common.close': 'Close',
+  'settings.section.appearance': 'Appearance',
+  'settings.general.theme': 'Theme',
+  'theme.dark': 'Dark',
+  'theme.light': 'Light',
+  'help.general.theme':
+    'The color scheme for QuickAI. Dark is the default; light is easier on the eyes in a bright room.',
+  'hotkey.doubleTap': 'Double-tap {key}',
+  'settings.general.dataDirBrowse': 'Browse…',
+  'settings.general.dataDirDefault': 'Default: {path}',
+  'settings.section.skills': 'Skills',
+  'settings.skills.alias': 'Alias',
+  'settings.skills.aliasPlaceholder': 'e.g. translate',
+  'settings.skills.path': 'Path',
+  'settings.skills.pathPlaceholder': 'Path to the skill file',
+  'settings.skills.add': 'Add skill',
+  'settings.skills.edit': 'Edit skill',
+  'settings.skills.delete': 'Delete skill',
+  'settings.skills.save': 'Save',
+  'settings.skills.moveUp': 'Move up',
+  'settings.skills.moveDown': 'Move down',
+  'settings.skills.enabledFor': 'Use {alias} as a system prompt',
+  'settings.skills.builtin': 'Built-in',
+  'settings.skills.empty': 'No skills yet.',
+  'settings.skills.loadError': "Couldn't load skills.",
+  'settings.skills.saveError': "Couldn't save skills. Please try again.",
+  'settings.skills.errorAliasEmpty': 'Enter an alias.',
+  'settings.skills.errorAliasWhitespace': 'The alias cannot contain spaces.',
+  'settings.skills.errorAliasDuplicate': 'That alias is already in use.',
+
+  // ─── Batch 3: chat & agent UX (T12) ─────────────────────────────────────
+  'command.add.desc': 'Add a skill to this message',
+  'ask.skills': 'Skills',
+  'ask.skillPickerLabel': 'Skill suggestions',
+  'ask.noSkills': 'No skills configured',
+  'ask.skillAddHint': 'Ctrl+Enter',
+  'ask.skillEnabledHint': 'Already enabled',
+  'ask.selectedSkills': 'Selected skills',
+  'ask.removeSkill': 'Remove skill {alias}',
+  'error.skillUnreadable':
+    "A selected skill couldn't be read, so it was left out of this message.",
 } as const;
 
 /** The complete set of translation keys understood by the app. */

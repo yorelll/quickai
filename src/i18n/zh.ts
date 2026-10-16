@@ -190,7 +190,6 @@ export const zh: Record<keyof typeof en, string> = {
   'settings.section.model': '模型',
   'settings.section.connection': '连接',
   'settings.section.apiKey': 'API 密钥',
-  'settings.section.prompt': '提示词',
   'settings.section.window': '窗口',
   'settings.section.input': '输入',
   'settings.section.language': '语言',
@@ -205,9 +204,6 @@ export const zh: Record<keyof typeof en, string> = {
   'settings.ai.apiKey': 'API 密钥（{provider}）',
   'settings.ai.apiKeyPlaceholder': '粘贴你的 API 密钥',
   'settings.ai.apiKeyHelper': '保存在本地数据库中，不会写入 config.toml。',
-  'settings.ai.systemPrompt': '系统提示词',
-  'settings.ai.systemPromptPlaceholder': '使用内置助手人设…',
-  'settings.ai.charCounter': '{count} / {max}',
 
   'settings.agent.provider': '智能体服务商',
   'settings.agent.model': '智能体模型',
@@ -239,8 +235,6 @@ export const zh: Record<keyof typeof en, string> = {
   'about.resetConfirm': '全部重置',
   'about.license': 'Apache-2.0 · 基于 ayzekhdawy 的 thukiwin 分支',
 
-  'help.prompt.system':
-    '你为 AI 自定义的人设或指令。留空则使用内置助手人设。斜杠命令列表总会额外附加。',
   'help.window.overlay_width':
     '浮窗的宽度（像素）。调大可获得更宽的输入与聊天区域，但会占用更多屏幕空间。',
   'help.window.max_chat_height':
@@ -358,4 +352,46 @@ export const zh: Record<keyof typeof en, string> = {
   'about.help.trayTitle': '托盘图标',
   'about.help.tray':
     'QuickAI 常驻系统托盘。托盘图标始终显示 QuickAI 标志 — 运行期间没有其它状态。左键单击打开菜单（打开 QuickAI、退出）；右键单击显示或隐藏浮窗。',
+
+  // ─── Batch 3: settings theme, data dir, skills, About popups (T11) ──────
+  'common.close': '关闭',
+  'settings.section.appearance': '外观',
+  'settings.general.theme': '主题',
+  'theme.dark': '深色',
+  'theme.light': '浅色',
+  'help.general.theme':
+    'QuickAI 的配色方案。默认为深色；在明亮环境下浅色更护眼。',
+  'hotkey.doubleTap': '双击 {key}',
+  'settings.general.dataDirBrowse': '浏览…',
+  'settings.general.dataDirDefault': '默认：{path}',
+  'settings.section.skills': '技能',
+  'settings.skills.alias': '别名',
+  'settings.skills.aliasPlaceholder': '例如 translate',
+  'settings.skills.path': '路径',
+  'settings.skills.pathPlaceholder': '技能文件的路径',
+  'settings.skills.add': '添加技能',
+  'settings.skills.edit': '编辑技能',
+  'settings.skills.delete': '删除技能',
+  'settings.skills.save': '保存',
+  'settings.skills.moveUp': '上移',
+  'settings.skills.moveDown': '下移',
+  'settings.skills.enabledFor': '将 {alias} 用作系统提示词',
+  'settings.skills.builtin': '内置',
+  'settings.skills.empty': '还没有技能。',
+  'settings.skills.loadError': '无法加载技能。',
+  'settings.skills.saveError': '无法保存技能，请重试。',
+  'settings.skills.errorAliasEmpty': '请输入别名。',
+  'settings.skills.errorAliasWhitespace': '别名不能包含空格。',
+  'settings.skills.errorAliasDuplicate': '该别名已被使用。',
+
+  // ─── Batch 3: chat & agent UX (T12) ─────────────────────────────────────
+  'command.add.desc': '为这条消息添加技能',
+  'ask.skills': '技能',
+  'ask.skillPickerLabel': '技能建议',
+  'ask.noSkills': '尚未配置技能',
+  'ask.skillAddHint': 'Ctrl+Enter',
+  'ask.skillEnabledHint': '已启用',
+  'ask.selectedSkills': '已选技能',
+  'ask.removeSkill': '移除技能 {alias}',
+  'error.skillUnreadable': '所选技能无法读取，已从本条消息中忽略。',
 };

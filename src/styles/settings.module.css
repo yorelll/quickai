@@ -1,4 +1,11 @@
-/* QuickAI Settings panel styles */
+/* QuickAI Settings panel styles.
+ *
+ * Colours come from the shared `--color-*` theme tokens (see App.css): the
+ * dark palette is the base and `:root[data-theme="light"]` overrides it. Where
+ * a translucent surface is needed the token is mixed with `transparent` via
+ * `color-mix()` rather than a hardcoded rgba, so it tracks the theme. The few
+ * hues with no palette token (error/destructive red) use `light-dark()`.
+ */
 
 .window {
   position: fixed;
@@ -9,7 +16,7 @@
   background:
     radial-gradient(
       ellipse 70% 40% at 50% 0%,
-      rgba(255, 141, 92, 0.08) 0%,
+      color-mix(in srgb, var(--color-primary) 10%, transparent) 0%,
       transparent 65%
     ),
     var(--color-surface-base);
@@ -19,7 +26,7 @@
   font-size: 13px;
   user-select: none;
   border: 1px solid var(--color-surface-border);
-  border-top-color: rgba(255, 141, 92, 0.2);
+  border-top-color: color-mix(in srgb, var(--color-primary) 25%, transparent);
   border-radius: 10px;
   overflow: hidden;
   backdrop-filter: blur(24px);
@@ -36,11 +43,45 @@
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(255, 141, 92, 0.35),
+    color-mix(in srgb, var(--color-primary) 45%, transparent),
     transparent
   );
   pointer-events: none;
   z-index: 1;
+}
+
+/* The window's drag region is the non-scrolling chrome only: this title row
+ * and the tab bar. The body scrolls, so it must never start a window drag. */
+.closeRow {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 8px 0;
+  flex-shrink: 0;
+}
+.closeBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  transition:
+    background 150ms ease,
+    color 150ms ease;
+}
+.closeBtn:hover {
+  background: color-mix(in srgb, var(--color-text-primary) 8%, transparent);
+  color: var(--color-text-primary);
+}
+.closeBtn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
 }
 
 .banner {
@@ -49,15 +90,15 @@
   gap: 12px;
   padding: 10px 14px;
   margin: 8px 16px 0;
-  background: rgba(36, 30, 26, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-top-color: rgba(230, 156, 5, 0.32);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-surface-border);
+  border-top-color: color-mix(in srgb, var(--color-tertiary) 45%, transparent);
   border-radius: 10px;
   font-size: 12.5px;
   color: var(--color-text-primary);
   flex-shrink: 0;
   user-select: text;
-  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 8px -2px light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.3));
 }
 .bannerIcon {
   flex-shrink: 0;
@@ -90,7 +131,10 @@
   padding: 6px 10px 6px;
   border: none;
   background: transparent;
-  color: rgba(240, 240, 242, 0.5);
+  /* 70% of the primary text token keeps the inactive label above 4.5:1 on the
+   * light tab bar (55% fell to ~3.7:1) while staying visibly dimmer than the
+   * active tab. */
+  color: color-mix(in srgb, var(--color-text-primary) 70%, transparent);
   cursor: pointer;
   font-family: inherit;
   border-radius: 10px;
@@ -101,11 +145,12 @@
 }
 .tab:hover:not(.tabActive) {
   color: var(--color-text-primary);
-  background: rgba(255, 255, 255, 0.025);
+  background: color-mix(in srgb, var(--color-text-primary) 5%, transparent);
 }
 .tab:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(255, 141, 92, 0.32);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--color-primary) 35%, transparent);
 }
 .tab svg {
   width: 20px;
@@ -121,8 +166,9 @@
 }
 .tabActive {
   color: var(--color-primary);
-  background: rgba(0, 0, 0, 0.28);
-  box-shadow: inset 0 0 0 1px rgba(255, 141, 92, 0.1);
+  background: color-mix(in srgb, var(--color-text-primary) 10%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--color-primary) 14%, transparent);
 }
 .tabActive svg {
   color: var(--color-primary);
@@ -133,16 +179,15 @@
   justify-content: center;
 }
 
+/* The window is a fixed height; the body always scrolls so no tab's lower
+ * settings can be cut off. */
 .body {
   flex: 1;
-  overflow: hidden;
+  overflow-y: auto;
   position: relative;
   padding: 18px 22px 24px;
   min-width: 0;
   user-select: text;
-}
-.bodyScrollable {
-  overflow-y: auto;
 }
 
 .section {
@@ -152,7 +197,7 @@
   margin-bottom: 8px;
 }
 .section + .section {
-  border-top: 1px solid rgba(255, 255, 255, 0.045);
+  border-top: 1px solid var(--color-surface-border);
   padding-top: 24px;
 }
 .sectionHeading {
@@ -172,12 +217,7 @@
   min-height: 48px;
 }
 .row + .row {
-  border-top: 1px solid rgba(255, 255, 255, 0.045);
-}
-.rowVertical {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 8px;
+  border-top: 1px solid var(--color-surface-border);
 }
 .rowLabelGroup {
   flex: 0 0 168px;
@@ -185,10 +225,6 @@
   align-items: center;
   gap: 6px;
   padding-top: 6px;
-}
-.rowVertical .rowLabelGroup {
-  flex: none;
-  padding-top: 0;
 }
 .rowLabel {
   font-size: 13px;
@@ -202,7 +238,7 @@
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--color-surface-border);
   background: transparent;
   color: var(--color-text-secondary);
   font-size: 10px;
@@ -217,9 +253,9 @@
     border-color 150ms ease;
 }
 .infoBtn:hover {
-  background: rgba(255, 141, 92, 0.12);
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
   color: var(--color-primary);
-  border-color: rgba(255, 141, 92, 0.4);
+  border-color: color-mix(in srgb, var(--color-primary) 45%, transparent);
 }
 .infoBtn:focus-visible {
   outline: 2px solid var(--color-primary);
@@ -231,9 +267,9 @@
   bottom: calc(100% + 8px);
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(36, 30, 26, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-top-color: rgba(255, 141, 92, 0.2);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-surface-border);
+  border-top-color: color-mix(in srgb, var(--color-primary) 25%, transparent);
   border-radius: 10px;
   padding: 10px 14px;
   font-size: 12px;
@@ -241,7 +277,8 @@
   line-height: 1.5;
   max-width: 320px;
   min-width: 200px;
-  box-shadow: 0 4px 14px -3px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 14px -3px
+    light-dark(rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0.5));
   z-index: 100;
   pointer-events: none;
   opacity: 0;
@@ -261,15 +298,6 @@
   gap: 6px;
   min-width: 0;
 }
-.rowControlRight {
-  align-items: flex-end;
-}
-.charCounter {
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  text-align: right;
-  letter-spacing: 0.02em;
-}
 .rowHelper {
   font-size: 11.5px;
   color: var(--color-text-secondary);
@@ -277,16 +305,16 @@
 }
 .rowError {
   font-size: 11.5px;
-  color: #ff8a80;
+  color: light-dark(#b3261e, #ff8a80);
   line-height: 1.45;
 }
 
-.input,
-.textarea {
+.input {
   width: 100%;
-  background: rgba(36, 30, 26, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-top-color: rgba(255, 141, 92, 0.1);
+  height: 32px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-surface-border);
+  border-top-color: color-mix(in srgb, var(--color-primary) 14%, transparent);
   border-radius: 8px;
   color: var(--color-text-primary);
   font-family: inherit;
@@ -297,32 +325,36 @@
     border-color 150ms ease,
     box-shadow 150ms ease;
 }
-.input {
-  height: 32px;
+.input::placeholder {
+  color: var(--color-text-secondary);
 }
-.textarea {
-  min-height: 96px;
-  padding: 10px 12px;
-  line-height: 1.55;
-  resize: vertical;
-  font-family: inherit;
+.input:hover {
+  border-color: color-mix(in srgb, var(--color-text-primary) 18%, transparent);
+  border-top-color: color-mix(in srgb, var(--color-primary) 22%, transparent);
 }
-.input:hover,
-.textarea:hover {
-  background: rgba(36, 30, 26, 0.8);
-  border-color: rgba(255, 255, 255, 0.1);
-  border-top-color: rgba(255, 141, 92, 0.18);
-}
-.input:focus-visible,
-.textarea:focus-visible {
+.input:focus-visible {
   outline: none;
-  background: rgba(36, 30, 26, 0.95);
-  border-color: rgba(255, 141, 92, 0.42);
-  box-shadow: 0 0 0 3px rgba(255, 141, 92, 0.1);
+  border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--color-primary) 14%, transparent);
 }
 .inputError {
-  border-color: rgba(255, 138, 128, 0.55);
-  border-top-color: rgba(255, 138, 128, 0.55);
+  border-color: light-dark(rgba(179, 38, 30, 0.6), rgba(255, 138, 128, 0.55));
+  border-top-color: light-dark(
+    rgba(179, 38, 30, 0.6),
+    rgba(255, 138, 128, 0.55)
+  );
+}
+
+/* A text field paired with a trailing action button (e.g. Browse). */
+.fieldWithButton {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fieldWithButton .input {
+  flex: 1;
+  min-width: 0;
 }
 
 .dropdown {
@@ -330,9 +362,9 @@
   align-items: center;
   gap: 8px;
   height: 32px;
-  background: rgba(36, 30, 26, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-top-color: rgba(255, 141, 92, 0.1);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-surface-border);
+  border-top-color: color-mix(in srgb, var(--color-primary) 14%, transparent);
   border-radius: 8px;
   padding: 0 10px 0 12px;
   color: var(--color-text-primary);
@@ -344,40 +376,45 @@
     border-color 150ms ease;
 }
 .dropdown:hover {
-  background: rgba(36, 30, 26, 0.8);
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: color-mix(in srgb, var(--color-text-primary) 18%, transparent);
 }
 .dropdown:focus-visible {
   outline: none;
-  border-color: rgba(255, 141, 92, 0.42);
-  box-shadow: 0 0 0 3px rgba(255, 141, 92, 0.1);
+  border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--color-primary) 14%, transparent);
 }
 
 .button {
-  background: rgba(36, 30, 26, 0.95);
+  background: var(--color-surface-elevated);
   color: var(--color-text-primary);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-top-color: rgba(255, 141, 92, 0.1);
+  border: 1px solid var(--color-surface-border);
+  border-top-color: color-mix(in srgb, var(--color-primary) 14%, transparent);
   border-radius: 8px;
   padding: 6px 13px;
   font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
   font-family: inherit;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 0
+    color-mix(in srgb, var(--color-text-primary) 6%, transparent);
   transition:
     background 150ms ease,
     border-color 150ms ease;
 }
 .button:hover {
-  background: rgba(46, 38, 32, 0.95);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: color-mix(
+    in srgb,
+    var(--color-text-primary) 6%,
+    var(--color-surface-elevated)
+  );
+  border-color: color-mix(in srgb, var(--color-text-primary) 18%, transparent);
 }
 .button:focus-visible {
   outline: none;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    0 0 0 3px rgba(255, 141, 92, 0.22);
+    inset 0 1px 0 color-mix(in srgb, var(--color-text-primary) 6%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--color-primary) 24%, transparent);
 }
 .button:disabled {
   opacity: 0.4;
@@ -385,22 +422,22 @@
 }
 .buttonGhost {
   background: transparent;
-  border-color: rgba(255, 255, 255, 0.06);
+  border-color: var(--color-surface-border);
   color: var(--color-text-primary);
   box-shadow: none;
 }
 .buttonGhost:hover {
-  background: rgba(255, 255, 255, 0.03);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--color-text-primary) 5%, transparent);
+  border-color: color-mix(in srgb, var(--color-text-primary) 18%, transparent);
 }
 .buttonDestructive {
-  background: rgba(36, 30, 26, 0.95);
-  border-color: rgba(255, 138, 128, 0.3);
-  color: #ff8a80;
+  background: var(--color-surface-elevated);
+  border-color: light-dark(rgba(179, 38, 30, 0.35), rgba(255, 138, 128, 0.3));
+  color: light-dark(#b3261e, #ff8a80);
 }
 .buttonDestructive:hover {
-  background: rgba(48, 34, 32, 0.95);
-  border-color: rgba(255, 138, 128, 0.5);
+  background: light-dark(rgba(179, 38, 30, 0.06), rgba(48, 34, 32, 0.95));
+  border-color: light-dark(rgba(179, 38, 30, 0.55), rgba(255, 138, 128, 0.5));
 }
 
 .sliderRow {
@@ -414,7 +451,7 @@
   -webkit-appearance: none;
   appearance: none;
   height: 2px;
-  background: rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--color-text-primary) 14%, transparent);
   border-radius: 2px;
   outline: none;
   cursor: pointer;
@@ -425,25 +462,25 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #ff8d5c 0%, #e06b30 100%);
+  background: var(--color-primary);
   border: none;
-  box-shadow: 0 0 10px rgba(255, 141, 92, 0.45);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-primary) 45%, transparent);
   cursor: grab;
 }
 .sliderInput::-moz-range-thumb {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #ff8d5c 0%, #e06b30 100%);
+  background: var(--color-primary);
   border: none;
-  box-shadow: 0 0 10px rgba(255, 141, 92, 0.45);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-primary) 45%, transparent);
   cursor: grab;
 }
 .valChip {
-  background: rgba(36, 30, 26, 0.95);
+  background: var(--color-surface-elevated);
   color: var(--color-text-primary);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-top-color: rgba(255, 141, 92, 0.1);
+  border: 1px solid var(--color-surface-border);
+  border-top-color: color-mix(in srgb, var(--color-primary) 14%, transparent);
   border-radius: 6px;
   padding: 3px 10px;
   font-size: 11.5px;
@@ -453,155 +490,16 @@
   text-align: center;
 }
 
-/* Context window log-scale slider */
-.ctxBlock {
-  padding: 10px 16px 14px;
-}
-.ctxTopRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-.ctxLabel {
-  font-size: 13px;
-  color: var(--color-text-primary);
-}
-.ctxChipGroup {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-.ctxChipInput {
-  background: rgba(36, 30, 26, 0.95);
-  border: 1px solid rgba(255, 141, 92, 0.3);
-  border-radius: 6px;
-  color: var(--color-primary);
-  font-size: 13px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  font-family: monospace;
-  padding: 3px 8px;
-  text-align: right;
-  width: 82px;
-  outline: none;
-  caret-color: var(--color-primary);
-  -moz-appearance: textfield;
-}
-.ctxChipInput::-webkit-outer-spin-button,
-.ctxChipInput::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-.ctxChipInput:focus {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 2.5px rgba(255, 141, 92, 0.18);
-}
-.ctxChipUnit {
-  font-size: 11px;
-  color: var(--color-text-secondary);
-}
-.ctxSlider {
-  --fill: 30%;
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 3px;
-  border-radius: 3px;
-  background: linear-gradient(
-    to right,
-    var(--color-primary) 0%,
-    var(--color-primary) calc(8px + var(--fill) * (100% - 16px) / 100%),
-    rgba(255, 255, 255, 0.1) calc(8px + var(--fill) * (100% - 16px) / 100%),
-    rgba(255, 255, 255, 0.1) 100%
-  );
-  outline: none;
-  cursor: pointer;
-  margin-bottom: 4px;
-}
-.ctxSlider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #ff8d5c 0%, #e06b30 100%);
-  box-shadow: 0 0 12px rgba(255, 141, 92, 0.55);
-  cursor: grab;
-}
-.ctxSlider::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #ff8d5c 0%, #e06b30 100%);
-  border: none;
-  box-shadow: 0 0 12px rgba(255, 141, 92, 0.55);
-  cursor: grab;
-}
-.ctxTickRow {
-  position: relative;
-  height: 14px;
-  margin: 0 8px 10px 8px;
-}
-.ctxTick {
-  position: absolute;
-  transform: translateX(-50%);
-  font-size: 9.5px;
-  color: rgba(138, 138, 142, 0.5);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.ctxHelper {
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  line-height: 1.5;
-  margin-bottom: 10px;
-}
-.ctxVramNote {
-  display: flex;
-  gap: 7px;
-  padding: 8px 10px;
-  background: rgba(255, 141, 92, 0.05);
-  border: 1px solid rgba(255, 141, 92, 0.14);
-  border-left: 2px solid rgba(255, 141, 92, 0.38);
-  border-radius: 0 6px 6px 0;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.48);
-  line-height: 1.55;
-}
-.ctxVramIcon {
-  flex-shrink: 0;
-  color: rgba(255, 141, 92, 0.7);
-  font-size: 11px;
-  margin-top: 0.5px;
-}
-.ctxVramLink {
-  display: inline;
-  padding: 0;
-  background: transparent;
-  border: 0;
-  font: inherit;
-  color: rgba(255, 141, 92, 0.85);
-  text-decoration: none;
-  white-space: nowrap;
-  font-weight: 500;
-  cursor: pointer;
-}
-.ctxVramLink:hover {
-  color: rgba(255, 141, 92, 1);
-  text-decoration: underline;
-}
-
 .stepper {
   display: inline-flex;
   align-items: center;
   align-self: flex-end;
   width: auto;
   min-width: 132px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-top-color: rgba(255, 141, 92, 0.1);
+  border: 1px solid var(--color-surface-border);
+  border-top-color: color-mix(in srgb, var(--color-primary) 14%, transparent);
   border-radius: 8px;
-  background: rgba(36, 30, 26, 0.6);
+  background: var(--color-surface-elevated);
   overflow: hidden;
 }
 .stepperBtn {
@@ -619,7 +517,7 @@
     background 150ms ease;
 }
 .stepperBtn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--color-text-primary) 6%, transparent);
   color: var(--color-text-primary);
 }
 .stepperBtn:disabled {
@@ -639,14 +537,14 @@
   position: fixed;
   bottom: 16px;
   right: 22px;
-  background-color: #2a221d;
+  background-color: var(--color-surface-elevated);
   background-image: linear-gradient(
     135deg,
-    rgba(255, 141, 92, 0.22) 0%,
-    rgba(224, 107, 48, 0.18) 100%
+    color-mix(in srgb, var(--color-primary) 22%, transparent) 0%,
+    color-mix(in srgb, var(--color-primary) 12%, transparent) 100%
   );
   color: var(--color-primary);
-  border: 1px solid rgba(255, 141, 92, 0.45);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 45%, transparent);
   border-radius: 999px;
   padding: 5px 13px;
   font-size: 11px;
@@ -654,34 +552,18 @@
   letter-spacing: 0.04em;
   pointer-events: none;
   opacity: 0;
-  box-shadow: 0 6px 18px -6px rgba(0, 0, 0, 0.65);
+  box-shadow: 0 6px 18px -6px
+    light-dark(rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0.65));
   transition: opacity 220ms ease;
 }
 .savedPillVisible {
   opacity: 1;
 }
 
-.resetLink {
-  background: none;
-  border: none;
-  color: var(--color-primary);
-  font-size: 12px;
-  cursor: pointer;
-  padding: 0;
-  text-align: right;
-  display: block;
-  margin-left: auto;
-  margin-top: 8px;
-  font-family: inherit;
-}
-.resetLink:hover {
-  text-decoration: underline;
-}
-
 .dialogBackdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: light-dark(rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.55));
   backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
@@ -689,14 +571,25 @@
   z-index: 1000;
 }
 .dialog {
-  background: rgba(36, 30, 26, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-top-color: rgba(255, 141, 92, 0.18);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-surface-border);
+  border-top-color: color-mix(in srgb, var(--color-primary) 20%, transparent);
   border-radius: 14px;
   padding: 22px 24px;
   min-width: 340px;
   max-width: 460px;
-  box-shadow: 0 4px 14px -3px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 14px -3px
+    light-dark(rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0.5));
+}
+/* Reference popups (shortcuts, help): wider, with a scrollable body. The width
+ * is capped against the viewport so the dialog still fits when the user has
+ * shrunk the resizable window to its 400px minimum. */
+.dialogWide {
+  display: flex;
+  flex-direction: column;
+  width: min(520px, calc(100% - 32px));
+  max-width: none;
+  max-height: calc(100% - 32px);
 }
 .dialogTitle {
   font-size: 15px;
@@ -710,10 +603,18 @@
   line-height: 1.55;
   margin: 0 0 20px;
 }
+.dialogBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0 0 16px;
+  padding-right: 4px;
+}
 .dialogActions {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+  flex-shrink: 0;
 }
 
 /* About tab */
@@ -746,13 +647,15 @@
   text-align: center;
   padding: 0 24px 18px;
   margin-bottom: 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+  border-bottom: 1px solid var(--color-surface-border);
 }
 .aboutHeroLogo {
   width: 72px;
   height: 72px;
   margin-bottom: 10px;
-  filter: drop-shadow(0 8px 24px rgba(255, 141, 92, 0.22));
+  filter: drop-shadow(
+    0 8px 24px color-mix(in srgb, var(--color-primary) 22%, transparent)
+  );
   user-select: none;
   -webkit-user-drag: none;
 }
@@ -828,6 +731,58 @@
   flex-wrap: wrap;
 }
 
+/* About: rows that open the reference popups */
+.aboutRefList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.aboutRefRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-surface-border);
+  border-radius: 10px;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease;
+}
+.aboutRefRow:hover {
+  background: color-mix(
+    in srgb,
+    var(--color-text-primary) 6%,
+    var(--color-surface-elevated)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--color-primary) 35%,
+    var(--color-surface-border)
+  );
+}
+.aboutRefRow:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--color-primary) 24%, transparent);
+}
+.aboutRefLabel {
+  flex: 1;
+}
+.aboutRefRow svg {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
 /* About: shortcuts, commands and help */
 .infoRow {
   display: flex;
@@ -837,7 +792,7 @@
   min-height: 30px;
 }
 .infoRow + .infoRow {
-  border-top: 1px solid rgba(255, 255, 255, 0.045);
+  border-top: 1px solid var(--color-surface-border);
 }
 .infoKeys {
   flex: 0 0 168px;
@@ -871,240 +826,115 @@
   margin: 0 0 8px;
 }
 
-/* Keep Warm layout */
-.keepWarmRow1 {
+/* Skills editor */
+.skillList {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skillRow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 12px 0 8px;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-surface-border);
+  border-radius: 10px;
+  cursor: grab;
 }
-.keepWarmLabelLine {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.skillRow:active {
+  cursor: grabbing;
 }
-.keepWarmLabel {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-text-primary);
-}
-.keepWarmTimerGroup {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex-shrink: 0;
-}
-.keepWarmStatusRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-bottom: 12px;
-  min-height: 36px;
-}
-.keepWarmStatusLeft {
+.skillMain {
   flex: 1;
-}
-.keepWarmVramSubtitle {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  font-weight: 400;
-  line-height: 1;
-}
-.keepWarmVramModelName {
-  font-weight: 500;
-  color: var(--color-text-primary);
-}
-.keepWarmNoModel {
-  font-size: 11px;
-  color: rgba(138, 138, 142, 0.35);
-  font-style: italic;
-}
-@keyframes keepWarmVramBreath {
-  0%,
-  100% {
-    opacity: 0.65;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.3);
-  }
-}
-.keepWarmVramDot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #5ec98a;
-  flex-shrink: 0;
-  animation: keepWarmVramBreath 2s ease-in-out infinite;
-}
-.keepWarmBarFieldLabel {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  font-weight: 500;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-.keepWarmNumberInput {
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.22);
-  color: var(--color-text-primary);
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  width: 32px;
-  padding: 1px 4px;
-  text-align: center;
-  outline: none;
-  -moz-appearance: textfield;
-  transition: border-color 150ms ease;
-}
-.keepWarmNumberInput::-webkit-inner-spin-button,
-.keepWarmNumberInput::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-.keepWarmNumberInput:focus-visible {
-  border-bottom-color: rgba(255, 141, 92, 0.7);
-}
-.keepWarmUnit {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  margin-left: -3px;
-}
-.keepWarmEjectPill {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 11px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 141, 92, 0.18);
-  background: transparent;
-  color: var(--color-primary);
-  font-size: 12px;
-  font-weight: 500;
-  font-family: inherit;
-  cursor: pointer;
-  transition:
-    background 150ms ease,
-    border-color 150ms ease;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-.keepWarmEjectPill:hover:not(:disabled) {
-  background: rgba(255, 141, 92, 0.08);
-  border-color: rgba(255, 141, 92, 0.36);
-}
-.keepWarmEjectPill:disabled {
-  cursor: default;
-}
-.keepWarmEjectPill:disabled:not([data-ejecting='true']) {
-  color: rgba(138, 138, 142, 0.45);
-  border-color: rgba(255, 255, 255, 0.07);
-}
-.keepWarmEjectPill[data-ejecting='true']:disabled {
-  color: #5ec98a;
-  border-color: rgba(94, 201, 138, 0.25);
-}
-@keyframes keepWarmDrawCircle {
-  from {
-    stroke-dashoffset: 44;
-  }
-  to {
-    stroke-dashoffset: 0;
-  }
-}
-@keyframes keepWarmDrawCheck {
-  from {
-    stroke-dashoffset: 16;
-  }
-  to {
-    stroke-dashoffset: 0;
-  }
-}
-.keepWarmCircleAnim {
-  stroke-dasharray: 44;
-  stroke-dashoffset: 44;
-  animation: keepWarmDrawCircle 550ms ease-out forwards;
-}
-.keepWarmCheckAnim {
-  stroke-dasharray: 16;
-  stroke-dashoffset: 16;
-  animation: keepWarmDrawCheck 300ms ease-out 450ms forwards;
-}
-
-/* Dev-only collapsible section */
-.devSection {
-  border-top: 1px solid rgba(255, 255, 255, 0.045);
-  padding-top: 20px;
-  margin-bottom: 8px;
-}
-.devTrigger {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 0 0 8px;
-  text-align: left;
-  font-family: inherit;
-  color: inherit;
+  flex-wrap: wrap;
 }
-.devTriggerLabel {
-  font-size: 11px;
+.skillAlias {
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: rgba(138, 138, 142, 0.5);
-  transition: color 150ms ease;
+  color: var(--color-text-primary);
 }
-.devTrigger:hover .devTriggerLabel {
+.skillPath {
+  flex: 1 1 100%;
+  min-width: 0;
+  font-size: 11px;
   color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.devTag {
+.skillBadge {
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: rgba(138, 138, 142, 0.4);
-  border: 1px solid rgba(138, 138, 142, 0.18);
-  border-radius: 3px;
+  color: var(--color-primary);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+  border-radius: 4px;
   padding: 1px 5px;
-  font-family: monospace;
 }
-.devChevron {
-  width: 10px;
-  height: 10px;
-  margin-left: auto;
-  color: rgba(138, 138, 142, 0.3);
-  transition: transform 180ms ease;
+.skillActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   flex-shrink: 0;
 }
-.devChevronOpen {
-  transform: rotate(90deg);
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 0;
+  transition:
+    background 150ms ease,
+    color 150ms ease;
+}
+.iconBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-text-primary) 8%, transparent);
+  color: var(--color-text-primary);
+}
+.iconBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.iconBtn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+.skillEdit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.skillEditFields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .tab,
   .input,
-  .textarea,
   .button,
+  .aboutRefRow,
+  .closeBtn,
+  .iconBtn,
   .savedPill,
-  .stepperBtn,
-  .keepWarmCircleAnim,
-  .keepWarmCheckAnim,
-  .keepWarmVramDot,
-  .devChevron {
+  .stepperBtn {
     transition: none !important;
     animation: none !important;
   }
@@ -1118,8 +948,9 @@
   width: 34px;
   height: 20px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(36, 30, 26, 0.8);
+  border: 1px solid
+    color-mix(in srgb, var(--color-text-primary) 20%, transparent);
+  background: color-mix(in srgb, var(--color-text-primary) 8%, transparent);
   cursor: pointer;
   padding: 0;
   flex-shrink: 0;
@@ -1129,11 +960,12 @@
 }
 .toggleOn {
   background: var(--color-primary);
-  border-color: rgba(255, 141, 92, 0.5);
+  border-color: color-mix(in srgb, var(--color-primary) 60%, transparent);
 }
 .toggle:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(255, 141, 92, 0.22);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--color-primary) 24%, transparent);
 }
 .toggleThumb {
   position: absolute;
@@ -1142,12 +974,12 @@
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: rgba(240, 240, 242, 0.5);
+  background: color-mix(in srgb, var(--color-text-primary) 55%, transparent);
   transition:
     transform 180ms ease,
     background 180ms ease;
 }
 .toggleOn .toggleThumb {
   transform: translateX(14px);
-  background: white;
+  background: #fff;
 }

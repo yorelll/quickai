@@ -17,6 +17,8 @@ import { createContext, use, useEffect, useState, type ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
+import { applyTheme, normalizeTheme } from '../settings/theme';
+
 /**
  * Backend event broadcast after the in-memory `AppConfig` is replaced
  * (`set_config_field`, `reset_config`, `reload_config_from_disk`). Mirrors
@@ -32,6 +34,7 @@ interface RawAppConfig {
     hotkey: string;
     language: string;
     data_dir: string;
+    theme: string;
   };
   prompt: {
     system: string;
@@ -66,6 +69,7 @@ export interface AppConfig {
     hotkey: string;
     language: string;
     dataDir: string;
+    theme: string;
   };
   prompt: {
     /** Raw user-editable persona prompt (may be empty). */
@@ -101,6 +105,7 @@ function transform(raw: RawAppConfig): AppConfig {
       hotkey: raw.general.hotkey,
       language: raw.general.language,
       dataDir: raw.general.data_dir,
+      theme: raw.general.theme,
     },
     prompt: {
       system: raw.prompt.system,
@@ -192,6 +197,14 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Apply the persisted theme to the document root. The Settings window also
+  // applies it optimistically when the user picks a theme; this keeps the
+  // overlay in sync on load and after an external config change.
+  const theme = config ? config.general.theme : 'dark';
+  useEffect(() => {
+    applyTheme(normalizeTheme(theme));
+  }, [theme]);
+
   if (!config) return null;
 
   return <ConfigContext value={config}>{children}</ConfigContext>;
@@ -241,6 +254,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     hotkey: 'ctrl',
     language: 'auto',
     dataDir: '',
+    theme: 'dark',
   },
   prompt: { system: '' },
   window: {

@@ -9,7 +9,7 @@ import { en } from '../../i18n/en';
 const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>;
 
 const RAW = {
-  general: { hotkey: 'ctrl', language: 'auto', data_dir: '' },
+  general: { hotkey: 'ctrl', language: 'auto', data_dir: '', theme: 'dark' },
   prompt: { system: '' },
   window: { overlay_width: 600, max_chat_height: 648, max_images: 3 },
   quote: {
@@ -26,8 +26,6 @@ const RAW = {
     permission: 'limited',
   },
 };
-
-let scrollHeightValue = 0;
 
 /** Installs a mock invoke that echoes config edits back like the backend. */
 function installBackend(
@@ -61,6 +59,10 @@ function installBackend(
           return options.settings ?? {};
         case 'get_corrupt_marker':
           return options.marker ?? null;
+        case 'get_skills':
+          return [];
+        case 'get_default_data_dir':
+          return 'C:\\Users\\me\\AppData\\Roaming\\quickai';
         default:
           return undefined;
       }
@@ -100,11 +102,6 @@ async function flushDebounce() {
 describe('SettingsWindow', () => {
   beforeEach(() => {
     mockInvoke.mockReset();
-    scrollHeightValue = 0;
-    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
     setLocale('en');
     localStorage.removeItem(LANGUAGE_STORAGE_KEY);
     __mockWindow.setSize.mockClear();
@@ -118,7 +115,6 @@ describe('SettingsWindow', () => {
 
   afterEach(() => {
     vi.useRealTimers();
-    delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;
   });
 
   it('renders nothing until the config resolves', () => {
@@ -171,10 +167,18 @@ describe('SettingsWindow', () => {
     expect(tab('About')).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('marks the body scrollable when the content is clamped', async () => {
-    scrollHeightValue = 900;
+  it('sizes the window once to the fixed Settings size', async () => {
     await renderWindow();
-    expect(screen.getByRole('tabpanel').className).toContain('Scrollable');
+    expect(__mockWindow.setSize).toHaveBeenCalledTimes(1);
+    expect(__mockWindow.setSize).toHaveBeenCalledWith({
+      width: 580,
+      height: 700,
+    });
+
+    // Switching tabs must not resize the window again.
+    await goToTab('AI');
+    await goToTab('Display');
+    expect(__mockWindow.setSize).toHaveBeenCalledTimes(1);
   });
 
   it('hides the window from the close button and Ctrl+W, and focuses on Ctrl+,', async () => {
@@ -193,25 +197,39 @@ describe('SettingsWindow', () => {
     expect(__mockWindow.setFocus).toHaveBeenCalledTimes(1);
   });
 
-  it('starts a window drag only from non-interactive chrome', async () => {
-    const { container } = await renderWindow();
-    const root = container.firstChild as HTMLElement;
+  it('starts a window drag only from the non-scrolling chrome', async () => {
+    await renderWindow();
+    const closeButton = screen.getByRole('button', { name: 'Close settings' });
+    const closeRow = closeButton.parentElement as HTMLElement;
 
-    fireEvent.mouseDown(root, { button: 0 });
+    fireEvent.mouseDown(closeRow, { button: 0 });
     expect(__mockWindow.startDragging).toHaveBeenCalledTimes(1);
+
+    fireEvent.mouseDown(screen.getByRole('tablist'), { button: 0 });
+    expect(__mockWindow.startDragging).toHaveBeenCalledTimes(2);
 
     // Right-click never drags.
-    fireEvent.mouseDown(root, { button: 2 });
-    expect(__mockWindow.startDragging).toHaveBeenCalledTimes(1);
+    fireEvent.mouseDown(closeRow, { button: 2 });
+    fireEvent.mouseDown(screen.getByRole('tablist'), { button: 2 });
+    expect(__mockWindow.startDragging).toHaveBeenCalledTimes(2);
 
     // Interactive controls never drag.
-    fireEvent.mouseDown(screen.getByRole('button', { name: 'Close settings' }));
-    expect(__mockWindow.startDragging).toHaveBeenCalledTimes(1);
+    fireEvent.mouseDown(closeButton);
+    fireEvent.mouseDown(tab('General'));
+    expect(__mockWindow.startDragging).toHaveBeenCalledTimes(2);
 
-    // Text-bearing elements never drag.
+    // The scrollable body — and therefore its scrollbar — never drags.
+    fireEvent.mouseDown(screen.getByRole('tabpanel'));
+    expect(__mockWindow.startDragging).toHaveBeenCalledTimes(2);
+
+    // A dialog backdrop covers the window; pressing it must not drag either.
     fireEvent.click(tab('About'));
-    fireEvent.mouseDown(screen.getByText('QuickAI'));
-    expect(__mockWindow.startDragging).toHaveBeenCalledTimes(1);
+    fireEvent.mouseDown(screen.getByRole('tabpanel'));
+    expect(__mockWindow.startDragging).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Help' }));
+    fireEvent.mouseDown(screen.getByRole('dialog'));
+    expect(__mockWindow.startDragging).toHaveBeenCalledTimes(2);
   });
 
   it('shows the corrupt-config banner and supports reveal and dismiss', async () => {
@@ -380,7 +398,7 @@ describe('SettingsWindow', () => {
       ).toHaveValue('sk-ant');
     });
 
-    it('saves the model, base URL and system prompt', async () => {
+    it('saves the model and base URL', async () => {
       await renderWindow();
       await goToTab('AI');
 
@@ -409,20 +427,17 @@ describe('SettingsWindow', () => {
         key: 'base_url',
         value: 'https://proxy.example/v1',
       });
+    });
 
-      fireEvent.change(
-        screen.getByLabelText('System prompt', { selector: 'textarea' }),
-        {
-          target: { value: 'Be terse.' },
-        },
-      );
-      await flushDebounce();
-      expect(mockInvoke).toHaveBeenCalledWith('set_config_field', {
-        section: 'prompt',
-        key: 'system',
-        value: 'Be terse.',
-      });
-      expect(screen.getByText('9 / 8000')).toBeInTheDocument();
+    it('replaces the system-prompt field with the Skills section', async () => {
+      await renderWindow();
+      await goToTab('AI');
+
+      expect(screen.queryByLabelText('System prompt')).toBeNull();
+      expect(screen.getByText('Skills')).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Add skill' }),
+      ).toBeInTheDocument();
     });
 
     it('tolerates a failing API-key lookup', async () => {
@@ -430,6 +445,7 @@ describe('SettingsWindow', () => {
         if (cmd === 'get_config' || cmd === 'reload_config_from_disk')
           return RAW;
         if (cmd === 'get_settings') throw new Error('db locked');
+        if (cmd === 'get_skills') return [];
         return undefined;
       });
       render(<SettingsWindow />);
@@ -446,6 +462,7 @@ describe('SettingsWindow', () => {
         if (cmd === 'get_config' || cmd === 'reload_config_from_disk')
           return RAW;
         if (cmd === 'get_settings') return {};
+        if (cmd === 'get_skills') return [];
         if (cmd === 'set_setting') throw new Error('db locked');
         return undefined;
       });
@@ -627,16 +644,28 @@ describe('SettingsWindow', () => {
   });
 
   describe('About tab', () => {
-    it('lists the shortcuts, commands and help', async () => {
+    it('opens the shortcuts and help popups from compact rows', async () => {
       await renderWindow();
       fireEvent.click(tab('About'));
 
-      expect(screen.getByText('Shortcuts and commands')).toBeInTheDocument();
-      expect(screen.getByText('Help')).toBeInTheDocument();
+      // The long reference content lives in dialogs, not on the page.
+      expect(screen.queryByText('Double-tap Ctrl')).toBeNull();
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Shortcuts and commands' }),
+      );
       expect(screen.getByText('Double-tap Ctrl')).toBeInTheDocument();
       expect(screen.getByText('Ctrl+S')).toBeInTheDocument();
       expect(screen.getByText('/screen')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      expect(screen.queryByText('Double-tap Ctrl')).toBeNull();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Help' }));
       expect(screen.getByText(en['about.help.trayTitle'])).toBeInTheDocument();
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.queryByText(en['about.help.trayTitle'])).toBeNull();
     });
 
     it('opens links and file actions', async () => {
