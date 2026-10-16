@@ -8,6 +8,25 @@ and the changelog follows the
 are written by hand as part of the manual release process (see
 [RELEASING.md](RELEASING.md)).
 
+## [0.1.0](https://github.com/yorelll/quickai/compare/v0.0.3...v0.1.0) (2026-10-16)
+
+
+### Features
+
+* **backend:** configurable hotkey, agent mode/permissions, data dir, rename ([27c3268](https://github.com/yorelll/quickai/commit/27c3268925f4692685d455b3a71a55ef20959cf7))
+* **backend:** theme, skills, hotkey semantics, folder picker, durable taskbar hiding ([a749623](https://github.com/yorelll/quickai/commit/a749623ab3867bf2f2c71c5b34451d024accc0f1))
+* **chat:** /add skill picker, scroll and layout fixes, keyboard control ([35da460](https://github.com/yorelll/quickai/commit/35da4605e21cb4aa738fdb7d29bb5c09c43c4156))
+* **chat:** rename, pin, agent keyboard control, layout fixes ([dda9b87](https://github.com/yorelll/quickai/commit/dda9b8721bdd74e7a6c6f3f576c8eec7ee9f82e3))
+* **settings:** General tab additions, About dialogs, Skills UI, light theme ([e6b6d42](https://github.com/yorelll/quickai/commit/e6b6d42c33054e66a41b9a0d52810c31682679e6))
+* **settings:** General tab, no default model, agent config UI, About help ([121b697](https://github.com/yorelll/quickai/commit/121b69716c0d9c492cb2b09cb7afff01efb87345))
+
+
+### Bug Fixes
+
+* compile on non-Windows targets ([2eeeef5](https://github.com/yorelll/quickai/commit/2eeeef5dc9e7fbce24627318570a99b9a9483fa3))
+* gate Windows-only items that are dead on other targets ([5008b3a](https://github.com/yorelll/quickai/commit/5008b3a372e5e50dbf0033a9f8f66bc2bffd701b))
+* **test:** make the seed-failure test exercise one branch on every platform ([5053aed](https://github.com/yorelll/quickai/commit/5053aed267b850529f001b76911f7cce4abb4910))
+
 ## 0.0.3 (2026-10-15)
 
 A theming and skills release, plus a batch of Settings, chat, and agent fixes.

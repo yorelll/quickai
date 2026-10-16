@@ -1,6 +1,6 @@
 {
   "name": "quickai",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "description": "A bilingual AI assistant overlay for Windows, powered by OpenAI, Anthropic, and OpenAI-compatible cloud models",
   "license": "Apache-2.0",
   "repository": {
