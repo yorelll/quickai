@@ -198,15 +198,28 @@ fn load_read_error_is_surfaced() {
 }
 
 #[test]
-fn load_propagates_builtin_file_seed_failure() {
+fn load_propagates_unusable_config_dir_failure() {
     let dir = tempdir();
-    // A regular file where the config dir should be: seeding the built-in file
-    // cannot create the parent directory.
+    // A regular file where the config dir should be leaves the store path
+    // unreadable and the built-in file unseeded. Which of the two fails first is
+    // platform-specific: Linux reports `ENOTDIR` on the store read and returns
+    // there, while Windows maps it to `NotFound` and fails later while seeding.
+    // Assert only the invariant both share: the failure is surfaced as an I/O
+    // error naming a file inside the config dir, never swallowed.
     let blocker = write_file(&dir, "not-a-dir", "x");
 
     match load(&blocker) {
         Err(SkillError::IoError { path, .. }) => {
-            assert_eq!(path, blocker.join(BUILTIN_ASSISTANT_FILE_NAME))
+            assert_eq!(
+                path.parent(),
+                Some(blocker.as_path()),
+                "error names a file inside the config dir, got {path:?}"
+            );
+            let name = path.file_name().and_then(|n| n.to_str());
+            assert!(
+                name == Some(SKILLS_FILE_NAME) || name == Some(BUILTIN_ASSISTANT_FILE_NAME),
+                "unexpected failing file: {path:?}"
+            );
         }
         other => panic!("expected IoError, got {other:?}"),
     }
