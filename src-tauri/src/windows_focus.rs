@@ -65,6 +65,55 @@ pub fn exit_minibar() -> bool {
     false
 }
 
+/// Applies the `WS_EX_TOOLWINDOW` extended style to `hwnd`, durably keeping the
+/// window out of the taskbar.
+///
+/// Tauri's `set_skip_taskbar(true)` is not durable on Windows: tao implements it
+/// as a one-shot `ITaskbarList::DeleteTab`, which the shell can undo when it next
+/// re-evaluates the window (the reappearing-taskbar-button bug). `WS_EX_TOOLWINDOW`
+/// is a window style the shell honours on every re-evaluation, so it is the
+/// reliable fix; `skip_taskbar` is kept alongside it as belt and braces.
+///
+/// Removing the window from Alt+Tab is **intended**, not a side effect: these are
+/// overlay-style windows the app already hides from the taskbar, and a tool
+/// window is the correct shell classification for them.
+///
+/// Best-effort and native-only: there is nothing to unit-test (it needs a live
+/// HWND), so it is coverage-excluded. A failure leaves the caller's
+/// `set_skip_taskbar` in place.
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub fn apply_tool_window_style(hwnd: HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, SWP_FRAMECHANGED,
+        SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_TOOLWINDOW,
+    };
+
+    unsafe {
+        // A zero read means the query failed (a real window always has some
+        // extended style). Bail out rather than OR-ing onto 0: `SetWindowLongPtrW`
+        // would then *replace* the window's real extended styles instead of
+        // adding to them. Skipping is the safe choice — the caller keeps its
+        // `set_skip_taskbar` in place.
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        if style == 0 {
+            return;
+        }
+        let with_tool_window = style | (WS_EX_TOOLWINDOW.0 as isize);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, with_tool_window);
+        // SWP_FRAMECHANGED makes the shell re-read the extended style;
+        // NOMOVE/NOSIZE/NOZORDER leave geometry and stacking untouched.
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
+        );
+    }
+}
+
 /// Focus change callback type. Receives the HWND of the newly focused window.
 type FocusChangeCallback = Arc<dyn Fn(HWND) + Send + Sync>;
 

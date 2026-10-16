@@ -14,8 +14,8 @@ use std::path::PathBuf;
 use super::defaults::{
     DEFAULT_AGENT_MODE, DEFAULT_AGENT_PERMISSION, DEFAULT_AGENT_PROVIDER, DEFAULT_CHAT_BASE_URL,
     DEFAULT_CHAT_MODEL, DEFAULT_CHAT_PROVIDER, DEFAULT_GENERAL_DATA_DIR, DEFAULT_GENERAL_HOTKEY,
-    DEFAULT_GENERAL_LANGUAGE, DEFAULT_MAX_CHAT_HEIGHT, DEFAULT_MAX_IMAGES, DEFAULT_OVERLAY_WIDTH,
-    DEFAULT_QUOTE_MAX_CONTEXT_LENGTH, DEFAULT_QUOTE_MAX_DISPLAY_CHARS,
+    DEFAULT_GENERAL_LANGUAGE, DEFAULT_GENERAL_THEME, DEFAULT_MAX_CHAT_HEIGHT, DEFAULT_MAX_IMAGES,
+    DEFAULT_OVERLAY_WIDTH, DEFAULT_QUOTE_MAX_CONTEXT_LENGTH, DEFAULT_QUOTE_MAX_DISPLAY_CHARS,
     DEFAULT_QUOTE_MAX_DISPLAY_LINES, DEFAULT_SYSTEM_PROMPT_BASE, SLASH_COMMAND_PROMPT_APPENDIX,
 };
 use super::error::ConfigError;
@@ -24,7 +24,7 @@ use super::loader::{
 };
 use super::schema::{
     AgentMode, AgentPermission, AgentSection, AppConfig, ChatSection, GeneralSection, Hotkey,
-    Language, PromptSection, QuoteSection, WindowSection,
+    Language, PromptSection, QuoteSection, Theme, WindowSection,
 };
 use super::writer::atomic_write;
 use crate::providers::Provider;
@@ -58,6 +58,7 @@ fn defaults_const_values_match_schema_defaults() {
     assert_eq!(c.quote.max_context_length, DEFAULT_QUOTE_MAX_CONTEXT_LENGTH);
     assert_eq!(c.general.hotkey, DEFAULT_GENERAL_HOTKEY);
     assert_eq!(c.general.language, DEFAULT_GENERAL_LANGUAGE);
+    assert_eq!(c.general.theme, DEFAULT_GENERAL_THEME);
     assert_eq!(c.general.data_dir, DEFAULT_GENERAL_DATA_DIR);
     assert_eq!(c.chat.provider, DEFAULT_CHAT_PROVIDER);
     assert_eq!(c.chat.model, DEFAULT_CHAT_MODEL);
@@ -127,6 +128,7 @@ fn section_defaults_are_sensible() {
     let g = GeneralSection::default();
     assert_eq!(g.hotkey, Hotkey::Ctrl);
     assert_eq!(g.language, Language::Auto);
+    assert_eq!(g.theme, Theme::Dark);
     assert!(g.data_dir.is_empty());
 
     let c = ChatSection::default();
@@ -183,6 +185,12 @@ fn general_section_deserializes_every_enum_value() {
         let parsed: AppConfig = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.general.language, language);
     }
+
+    for (wire, theme) in [("dark", Theme::Dark), ("light", Theme::Light)] {
+        let toml_str = format!("[general]\ntheme = \"{wire}\"");
+        let parsed: AppConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.general.theme, theme);
+    }
 }
 
 #[test]
@@ -190,11 +198,13 @@ fn general_section_serializes_enums_as_wire_strings() {
     let mut config = AppConfig::default();
     config.general.hotkey = Hotkey::Win;
     config.general.language = Language::Zh;
+    config.general.theme = Theme::Light;
     config.general.data_dir = "D:/quickai-data".to_string();
 
     let toml_str = toml::to_string_pretty(&config).unwrap();
     assert!(toml_str.contains("hotkey = \"win\""));
     assert!(toml_str.contains("language = \"zh\""));
+    assert!(toml_str.contains("theme = \"light\""));
     assert!(toml_str.contains("data_dir = \"D:/quickai-data\""));
 }
 

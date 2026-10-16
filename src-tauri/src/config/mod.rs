@@ -25,7 +25,7 @@ pub use error::ConfigError;
 pub use loader::load_from_path;
 pub use schema::{
     AgentMode, AgentPermission, AgentSection, AppConfig, ChatSection, GeneralSection, Hotkey,
-    Language, PromptSection, QuoteSection, WindowSection,
+    Language, PromptSection, QuoteSection, Theme, WindowSection,
 };
 pub use writer::{atomic_write, atomic_write_bytes};
 
@@ -114,6 +114,24 @@ pub fn resolve_data_dir(app: &tauri::AppHandle, configured: &str) -> ResolvedDat
         .app_data_dir()
         .expect("failed to resolve app data directory");
     ResolvedDataDir(resolve_data_dir_from(configured, default))
+}
+
+/// Returns the OS default app data directory for the bundle identifier — the
+/// directory an empty `[general].data_dir` falls back to. Unlike
+/// [`resolve_data_dir`] this ignores the configured override, so the Settings
+/// UI can show the real default path as the field's hint.
+///
+/// Tauri-aware wrapper; excluded from coverage because it needs a real
+/// `AppHandle`. The failure branch maps a path-resolution error to `IoError`.
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub fn default_data_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, ConfigError> {
+    use tauri::Manager;
+    app.path()
+        .app_data_dir()
+        .map_err(|source| ConfigError::IoError {
+            path: std::path::PathBuf::from("<app_data_dir>"),
+            source: std::io::Error::other(source.to_string()),
+        })
 }
 
 /// Tauri-aware entry point. Resolves the per-user config path via

@@ -17,6 +17,7 @@ pub mod onboarding;
 pub mod providers;
 pub mod screenshot;
 pub mod settings_commands;
+pub mod skills;
 
 #[cfg(target_os = "windows")]
 mod agent;
@@ -150,6 +151,24 @@ fn request_overlay_hide(app_handle: &tauri::AppHandle) {
     }
 }
 
+/// Keeps `window` out of the taskbar, durably on Windows.
+///
+/// `set_skip_taskbar(true)` alone is not durable there: tao implements it as a
+/// one-shot `ITaskbarList::DeleteTab`, so the shell can re-add the button later.
+/// On Windows this also applies the `WS_EX_TOOLWINDOW` extended style, which the
+/// shell honours on every re-evaluation. That style additionally removes the
+/// window from Alt+Tab — intended for these overlay-style windows (see
+/// `windows_focus::apply_tool_window_style`).
+fn hide_from_taskbar(window: &tauri::WebviewWindow) {
+    let _ = window.set_skip_taskbar(true);
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(hwnd) = window.hwnd() {
+            windows_focus::apply_tool_window_style(hwnd);
+        }
+    }
+}
+
 /// Shows the overlay and requests the frontend to replay its entrance animation.
 ///
 /// On Windows, the overlay is shown as an always-on-top, skip-taskbar window.
@@ -240,7 +259,7 @@ fn show_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::ActivationCo
 
     if let Some(window) = app_handle.get_webview_window("main") {
         let _ = window.set_always_on_top(true);
-        let _ = window.set_skip_taskbar(true);
+        hide_from_taskbar(&window);
         let _ = window.show();
         let _ = window.set_focus();
 
@@ -337,13 +356,21 @@ async fn open_settings_window(app_handle: tauri::AppHandle) -> Result<(), String
     // native title bar — a light bar with a second, redundant close button — is
     // disabled. The app icon is set explicitly: a window created after startup
     // otherwise falls back to a generic Windows taskbar icon.
+    //
+    // The size matches the Settings layout's fixed 580×700 frame, so the window
+    // opens at its final size and the frontend's mount-time `setSize` is a
+    // no-op — no visible width snap or backdrop-blur re-rasterise on open.
+    //
+    // The window stays resizable so the user can give it more height, but the
+    // width floor is pinned to the layout's 580 so it can never be dragged
+    // narrow enough to clip the fixed-width frame.
     let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png"))
         .expect("failed to load window icon");
 
     let window = WebviewWindowBuilder::new(&app_handle, "settings", url)
         .title("Settings — QuickAI")
-        .inner_size(480.0, 700.0)
-        .min_inner_size(400.0, 500.0)
+        .inner_size(580.0, 700.0)
+        .min_inner_size(580.0, 500.0)
         .center()
         .resizable(true)
         .decorations(false)
@@ -355,6 +382,11 @@ async fn open_settings_window(app_handle: tauri::AppHandle) -> Result<(), String
         .map_err(|e| e.to_string())?
         .build()
         .map_err(|e| e.to_string())?;
+
+    // Keep the window out of the taskbar durably. The builder's
+    // `skip_taskbar(true)` covers creation; `hide_from_taskbar` re-applies it
+    // and adds the Windows tool-window style the shell actually honours.
+    hide_from_taskbar(&window);
 
     let _ = window.show();
     let _ = window.set_focus();
@@ -634,7 +666,7 @@ fn finish_onboarding(
                     OVERLAY_LOGICAL_HEIGHT_COLLAPSED,
                 )));
                 let _ = window.set_always_on_top(true);
-                let _ = window.set_skip_taskbar(true);
+                hide_from_taskbar(&window);
             }
             show_overlay(&handle, crate::context::ActivationContext::empty());
         });
@@ -731,7 +763,9 @@ fn spawn_periodic_image_cleanup(app_handle: tauri::AppHandle) {
 /// Panics if the Tauri runtime fails to initialise.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default().plugin(tauri_plugin_notification::init());
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init());
 
     builder
         .setup(|app| {
@@ -773,6 +807,16 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // ── Durable taskbar hiding for the overlay ────────────────
+            // The main window is created from `tauri.conf.json` before this
+            // runs. Apply the tool-window style here, once, so no show path —
+            // including onboarding — can fall back on tao's non-durable
+            // one-shot `DeleteTab`. The per-show `hide_from_taskbar` calls are
+            // belt and braces on top of this.
+            if let Some(window) = app.get_webview_window("main") {
+                hide_from_taskbar(&window);
+            }
 
             // ── Activation listener (Windows) ─────────────────────────
             #[cfg(target_os = "windows")]
@@ -922,6 +966,11 @@ pub fn run() {
             settings_commands::reload_config_from_disk,
             settings_commands::get_corrupt_marker,
             settings_commands::reveal_config_in_explorer,
+            settings_commands::get_default_data_dir,
+            settings_commands::pick_folder,
+            // Skills (dedicated skills.toml)
+            skills::get_skills,
+            skills::set_skills,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

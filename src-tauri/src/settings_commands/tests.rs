@@ -12,12 +12,12 @@ use serde_json::json;
 use toml_edit::DocumentMut;
 
 use super::{
-    coerce_json_to_toml, is_allowed_field, is_allowed_section, json_type_name,
+    coerce_json_to_toml, folder_pick_result, is_allowed_field, is_allowed_section, json_type_name,
     json_value_to_toml_item, patch_document, read_document, reset_section_on_disk,
     write_field_to_disk,
 };
 use crate::config::defaults::{ALLOWED_FIELDS, ALLOWED_SECTIONS};
-use crate::config::{AgentMode, AgentPermission, ConfigError, Hotkey, Language};
+use crate::config::{AgentMode, AgentPermission, ConfigError, Hotkey, Language, Theme};
 
 // ─── Test fixtures ──────────────────────────────────────────────────────────
 
@@ -63,10 +63,10 @@ fn parse_sample() -> DocumentMut {
 #[test]
 fn allowed_fields_count_matches_schema_field_count() {
     // Hand-counted from `AppConfig`: prompt(1) + window(3) + quote(3)
-    // + general(3) + chat(3) + agent(5) = 18 tunable fields. If this assertion
+    // + general(4) + chat(3) + agent(5) = 19 tunable fields. If this assertion
     // fails, the schema has drifted from the allowlist and someone added a
     // field without extending ALLOWED_FIELDS.
-    assert_eq!(ALLOWED_FIELDS.len(), 18);
+    assert_eq!(ALLOWED_FIELDS.len(), 19);
 }
 
 #[test]
@@ -86,6 +86,7 @@ fn is_allowed_field_accepts_known_pair() {
     assert!(is_allowed_field("agent", "permission"));
     assert!(is_allowed_field("general", "hotkey"));
     assert!(is_allowed_field("general", "language"));
+    assert!(is_allowed_field("general", "theme"));
     assert!(is_allowed_field("general", "data_dir"));
     assert!(is_allowed_field("window", "max_images"));
 }
@@ -366,6 +367,91 @@ fn patch_document_insert_rejects_array_with_non_string_for_missing_field() {
     let mut doc: DocumentMut = toml.parse().unwrap();
     let err = patch_document(&mut doc, "chat", "fallbacks", json!(["ok", 42])).unwrap_err();
     matches_type_mismatch(&err, "chat", "fallbacks");
+}
+
+/// Upgrade path: a `config.toml` written before `[general]` existed has no such
+/// table. `patch_document` must create the allowed section rather than failing
+/// with `unknown section: general` (the v0.0.1 → v0.0.2 upgrade bug).
+#[test]
+fn patch_document_creates_missing_allowed_section() {
+    let toml = "[chat]\nmodel = \"gpt-4o\"\n";
+    let mut doc: DocumentMut = toml.parse().unwrap();
+    assert!(doc.get("general").is_none());
+
+    patch_document(&mut doc, "general", "hotkey", json!("alt")).unwrap();
+
+    let hotkey = doc
+        .get("general")
+        .and_then(|s| s.get("hotkey"))
+        .and_then(|k| k.as_str())
+        .expect("[general].hotkey created");
+    assert_eq!(hotkey, "alt");
+    // The untouched section survives.
+    assert!(doc.get("chat").is_some());
+}
+
+/// A section that exists but is not a table is still rejected: the fix only
+/// creates genuinely missing sections.
+#[test]
+fn patch_document_rejects_section_that_is_not_a_table() {
+    let toml = "general = 5\n";
+    let mut doc: DocumentMut = toml.parse().unwrap();
+    let err = patch_document(&mut doc, "general", "hotkey", json!("alt")).unwrap_err();
+    match err {
+        ConfigError::UnknownSection { section } => assert_eq!(section, "general"),
+        other => panic!("expected UnknownSection, got {other:?}"),
+    }
+}
+
+/// Full round trip through the writer + loader for the upgrade case: a legacy
+/// document with no `[general]` section accepts a write and the loader resolves
+/// the resulting file.
+#[test]
+fn write_field_to_disk_creates_section_missing_from_legacy_config() {
+    let dir = tempdir();
+    let path = dir.join("config.toml");
+    // A minimal v0.0.1-era file: no `[general]`, no `[agent].mode`/`permission`.
+    std::fs::write(&path, "[window]\noverlay_width = 600.0\n").unwrap();
+
+    let resolved = write_field_to_disk(&path, "general", "hotkey", json!("alt")).unwrap();
+    assert_eq!(resolved.general.hotkey, Hotkey::Alt);
+    assert!(std::fs::read_to_string(&path)
+        .unwrap()
+        .contains("[general]"));
+}
+
+#[test]
+fn write_field_to_disk_accepts_general_theme() {
+    let dir = tempdir();
+    let path = dir.join("config.toml");
+    std::fs::write(&path, SAMPLE_CONFIG).unwrap();
+
+    let resolved = write_field_to_disk(&path, "general", "theme", json!("light")).unwrap();
+    assert_eq!(resolved.general.theme, Theme::Light);
+
+    let on_disk = std::fs::read_to_string(&path).unwrap();
+    assert!(on_disk.contains("theme = \"light\""));
+}
+
+// ─── folder_pick_result ─────────────────────────────────────────────────────
+
+#[test]
+fn folder_pick_result_returns_path_string() {
+    let picked = tauri_plugin_dialog::FilePath::Path(PathBuf::from("D:/quickai-data"));
+    let got = folder_pick_result(Some(picked)).unwrap();
+    assert_eq!(got.as_deref(), Some("D:/quickai-data"));
+}
+
+#[test]
+fn folder_pick_result_returns_none_on_cancel() {
+    assert_eq!(folder_pick_result(None).unwrap(), None);
+}
+
+#[test]
+fn folder_pick_result_errors_on_non_file_url() {
+    // A `content://` URI cannot be turned into a filesystem path.
+    let picked: tauri_plugin_dialog::FilePath = "content://com.android/1".parse().unwrap();
+    assert!(folder_pick_result(Some(picked)).is_err());
 }
 
 // ─── json_value_to_toml_item ─────────────────────────────────────────────────

@@ -709,11 +709,16 @@ fn read_image_as_base64(path: &str) -> Result<String, String> {
 /// Starts the cloud agent loop for `task`. The provider, model, base URL, and
 /// API key come from the `[chat]` or `[agent]` section per `[agent].mode`; the
 /// consent policy comes from `[agent].permission`.
+///
+/// `skills` are skill aliases (from `/do /add <alias> …`): their file contents
+/// are appended to this run's task prompt. A missing or unreadable skill is
+/// reported as an [`AgentEvent::Error`] and never fails the run.
 #[tauri::command]
 pub async fn start_agent_mode(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, Arc<AgentState>>,
     task: String,
+    skills: Option<Vec<String>>,
     config: tauri::State<'_, parking_lot::RwLock<crate::config::AppConfig>>,
     db: tauri::State<'_, crate::history::Database>,
 ) -> Result<(), String> {
@@ -725,6 +730,32 @@ pub async fn start_agent_mode(
         let provider_config =
             crate::commands::resolve_agent_provider(&guard, &conn).map_err(|e| e.message)?;
         (provider_config, guard.agent.permission)
+    };
+
+    // Skills are consulted only when this run names any: the agent never
+    // injects enabled skills into its fixed tool-calling prompt, so an empty
+    // selection makes the store irrelevant to this run and it is left unread.
+    // Append the selected skills to the task prompt, mirroring the chat path;
+    // a bad skill path must not fail the run, so it is reported as an agent
+    // error event and the loop still starts.
+    let selected = skills.unwrap_or_default();
+    let task = if selected.is_empty() {
+        task
+    } else {
+        let (skill_list, mut skill_failures) = crate::skills::load_for_turn(&app_handle).await;
+        let (composed, selected_failures) =
+            crate::skills::append_skills_by_alias(&task, &skill_list, &selected);
+        skill_failures.extend(selected_failures);
+        for failure in &skill_failures {
+            emit(
+                &app_handle,
+                AgentEvent::Error {
+                    code: crate::providers::CODE_SKILL_UNREADABLE.to_string(),
+                    message: failure.detail(),
+                },
+            );
+        }
+        composed
     };
 
     let state = state.inner().clone();

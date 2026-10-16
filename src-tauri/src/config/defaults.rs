@@ -5,7 +5,7 @@
 //! Changing a default here propagates to a fresh first-run config file and to
 //! any field a user has left unset or left empty in their existing file.
 
-use super::schema::{AgentMode, AgentPermission, Hotkey, Language};
+use super::schema::{AgentMode, AgentPermission, Hotkey, Language, Theme};
 use crate::providers::Provider;
 
 /// Built-in assistant persona prompt. User overrides via `[prompt] system` in
@@ -50,6 +50,8 @@ pub const BOUNDS_QUOTE_MAX_CONTEXT_LENGTH: (u32, u32) = (1, 65_536);
 /// General settings defaults.
 pub const DEFAULT_GENERAL_HOTKEY: Hotkey = Hotkey::Ctrl;
 pub const DEFAULT_GENERAL_LANGUAGE: Language = Language::Auto;
+/// Dark is the default theme (item 8).
+pub const DEFAULT_GENERAL_THEME: Theme = Theme::Dark;
 /// Empty means "use the OS default app data directory".
 pub const DEFAULT_GENERAL_DATA_DIR: &str = "";
 
@@ -102,6 +104,7 @@ pub const ALLOWED_FIELDS: &[(&str, &str)] = &[
     // [general]
     ("general", "hotkey"),
     ("general", "language"),
+    ("general", "theme"),
     ("general", "data_dir"),
     // [chat]
     ("chat", "provider"),

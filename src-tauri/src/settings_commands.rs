@@ -12,6 +12,9 @@
 //! - [`get_corrupt_marker`] — returns and consumes the recovery marker the
 //!   loader wrote when a corrupt config file was renamed.
 //! - [`reveal_config_in_explorer`] — opens Explorer with the config file selected.
+//! - [`get_default_data_dir`] — the resolved OS default app data directory, so
+//!   the General tab can show the real path instead of "default".
+//! - [`pick_folder`] — opens the native folder picker for choosing a data dir.
 //!
 //! ## Security model
 //!
@@ -322,6 +325,59 @@ pub fn reveal_config_in_explorer(app: AppHandle) -> Result<(), String> {
     }
 }
 
+// ─── Data directory + folder picker ─────────────────────────────────────────
+
+/// Returns the resolved OS default app data directory as an absolute path
+/// string. The Settings UI shows this as the data-directory field's hint when
+/// `[general].data_dir` is empty, instead of the word "default".
+#[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub fn get_default_data_dir(app: AppHandle) -> Result<String, ConfigError> {
+    Ok(config::default_data_dir(&app)?.display().to_string())
+}
+
+/// Opens the native folder picker and returns the chosen directory as an
+/// absolute path, or `null` when the user cancels.
+///
+/// The dialog is blocking, so it runs on a blocking thread pool rather than the
+/// async runtime. It is parented to the Settings window (falling back to the
+/// overlay) so Windows shows the modal in front of the window that opened it.
+/// The only logic is the [`folder_pick_result`] conversion, which is
+/// unit-tested; the wrapper itself needs a live window and is coverage-excluded.
+#[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let mut builder = app.dialog().file();
+        if let Some(window) = app
+            .get_webview_window("settings")
+            .or_else(|| app.get_webview_window("main"))
+        {
+            builder = builder.set_parent(&window);
+        }
+        builder.blocking_pick_folder()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    folder_pick_result(picked)
+}
+
+/// Converts the folder picker's result into the IPC value the frontend expects:
+/// the absolute path string, or `None` when the user cancelled. A picked URL
+/// that cannot be converted to a filesystem path surfaces as an error string.
+pub(crate) fn folder_pick_result(
+    picked: Option<tauri_plugin_dialog::FilePath>,
+) -> Result<Option<String>, String> {
+    match picked {
+        None => Ok(None),
+        Some(path) => path
+            .into_path()
+            .map(|p| Some(p.display().to_string()))
+            .map_err(|e| e.to_string()),
+    }
+}
+
 // ─── Document I/O + JSON→TOML coercion (testable internals) ─────────────────
 
 /// Reads and parses the TOML document. Maps any I/O or parse error to the
@@ -342,6 +398,12 @@ pub(crate) fn read_document(path: &Path) -> Result<DocumentMut, ConfigError> {
 
 /// Locates `[section][key]` inside `doc` and overwrites it with `value`,
 /// preserving the existing TOML type. Rejects type drift with `TypeMismatch`.
+///
+/// `section` must be in `defaults::ALLOWED_SECTIONS`; anything else is rejected
+/// with `UnknownSection`. When an *allowed* section is missing from the
+/// document — a `config.toml` written by an older release predates it, e.g. a
+/// v0.0.1 file has no `[general]` — the section is created rather than
+/// erroring, so upgrading users can write the new fields.
 ///
 /// If the key is absent from the section (e.g. the user hand-edited it out),
 /// a new item is inserted with the type inferred from the JSON value rather
@@ -374,6 +436,17 @@ pub(crate) fn patch_document(
     key: &str,
     value: JsonValue,
 ) -> Result<(), ConfigError> {
+    if !is_allowed_section(section) {
+        return Err(ConfigError::UnknownSection {
+            section: section.to_string(),
+        });
+    }
+    // Upgrade path: a file written before this section existed has no
+    // `[section]` table at all. Create it so the write can land instead of
+    // failing with `unknown section` (the v0.0.1 → v0.0.2 upgrade bug).
+    if doc.get(section).is_none() {
+        doc.insert(section, Item::Table(toml_edit::Table::new()));
+    }
     let table = doc
         .get_mut(section)
         .and_then(Item::as_table_mut)

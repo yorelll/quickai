@@ -17,7 +17,7 @@ use super::defaults::{
     DEFAULT_AGENT_BASE_URL, DEFAULT_AGENT_MODE, DEFAULT_AGENT_MODEL, DEFAULT_AGENT_PERMISSION,
     DEFAULT_AGENT_PROVIDER, DEFAULT_CHAT_BASE_URL, DEFAULT_CHAT_MODEL, DEFAULT_CHAT_PROVIDER,
     DEFAULT_GENERAL_DATA_DIR, DEFAULT_GENERAL_HOTKEY, DEFAULT_GENERAL_LANGUAGE,
-    DEFAULT_MAX_CHAT_HEIGHT, DEFAULT_MAX_IMAGES, DEFAULT_OVERLAY_WIDTH,
+    DEFAULT_GENERAL_THEME, DEFAULT_MAX_CHAT_HEIGHT, DEFAULT_MAX_IMAGES, DEFAULT_OVERLAY_WIDTH,
     DEFAULT_QUOTE_MAX_CONTEXT_LENGTH, DEFAULT_QUOTE_MAX_DISPLAY_CHARS,
     DEFAULT_QUOTE_MAX_DISPLAY_LINES,
 };
@@ -44,6 +44,15 @@ pub enum Language {
     Zh,
 }
 
+/// UI colour theme. Wire values are exactly `"dark"` and `"light"`; the
+/// frontend sets `document.documentElement.dataset.theme` from this value.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Theme {
+    Dark,
+    Light,
+}
+
 /// How the agent resolves its provider, model, base URL, and API key.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -64,9 +73,9 @@ pub enum AgentPermission {
     Full,
 }
 
-/// General configuration: activation hotkey, UI language, and the app data
-/// directory override. These are the knobs that do not belong to any single
-/// feature section.
+/// General configuration: activation hotkey, UI language, colour theme, and
+/// the app data directory override. These are the knobs that do not belong to
+/// any single feature section.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct GeneralSection {
@@ -74,6 +83,8 @@ pub struct GeneralSection {
     pub hotkey: Hotkey,
     /// UI language selector.
     pub language: Language,
+    /// UI colour theme selector.
+    pub theme: Theme,
     /// Directory holding the database and images. Empty means the OS default
     /// app data directory; applied at startup only.
     pub data_dir: String,
@@ -84,6 +95,7 @@ impl Default for GeneralSection {
         Self {
             hotkey: DEFAULT_GENERAL_HOTKEY,
             language: DEFAULT_GENERAL_LANGUAGE,
+            theme: DEFAULT_GENERAL_THEME,
             data_dir: DEFAULT_GENERAL_DATA_DIR.to_string(),
         }
     }

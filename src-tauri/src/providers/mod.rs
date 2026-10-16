@@ -105,6 +105,9 @@ pub const CODE_BAD_REQUEST: &str = "bad_request";
 pub const CODE_CONTEXT_LENGTH_EXCEEDED: &str = "context_length_exceeded";
 /// Stable error code: the user cancelled generation.
 pub const CODE_CANCELLED: &str = "cancelled";
+/// Stable error code: a selected skill's file could not be read. Surfaced as an
+/// inline notice so a bad skill path never fails the whole turn (batch 3).
+pub const CODE_SKILL_UNREADABLE: &str = "skill_unreadable";
 /// Stable error code: an unclassified failure.
 pub const CODE_UNKNOWN: &str = "unknown";
 

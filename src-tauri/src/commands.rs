@@ -326,6 +326,10 @@ pub fn set_setting(
 /// - `think` requests the provider's reasoning mode.
 /// - `prompt_override`, when present, replaces the text actually sent to the
 ///   provider (the chat bubble still shows `query`).
+/// - `skills` are skill aliases whose files are appended to this turn's prompt.
+///   Skills with `enabled: true` are appended to the system prompt every turn
+///   regardless of this list. An unreadable skill is surfaced as an error chunk
+///   and never fails the turn.
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(not(coverage), tauri::command)]
 #[allow(clippy::too_many_arguments)]
@@ -335,7 +339,9 @@ pub async fn ask(
     images: Option<Vec<String>>,
     think: Option<bool>,
     prompt_override: Option<String>,
+    skills: Option<Vec<String>>,
     on_event: Channel<StreamChunk>,
+    app: tauri::AppHandle,
     client: State<'_, reqwest::Client>,
     generation: State<'_, GenerationState>,
     history: State<'_, ConversationHistory>,
@@ -358,7 +364,17 @@ pub async fn ask(
             return Ok(());
         }
     };
-    let system_prompt = config.read().prompt.resolved_system.clone();
+
+    // Load the skills store from the config dir (seeding the built-in
+    // assistant on first use) and compose this turn's prompts. Enabled skills
+    // are appended to the system prompt; the aliases in `skills` are appended
+    // to the user prompt for this turn only. A load failure is reported through
+    // the skill-failure path, so an unreadable store never silently drops the
+    // enabled skills — including the built-in assistant — from the prompt.
+    let (skill_list, mut skill_failures) = crate::skills::load_for_turn(&app).await;
+    let (system_prompt, enabled_failures) =
+        crate::skills::append_enabled_skills(&config.read().prompt.resolved_system, &skill_list);
+    skill_failures.extend(enabled_failures);
 
     // Build the user message. When quoted text is present, label it explicitly
     // so the model knows the highlighted text is the primary subject and any
@@ -370,6 +386,16 @@ pub async fn ask(
         }
         _ => actual_prompt,
     };
+    let (content, selected_failures) =
+        crate::skills::append_skills_by_alias(&content, &skill_list, &skills.unwrap_or_default());
+    skill_failures.extend(selected_failures);
+    // A bad skill path must not fail the turn: report it inline and continue.
+    for failure in &skill_failures {
+        let _ = on_event.send(StreamChunk::Error(ApiError::new(
+            providers::CODE_SKILL_UNREADABLE,
+            failure.detail(),
+        )));
+    }
 
     let encoded_images = match images {
         Some(ref paths) if !paths.is_empty() => {
