@@ -967,6 +967,7 @@ pub fn run() {
             settings_commands::get_corrupt_marker,
             settings_commands::reveal_config_in_explorer,
             settings_commands::get_default_data_dir,
+            #[cfg(not(coverage))]
             settings_commands::pick_folder,
             // Skills (dedicated skills.toml)
             skills::get_skills,

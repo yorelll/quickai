@@ -344,8 +344,8 @@ pub fn get_default_data_dir(app: AppHandle) -> Result<String, ConfigError> {
 /// overlay) so Windows shows the modal in front of the window that opened it.
 /// The only logic is the [`folder_pick_result`] conversion, which is
 /// unit-tested; the wrapper itself needs a live window and is coverage-excluded.
-#[tauri::command]
 #[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(not(coverage), tauri::command)]
 pub async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
     let picked = tauri::async_runtime::spawn_blocking(move || {
         use tauri_plugin_dialog::DialogExt;
