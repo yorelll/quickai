@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { onAction } from '@tauri-apps/plugin-notification';
-import App from '../App';
+import App, { extractSkillAdds } from '../App';
 import {
   invoke,
   emitTauriEvent,
@@ -359,6 +359,97 @@ describe('App', () => {
     });
 
     expect(__mockWindow.startDragging).not.toHaveBeenCalled();
+  });
+
+  it('does not fire drag when mousedown lands on a scrollbar', async () => {
+    render(<App />);
+    await act(async () => {});
+
+    await showOverlay();
+
+    // Enter chat mode so the transcript scroller is mounted.
+    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    act(() => {
+      fireEvent.change(textarea, { target: { value: 'test message' } });
+    });
+    act(() => {
+      fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+    });
+    await act(async () => {});
+
+    const scroller = document.querySelector(
+      '.chat-messages-scroll',
+    ) as HTMLElement;
+    expect(scroller).not.toBeNull();
+
+    // jsdom reports zero-size layout; describe a scrollable box with the
+    // pointer past the content+padding right edge (the scrollbar gutter).
+    Object.defineProperty(scroller, 'scrollHeight', { value: 1000 });
+    Object.defineProperty(scroller, 'clientHeight', { value: 400 });
+    Object.defineProperty(scroller, 'clientWidth', { value: 585 });
+    Object.defineProperty(scroller, 'clientLeft', { value: 0 });
+    scroller.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        right: 600,
+        bottom: 400,
+        width: 600,
+        height: 400,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    __mockWindow.startDragging.mockClear();
+    act(() => {
+      fireEvent.mouseDown(scroller, { clientX: 590 });
+    });
+
+    expect(__mockWindow.startDragging).not.toHaveBeenCalled();
+  });
+
+  it('still fires drag on a scrollable element when the pointer is on its content', async () => {
+    render(<App />);
+    await act(async () => {});
+
+    await showOverlay();
+
+    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    act(() => {
+      fireEvent.change(textarea, { target: { value: 'test message' } });
+    });
+    act(() => {
+      fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+    });
+    await act(async () => {});
+
+    const scroller = document.querySelector(
+      '.chat-messages-scroll',
+    ) as HTMLElement;
+    Object.defineProperty(scroller, 'scrollHeight', { value: 1000 });
+    Object.defineProperty(scroller, 'clientHeight', { value: 400 });
+    Object.defineProperty(scroller, 'clientWidth', { value: 600 });
+    Object.defineProperty(scroller, 'clientLeft', { value: 0 });
+    scroller.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        right: 600,
+        bottom: 400,
+        width: 600,
+        height: 400,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    __mockWindow.startDragging.mockClear();
+    act(() => {
+      fireEvent.mouseDown(scroller, { clientX: 300 });
+    });
+
+    expect(__mockWindow.startDragging).toHaveBeenCalled();
   });
 
   it('submits query with quoted text when selectedContext is set', async () => {
@@ -4198,6 +4289,7 @@ describe('App', () => {
 
       expect(invoke).toHaveBeenCalledWith('start_agent_mode', {
         task: 'open notepad',
+        skills: null,
       });
     });
 
@@ -4214,6 +4306,7 @@ describe('App', () => {
 
       expect(invoke).toHaveBeenCalledWith('start_agent_mode', {
         task: 'tidy my desktop',
+        skills: null,
       });
     });
 
@@ -4241,12 +4334,15 @@ describe('App', () => {
       });
       expect(invoke).toHaveBeenCalledWith('start_agent_mode', {
         task: 'open notepad',
+        skills: null,
       });
 
       fireEvent.click(screen.getByRole('button', { name: 'Minimize' }));
 
       const minibar = screen.getByTitle(/click to restore/i);
-      expect(minibar.querySelector('.bg-amber-400')).not.toBeNull();
+      expect(minibar.querySelector('span.absolute')?.className).toContain(
+        'bg-tertiary',
+      );
     });
 
     it('shows a rotating tip in chat mode', async () => {
@@ -4334,6 +4430,7 @@ describe('App', () => {
 
       expect(invoke).toHaveBeenCalledWith('start_agent_mode', {
         task: 'tidy up my desktop',
+        skills: null,
       });
     });
 
@@ -4381,6 +4478,40 @@ describe('App', () => {
 
       expect(screen.getByText('Error')).toBeInTheDocument();
       expect(screen.getByText('Provider is busy')).toBeInTheDocument();
+    });
+
+    it('keeps the agent panel across a skill_unreadable notice', async () => {
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.change(textarea, { target: { value: '/do open notepad' } });
+      await act(async () => {
+        fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      });
+
+      await act(async () => {
+        emitTauriEvent('quickai://agent', {
+          kind: 'error',
+          code: 'skill_unreadable',
+          message: 'translate: not found',
+        });
+      });
+
+      // The notice is surfaced without ending the run or flashing an error.
+      expect(screen.getByText('translate: not found')).toBeInTheDocument();
+      expect(screen.getByText('Capturing screen...')).toBeInTheDocument();
+      expect(screen.queryByText('Error')).toBeNull();
+
+      // A later event still drives the panel, so it never vanishes mid-run.
+      await act(async () => {
+        emitTauriEvent('quickai://agent', {
+          kind: 'reasoning',
+          text: 'thinking',
+        });
+      });
+      expect(screen.getByText('Analyzing...')).toBeInTheDocument();
     });
 
     it('clears a finished agent panel when the overlay is reopened', async () => {
@@ -4894,7 +5025,7 @@ describe('App', () => {
       );
     });
 
-    it('does not act on keys typed into the input box', async () => {
+    it('acts on keys typed into the input box while a confirmation is pending', async () => {
       await startAgentAwaitingConfirmation();
 
       const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
@@ -4903,13 +5034,12 @@ describe('App', () => {
       });
       await act(async () => {});
 
-      expect(invoke).not.toHaveBeenCalledWith(
-        'confirm_agent_action',
-        expect.anything(),
-      );
+      expect(invoke).toHaveBeenCalledWith('confirm_agent_action', {
+        actionId: null,
+      });
     });
 
-    it('does not act on keys typed into a contenteditable field', async () => {
+    it('acts on keys typed into a contenteditable field while a confirmation is pending', async () => {
       await startAgentAwaitingConfirmation();
 
       const editable = document.createElement('div');
@@ -4917,14 +5047,13 @@ describe('App', () => {
       document.body.appendChild(editable);
 
       act(() => {
-        fireEvent.keyDown(editable, { key: '1' });
+        fireEvent.keyDown(editable, { key: '2' });
       });
       await act(async () => {});
 
-      expect(invoke).not.toHaveBeenCalledWith(
-        'confirm_agent_action',
-        expect.anything(),
-      );
+      expect(invoke).toHaveBeenCalledWith('reject_agent_action', {
+        actionId: null,
+      });
       editable.remove();
     });
 
@@ -4941,6 +5070,345 @@ describe('App', () => {
       expect(invoke).not.toHaveBeenCalledWith(
         'confirm_agent_action',
         expect.anything(),
+      );
+    });
+  });
+
+  describe('skills (/add)', () => {
+    const SKILLS = [
+      { id: 's1', alias: 'assistant', path: '/a.md', enabled: true },
+      { id: 's2', alias: 'translate', path: '/b.md', enabled: false },
+    ];
+
+    function extract(text: string, aliases: string[]) {
+      return extractSkillAdds(text, new Set(aliases));
+    }
+
+    it('extractSkillAdds pulls out known aliases and strips the pair', () => {
+      expect(extract('/add translate summarize this', ['translate'])).toEqual({
+        skills: ['translate'],
+        stripped: 'summarize this',
+      });
+    });
+
+    it('extractSkillAdds leaves a bare /add untouched', () => {
+      expect(extract('/add', ['translate'])).toEqual({
+        skills: [],
+        stripped: '/add',
+      });
+    });
+
+    it('extractSkillAdds leaves an unknown alias untouched', () => {
+      expect(extract('/add bogus hello', ['translate'])).toEqual({
+        skills: [],
+        stripped: '/add bogus hello',
+      });
+    });
+
+    async function showWithSkills(list: typeof SKILLS = SKILLS) {
+      enableChannelCaptureWithResponses({ get_skills: list });
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+      return screen.getByPlaceholderText('Ask QuickAI anything...');
+    }
+
+    it('lists every skill, marking enabled ones inert', async () => {
+      const textarea = await showWithSkills();
+
+      fireEvent.change(textarea, { target: { value: '/add' } });
+      await act(async () => {});
+
+      const options = screen.getAllByRole('option');
+      expect(options).toHaveLength(2);
+      expect(options[0]).toHaveTextContent('assistant');
+      expect(options[0]).toHaveAttribute('aria-disabled', 'true');
+      expect(options[0]).toHaveAttribute('aria-selected', 'false');
+      expect(options[1]).toHaveTextContent('translate');
+      // The highlight opens on the addable skill, not the enabled first row.
+      expect(options[1]).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByText('Already enabled')).toBeInTheDocument();
+    });
+
+    it('opens with no selection when every skill is enabled', async () => {
+      const textarea = await showWithSkills([SKILLS[0]]);
+
+      fireEvent.change(textarea, { target: { value: '/add' } });
+      await act(async () => {});
+
+      const options = screen.getAllByRole('option');
+      expect(options).toHaveLength(1);
+      expect(options[0]).toHaveAttribute('aria-selected', 'false');
+    });
+
+    it('does not add an enabled skill picked from the picker', async () => {
+      const textarea = await showWithSkills();
+
+      fireEvent.change(textarea, { target: { value: '/add' } });
+      await act(async () => {});
+      // Up onto the enabled built-in assistant row.
+      fireEvent.keyDown(textarea, { key: 'ArrowUp' });
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      await act(async () => {});
+
+      expect(
+        screen.queryByRole('list', { name: 'Selected skills' }),
+      ).toBeNull();
+    });
+
+    it('does not record an enabled alias typed directly', async () => {
+      const textarea = await showWithSkills();
+
+      // `assistant` is enabled, so it must not be stripped out and recorded —
+      // it already rides the system prompt on every turn.
+      fireEvent.change(textarea, {
+        target: { value: '/add assistant say hi' },
+      });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      await act(async () => {});
+
+      expect(
+        screen.queryByRole('list', { name: 'Selected skills' }),
+      ).toBeNull();
+      expect(invoke).toHaveBeenCalledWith(
+        'ask',
+        expect.objectContaining({ skills: null }),
+      );
+    });
+
+    it('adds a skill from the picker and sends it with the message', async () => {
+      const textarea = await showWithSkills();
+
+      fireEvent.change(textarea, { target: { value: '/add' } });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      await act(async () => {});
+
+      // The chip for the picked skill is shown and the box is empty.
+      expect(
+        screen.getByRole('list', { name: 'Selected skills' }),
+      ).toBeInTheDocument();
+
+      fireEvent.change(textarea, { target: { value: 'hello' } });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      await act(async () => {});
+
+      expect(invoke).toHaveBeenCalledWith(
+        'ask',
+        expect.objectContaining({ query: 'hello', skills: ['translate'] }),
+      );
+    });
+
+    it('Ctrl+Enter adds the skill but keeps the picker open', async () => {
+      const textarea = await showWithSkills();
+
+      fireEvent.change(textarea, { target: { value: '/add' } });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+      await act(async () => {});
+
+      expect(
+        screen.getByRole('listbox', { name: 'Skill suggestions' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('list', { name: 'Selected skills' }),
+      ).toBeInTheDocument();
+    });
+
+    it('adds a skill named directly with /add <alias> without sending', async () => {
+      const textarea = await showWithSkills();
+
+      fireEvent.change(textarea, { target: { value: '/add translate' } });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      await act(async () => {});
+
+      expect(invoke).not.toHaveBeenCalledWith('ask', expect.anything());
+      expect(screen.getByText('translate')).toBeInTheDocument();
+
+      fireEvent.change(textarea, { target: { value: 'say hi' } });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      await act(async () => {});
+
+      expect(invoke).toHaveBeenCalledWith(
+        'ask',
+        expect.objectContaining({ query: 'say hi', skills: ['translate'] }),
+      );
+    });
+
+    it('sends an unknown /add alias as ordinary text with no skills', async () => {
+      const textarea = await showWithSkills();
+
+      fireEvent.change(textarea, { target: { value: '/add bogus hello' } });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      await act(async () => {});
+
+      expect(invoke).toHaveBeenCalledWith(
+        'ask',
+        expect.objectContaining({ skills: null }),
+      );
+    });
+
+    it('does not add the same skill twice', async () => {
+      const textarea = await showWithSkills();
+
+      fireEvent.change(textarea, { target: { value: '/add' } });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+      await act(async () => {});
+
+      const list = screen.getByRole('list', { name: 'Selected skills' });
+      expect(list.querySelectorAll('[role="listitem"]')).toHaveLength(1);
+    });
+
+    it('sends a prompt typed after a direct /add <alias>', async () => {
+      const textarea = await showWithSkills();
+
+      fireEvent.change(textarea, {
+        target: { value: '/add translate say hi' },
+      });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      await act(async () => {});
+
+      expect(invoke).toHaveBeenCalledWith(
+        'ask',
+        expect.objectContaining({ query: 'say hi', skills: ['translate'] }),
+      );
+    });
+
+    it('removes a selected skill with the chip remove button', async () => {
+      const textarea = await showWithSkills();
+
+      fireEvent.change(textarea, { target: { value: '/add translate' } });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      await act(async () => {});
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Remove skill translate' }),
+      );
+      await act(async () => {});
+
+      expect(
+        screen.queryByRole('list', { name: 'Selected skills' }),
+      ).toBeNull();
+    });
+
+    it('clears selected skills when the overlay reopens', async () => {
+      const textarea = await showWithSkills();
+
+      fireEvent.change(textarea, { target: { value: '/add translate' } });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      await act(async () => {});
+      expect(
+        screen.getByRole('list', { name: 'Selected skills' }),
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        emitTauriEvent('quickai://visibility', { state: 'hide-request' });
+      });
+      await showOverlay();
+
+      expect(
+        screen.queryByRole('list', { name: 'Selected skills' }),
+      ).toBeNull();
+    });
+
+    it('re-reads the skill list when the overlay reopens', async () => {
+      let list: unknown[] = [];
+      invoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'get_skills') return list;
+        if (cmd === 'list_conversations') return [];
+      });
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      let textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.change(textarea, { target: { value: '/add' } });
+      await act(async () => {});
+      expect(screen.getByText('No skills configured')).toBeInTheDocument();
+
+      // The user adds a skill in the Settings window (a separate webview).
+      list = [{ id: 's2', alias: 'translate', path: '/b.md', enabled: false }];
+
+      await act(async () => {
+        emitTauriEvent('quickai://visibility', { state: 'hide-request' });
+      });
+      await showOverlay();
+
+      textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.change(textarea, { target: { value: '/add' } });
+      await act(async () => {});
+      expect(screen.getByText('translate')).toBeInTheDocument();
+    });
+
+    it('passes selected skills to /do and clears the selection', async () => {
+      const textarea = await showWithSkills();
+
+      fireEvent.change(textarea, {
+        target: { value: '/do /add translate tidy' },
+      });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      await act(async () => {});
+
+      expect(invoke).toHaveBeenCalledWith('start_agent_mode', {
+        task: 'tidy',
+        skills: ['translate'],
+      });
+      // The selection must not survive to leak into the next chat turn.
+      expect(
+        screen.queryByRole('list', { name: 'Selected skills' }),
+      ).toBeNull();
+    });
+
+    it('passes selected skills to an auto-detected agent run', async () => {
+      const textarea = await showWithSkills();
+
+      fireEvent.change(textarea, {
+        target: { value: '/add translate open notepad' },
+      });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      await act(async () => {});
+
+      expect(invoke).toHaveBeenCalledWith('start_agent_mode', {
+        task: 'open notepad',
+        skills: ['translate'],
+      });
+      expect(
+        screen.queryByRole('list', { name: 'Selected skills' }),
+      ).toBeNull();
+    });
+
+    it('does not leak a cleared selection into the next ask turn', async () => {
+      const textarea = await showWithSkills();
+
+      fireEvent.change(textarea, {
+        target: { value: '/do /add translate tidy' },
+      });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      await act(async () => {});
+
+      invoke.mockClear();
+      fireEvent.change(textarea, { target: { value: 'hello' } });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      await act(async () => {});
+
+      expect(invoke).toHaveBeenCalledWith(
+        'ask',
+        expect.objectContaining({ query: 'hello', skills: null }),
       );
     });
   });

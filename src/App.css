@@ -18,13 +18,14 @@
   --color-surface-elevated: #2c2c2c;
   --color-surface-border: rgba(255, 255, 255, 0.08);
 
-  /* Text tokens */
+  /* Text tokens. Secondary clears 4.5:1 on both the base and the elevated
+   * surface, so muted copy stays AA on cards as well as on the window. */
   --color-text-primary: #f0f0f2;
-  --color-text-secondary: #8a8a8e;
+  --color-text-secondary: #9a9a9e;
 
   /* Streamdown theme tokens (shadcn/ui convention) */
   --color-muted: #2c2c2c;
-  --color-muted-foreground: #8a8a8e;
+  --color-muted-foreground: #9a9a9e;
   --color-border: rgba(255, 255, 255, 0.08);
   --color-sidebar: #202020;
   --color-foreground: #f0f0f2;
@@ -39,9 +40,40 @@
     0 8px 24px -8px rgba(0, 0, 0, 0.22);
 }
 
+/* Dark is the base palette; `data-theme="light"` swaps the token values.
+ * Every token is redefined here so token-backed utilities follow the theme
+ * with no per-component work. `color-scheme` also themes native widgets
+ * (scrollbars, select menus) and drives the `light-dark()` accents used for
+ * the few non-palette hues (error/destructive red). */
+:root {
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --color-primary: #b0491a;
+  --color-secondary: #8f4a10;
+  --color-tertiary: #8a5f00;
+  --color-neutral: #e8e4df;
+
+  --color-surface-base: #f6f4f1;
+  --color-surface-elevated: #ffffff;
+  --color-surface-border: rgba(0, 0, 0, 0.14);
+
+  --color-text-primary: #1f1c1a;
+  --color-text-secondary: #5c5855;
+
+  --color-muted: #eceae6;
+  --color-muted-foreground: #5c5855;
+  --color-border: rgba(0, 0, 0, 0.14);
+  --color-sidebar: #f6f4f1;
+  --color-foreground: #1f1c1a;
+}
+
 html,
 body {
-  background-color: #202020;
+  background-color: var(--color-surface-base);
   color: var(--color-text-primary);
   margin: 0;
   padding: 0;
@@ -67,12 +99,6 @@ body {
  */
 .chat-bubble-user {
   background: linear-gradient(135deg, #ff8d5c 0%, #e06b30 100%);
-  box-shadow: none;
-}
-
-.chat-bubble-ai {
-  background: #2c2c2c;
-  border: none;
   box-shadow: none;
 }
 
@@ -232,14 +258,17 @@ body {
   background: transparent;
 }
 
-/* ─── Windows Title Bar Buttons ─── */
+/* ─── Windows Title Bar Buttons ───
+ * These sit directly on the window surface (no chrome behind them), so their
+ * foreground has to follow the theme — white glyphs vanish on the light base.
+ */
 .win-title-btn {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 46px;
   height: 32px;
-  color: rgba(255, 255, 255, 0.7);
+  color: light-dark(rgba(0, 0, 0, 0.62), rgba(255, 255, 255, 0.7));
   transition: background-color 0.1s ease;
   cursor: pointer;
   border: none;
@@ -247,17 +276,17 @@ body {
   padding: 0;
 }
 .win-title-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.9);
+  background: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
+  color: light-dark(rgba(0, 0, 0, 0.88), rgba(255, 255, 255, 0.9));
 }
 .win-title-btn-close:hover {
   background: #c42b1c;
-  color: white;
+  color: #fff;
 }
 .win-title-btn:active {
-  background: rgba(255, 255, 255, 0.04);
+  background: light-dark(rgba(0, 0, 0, 0.04), rgba(255, 255, 255, 0.04));
 }
 .win-title-btn-close:active {
   background: #b22a1a;
-  color: white;
+  color: #fff;
 }

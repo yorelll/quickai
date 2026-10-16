@@ -4,8 +4,9 @@ QuickAI is configured in three places:
 
 1. **Environment variables** (`.env`) — build/dev-time defaults, read by the
    Vite frontend via `import.meta.env`.
-2. **The Settings window** — provider, model, base URL, API keys, language,
-   hotkey, data directory, and window/quote options, edited in the app.
+2. **The Settings window** — provider, model, base URL, API keys, skills,
+   language, hotkey, theme, data directory, and window/quote options, edited in
+   the app.
 3. **`config.toml`** — the on-disk configuration file, editable by hand or
    through the Settings window.
 
@@ -38,9 +39,11 @@ the next `bun run dev` or `bun run build:all`.
 `VITE_GIT_COMMIT_SHA` is injected by CI at build time and shown on the Settings
 **About** tab. It is not meant to be set by hand.
 
-The system prompt is **not** an environment variable. Set it with `[prompt]
-system` in [`config.toml`](#configtoml), or leave it empty to use the built-in
-assistant persona.
+The system prompt is **not** an environment variable. The AI tab no longer has a
+system-prompt field — it is replaced by the **Skills** section (see
+[Skills](#skills)), where enabled skills are appended to the prompt. The base
+persona is still the `[prompt] system` key in [`config.toml`](#configtoml), which
+you can edit by hand; leave it empty to use the built-in assistant persona.
 
 ### Validation rules
 
@@ -78,9 +81,10 @@ The settings that do not belong to a single feature.
 
 | Setting | Description |
 | :--- | :--- |
-| **Summon hotkey** | The key you double-tap to summon the overlay: `ctrl` (default), `alt`, `shift`, or `win`. Pick one that does not clash with your other shortcuts. |
+| **Summon hotkey** | The key you **double-tap** to summon the overlay: `ctrl` (default), `alt`, `shift`, or `win`. The picker reads "Double-tap <key>", so `alt` means `Alt`+`Alt` — not `Alt`+`Ctrl`. Pick one that does not clash with your other shortcuts. |
 | **Interface language** | `auto` (follow the Windows display language), `en` (English), or `zh` (Simplified Chinese). Defaults to `auto` (`zh*` → Chinese, otherwise English). |
-| **Data directory** | Where QuickAI keeps its database and saved images. Empty means the default per-user app-data directory. **A restart is required** for a change to take effect. |
+| **Theme** (Appearance) | `dark` (default) or `light`. Applies immediately — no restart. The light palette overrides the same design tokens. |
+| **Data directory** | Where QuickAI keeps its database and saved images. The field shows the full resolved default path as its hint when empty, and a **Browse…** button opens the native Windows folder picker. **A restart is required** for a change to take effect. |
 | **Start on boot** | Register QuickAI to launch when you sign in (a Windows Task Scheduler entry, not a `config.toml` field). |
 
 ### AI
@@ -93,7 +97,7 @@ The provider used for the main chat, vision, and `/think`.
 | **Model** | Provider-specific model name. **There is no default** — the field starts empty and shows a placeholder (`e.g. gpt-4o`) only. Suggested values include `gpt-4o`, `gpt-4o-mini`, `o4-mini`, `gpt-4.1` (OpenAI) and `claude-sonnet-4-5`, `claude-opus-4-1`, `claude-haiku-4-5` (Anthropic). The field is editable, so you can enter any model your account can access. Starting a chat with no model set surfaces the error "No chat model selected. Set one in Settings." |
 | **Base URL** | API endpoint. **Empty by default**; empty means the provider default: `https://api.openai.com/v1` (OpenAI) or `https://api.anthropic.com` (Anthropic). The field shows the default as a placeholder only. Required for `openai_compatible`. |
 | **API key** | Your provider API key. Stored locally in the SQLite `app_config` table (`api_key_openai`, `api_key_anthropic`, `api_key_openai_compatible`). |
-| **System prompt** | Optional persona override; empty uses the built-in assistant persona. |
+| **Skills** | The skills editor, which replaces the old system-prompt field. Each entry has an **alias** (no spaces), a **path** to the file holding the skill text, and an **enabled-as-system-prompt** toggle. Add, edit, delete, and reorder (drag, or the up/down buttons). One built-in assistant skill is seeded on first use and cannot be deleted. See [Skills](#skills). |
 
 ### Display
 
@@ -118,10 +122,11 @@ How `/do` computer control gets its model and how much it may do without asking.
 
 ### About
 
-App identity, version, links, a **Shortcuts and commands** list (every keyboard
-shortcut and slash command), a **Help** section (features, usage, and the tray
-icon), and file actions (reveal app data, refresh `config.toml`, reset all
-settings to defaults).
+App identity, version, links, file actions (reveal app data, refresh
+`config.toml`, reset all settings to defaults), and two reference popups. The
+long references are no longer on the page: **Shortcuts and commands** (every
+keyboard shortcut and slash command) and **Help** (features, usage, and the tray
+icon) each open in a scrollable popup dialog.
 
 ---
 
@@ -149,6 +154,7 @@ max_context_length = 4096
 [general]                    # activation and app-wide settings
 hotkey = "ctrl"              # double-tap key: "ctrl" | "alt" | "shift" | "win"
 language = "auto"            # "auto" | "en" | "zh"
+theme = "dark"               # "dark" | "light" (default "dark")
 data_dir = ""                # empty → default app data dir (applied at startup)
 
 [chat]                       # drives main chat, vision, and /think
@@ -173,6 +179,11 @@ Notes:
   request time, and the UI shows that default as a placeholder.
 - **`[general].data_dir`** is read once at **startup**, so changing it requires a
   restart. Empty (or whitespace) means the default per-user app-data directory.
+  The Settings field shows that resolved default path as its hint, and a
+  **Browse…** button opens the native folder picker.
+- **`[general].theme`** is `"dark"` (the default) or `"light"`. The app sets
+  `document.documentElement.dataset.theme` from it and applies the change
+  immediately, with no restart.
 - **`[agent].mode = "same_as_chat"`** (the default) makes the agent reuse the
   `[chat]` provider, model, base URL, **and** the chat provider's API key;
   `"custom"` uses the `[agent]` provider/model/base URL and its own API key.
@@ -184,3 +195,51 @@ Notes:
 - Values outside the accepted range fall back to the default. If the file
   cannot be parsed, QuickAI backs it up as `config.toml.corrupt-<timestamp>` and
   starts from defaults.
+- Skills are **not** stored in `config.toml` — they live in a separate
+  `skills.toml` (see [Skills](#skills) below).
+
+---
+
+## Skills
+
+Skills let you attach extra text to a prompt — a persona, a set of rules, or a
+task-specific instruction — without editing the base persona.
+
+They are stored in **`skills.toml`**, a separate file in QuickAI's per-user
+configuration directory (`%APPDATA%`), as an array of `[[skills]]` tables:
+
+```toml
+[[skills]]
+id = "builtin-assistant"     # stable opaque id; the built-in skill's id is fixed
+alias = "assistant"          # unique, non-empty, no whitespace
+path = "C:\\...\\assistant.md"  # file whose contents are the skill text
+enabled = true               # append to the system prompt every turn
+```
+
+Each `Skill` has four fields:
+
+| Field | Description |
+| :--- | :--- |
+| **`id`** | A stable opaque id assigned by the app. |
+| **`alias`** | The name used to invoke the skill. Non-empty, **no whitespace**, and unique across all skills. |
+| **`path`** | A file whose contents are the skill text. |
+| **`enabled`** | When `true`, the skill's text is appended to the **chat** system prompt on every turn. |
+
+Notes:
+
+- **One built-in skill.** On first use QuickAI seeds a single built-in assistant
+  skill (`id = "builtin-assistant"`). Its file lives in the config directory and
+  is **not deletable** — a save that omits it is rejected. You can still edit its
+  path or toggle it.
+- **Enabled vs. on-demand.** An enabled skill is appended to the **chat** system
+  prompt every turn. The `/add` picker lists the skills that are **not** enabled,
+  so you can invoke them for a single message (see
+  [commands.md](commands.md#add)).
+- **Enabled skills do not reach `/do`.** A skill with `enabled` on affects the
+  main chat, but it is **not** injected into the `/do` agent prompt — the agent
+  uses its own fixed tool-calling prompt. A `/do` run uses only the skills you
+  name with `/add`.
+- **Whole-list saves.** The Settings editor owns add / edit / delete / reorder
+  and saves the whole list at once; the backend re-validates every save
+  (rejecting empty or whitespace aliases, duplicates, and deletion of the
+  built-in skill) and returns the persisted list.

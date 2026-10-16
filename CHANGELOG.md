@@ -8,6 +8,59 @@ and the changelog follows the
 are written by hand as part of the manual release process (see
 [RELEASING.md](RELEASING.md)).
 
+## 0.0.3 (2026-10-15)
+
+A theming and skills release, plus a batch of Settings, chat, and agent fixes.
+
+### Features
+
+* **Light theme** — a user-selectable theme on the General tab's **Appearance**
+  section: `dark` (the default) or `light`. The light palette overrides the same
+  design tokens, so switching applies immediately with no restart.
+* **Skills** — a **Skills** section on the AI tab. Each entry has an **alias**
+  (no spaces), a **path** to the file holding its text, and an
+  **enabled-as-system-prompt** toggle; entries can be added, edited, deleted, and
+  reordered (drag, or the up/down buttons). Exactly one built-in assistant skill
+  is seeded on first use, lives in the config directory, and cannot be deleted.
+* **`/add` command** — list and pick a skill from the chat bar. A bare `/add`
+  opens the picker: <kbd>Enter</kbd> adds the highlighted skill and clears the
+  box, while <kbd>Ctrl</kbd>+<kbd>Enter</kbd> adds it and stays in the picker for
+  multi-select. Selected skills show as removable chips above the input and ride
+  the message; typing `/add <alias>` directly invokes that skill.
+* **Folder picker for the data directory** — the General tab's data-directory
+  field now shows the full resolved default path as its hint and has a
+  **Browse…** button that opens the native Windows folder picker.
+
+### Changed
+
+* **Hotkey wording** — the picker now reads "Double-tap <key>", making explicit
+  that the summon gesture is a double-tap of the chosen key (<kbd>Alt</kbd> means
+  <kbd>Alt</kbd>+<kbd>Alt</kbd>, not <kbd>Alt</kbd>+<kbd>Ctrl</kbd>).
+* **About tab** — "Shortcuts and commands" and "Help" moved off the page into
+  scrollable popup dialogs, so the first-level About page is no longer so tall.
+
+### Fixed
+
+* **Settings from an older version now save correctly.** A `config.toml` written
+  before a section existed (for example a v0.0.1 file with no `[general]`) made
+  every write to that section fail with `unknown section`, which is why the
+  hotkey, language, and theme switches appeared to do nothing. The config writer
+  now creates a missing allowed section instead of erroring.
+* **Settings tab switching no longer lags** on General→AI and General→Display,
+  and every tab shares one window height instead of shrinking the window and
+  cutting off the lower settings.
+* **Dragging the settings scrollbar no longer moves the window** — a mousedown on
+  a scrollbar scrolls instead of starting a window drag.
+* **Opening a history conversation lands at the input box**, and switching
+  between conversations returns to the bottom of the transcript.
+* **The chat input is no longer clipped while streaming** — the height budget now
+  accounts for the reply box and the input bar together.
+* **Keyboard control of agent confirmations works again** — while a confirmation
+  is pending, <kbd>1</kbd> allows, <kbd>2</kbd> denies, and <kbd>Ctrl</kbd>+<kbd>C</kbd>
+  aborts, even with the input box focused.
+* **Light-theme contrast** — text and icons are legible on every surface in both
+  themes.
+
 ## 0.0.2 (2026-10-14)
 
 A usability release focused on configuration, the Settings window, and the chat

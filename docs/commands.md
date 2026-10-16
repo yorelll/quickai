@@ -72,6 +72,50 @@ summarizes with extended reasoning enabled.
 
 ---
 
+## /add
+
+Adds one or more configured **skills** to the current message.
+
+**Usage:** `/add` (opens the picker) or `/add <alias>` (adds that skill without
+opening the picker)
+
+**Behavior:** A bare `/add` opens a picker listing the skills available to add
+— the ones *not* enabled as a system prompt. Use the arrow keys to move the
+highlight, or click a skill to add it (a click behaves like <kbd>Enter</kbd>):
+
+- <kbd>Enter</kbd> adds the highlighted skill and clears the `/add` text so you
+  can type your prompt.
+- <kbd>Ctrl</kbd>+<kbd>Enter</kbd> adds the highlighted skill but stays in the
+  picker, so you can select several in a row. To leave the picker after that,
+  delete the `/add` text.
+
+Each selected skill appears as a chip above the input with a small **×** to
+remove it and re-pick it. When you send the message, the selected skills'
+contents are appended to the prompt for that turn only.
+
+Typing `/add <alias>` directly (for example `/add translate`) adds that skill to
+the message without opening the picker. Like a picker selection, a bare
+`/add <alias>` does not send on its own — it records the skill and waits for your
+prompt.
+
+**Skills:** skills are configured in Settings → **AI** tab → **Skills** section
+(alias, path, and enabled-as-system-prompt). A skill with **enabled** on is
+appended to the chat system prompt on *every* turn; the `/add` picker lists the
+skills that are *not* enabled, so you can invoke them on demand. See
+[configurations.md](configurations.md#skills).
+
+**Enabled skills do not affect `/do`.** A skill you enable is appended to the
+**chat** system prompt, but it is **not** injected into the `/do` agent prompt —
+the agent uses its own fixed tool-calling prompt. So a `/do` run uses only the
+skills you name explicitly with `/add`.
+
+**Composable:** `/add` rides the message, so it works with the utility commands
+and with `/do`: `/add translate /rewrite` rewrites with the translate skill
+available, and `/do /add translate <task>` gives the agent that skill for the
+run.
+
+---
+
 ## /translate
 
 Translates text to another language.
@@ -230,8 +274,8 @@ provider, and executes mouse/keyboard actions in a loop until the task is done.
 **Keyboard control:** while a confirmation is pending you do not need the mouse
 — useful when the agent is driving it. Press <kbd>1</kbd> to **allow**,
 <kbd>2</kbd> to **deny**, or <kbd>Ctrl</kbd>+<kbd>C</kbd> to **abort** the run.
-The confirmation panel shows this hint, and the shortcuts are ignored while you
-are typing in a text field.
+The confirmation panel shows this hint, and these keys take priority over the
+input box, so they work even while it holds focus.
 
 **Minibar integration:** When you switch away from QuickAI while an agent task is
 running, the overlay shrinks to a minibar. The minibar shows a status dot (amber
@@ -247,5 +291,6 @@ Settings → AI tab); set the Agent tab's **Configuration** to **Custom** to giv
 it its own provider, model, base URL, and API key instead. Configure this on the
 **Agent** tab in Settings.
 
-**Not composable:** `/do` does not combine with other commands. It is a
-standalone mode that takes over the input.
+**Not composable:** `/do` does not combine with the text commands — it is a
+standalone mode that takes over the input. The one exception is `/add`, whose
+skills ride the run (see [/add](#add) above).

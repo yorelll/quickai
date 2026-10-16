@@ -4,7 +4,7 @@ import { invoke } from '../testUtils/mocks/tauri';
 
 /** Raw config as returned by `get_config`. */
 const RAW = {
-  general: { hotkey: 'ctrl', language: 'auto', data_dir: '' },
+  general: { hotkey: 'ctrl', language: 'auto', data_dir: '', theme: 'dark' },
   prompt: { system: '' },
   window: { overlay_width: 600, max_chat_height: 648, max_images: 3 },
   quote: {
