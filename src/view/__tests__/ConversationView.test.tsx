@@ -70,6 +70,26 @@ describe('ConversationView', () => {
     expect(dots).toHaveLength(0);
   });
 
+  it('keeps the streaming bubble mounted when only a notice has arrived', () => {
+    const { container } = render(
+      <ConversationView
+        messages={[
+          {
+            id: '1',
+            role: 'assistant' as const,
+            content: '',
+            notice: { code: 'skill_unreadable', message: 'translate: missing' },
+          },
+        ]}
+        isGenerating={true}
+        onClose={vi.fn()}
+        onMinimize={vi.fn()}
+      />,
+    );
+    expect(container.querySelector('[data-error-bar]')).not.toBeNull();
+    expect(screen.getByText('translate: missing')).toBeInTheDocument();
+  });
+
   it('renders WindowControls with onClose', () => {
     const onClose = vi.fn();
     render(

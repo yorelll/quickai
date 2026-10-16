@@ -163,6 +163,21 @@ describe('ImageThumbnails', () => {
     expect(container.querySelector('.animate-spin')).not.toBeNull();
   });
 
+  it('themes the loading spinner with surface tokens, not hardcoded white', () => {
+    const { container } = render(
+      <ImageThumbnails
+        items={[
+          { id: 'img-1', src: 'blob:http://localhost/img', loading: true },
+        ]}
+        onPreview={vi.fn()}
+      />,
+    );
+    const spinner = container.querySelector('.animate-spin') as HTMLElement;
+    expect(spinner.className).toContain('border-text-secondary/30');
+    expect(spinner.className).toContain('border-t-text-secondary');
+    expect(spinner.className).not.toContain('border-white');
+  });
+
   it('does not render spinner when item is not loading', () => {
     const { container } = render(
       <ImageThumbnails

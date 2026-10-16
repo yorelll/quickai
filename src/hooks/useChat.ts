@@ -38,6 +38,8 @@ export function useChat(
    * @param promptOverride When provided, sent to the backend as the actual
    *   prompt instead of displayContent. The chat bubble still shows
    *   displayContent. Used by utility slash commands to send a composed prompt.
+   * @param skills Aliases of the skills to append to this turn's prompt. Omit
+   *   or pass an empty array for a turn with no extra skills.
    */
   const ask = useCallback(
     async (
@@ -46,6 +48,7 @@ export function useChat(
       imagePaths?: string[],
       think?: boolean,
       promptOverride?: string,
+      skills?: string[],
     ) => {
       if (
         (!displayContent.trim() && (!imagePaths || imagePaths.length === 0)) ||
@@ -119,6 +122,17 @@ export function useChat(
             break;
           }
           case 'Error': {
+            // `skill_unreadable` is a non-fatal notice: the backend keeps
+            // streaming the answer, so the turn must not be ended and the
+            // notice must not replace the content.
+            if (chunk.data.code === 'skill_unreadable') {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId ? { ...m, notice: chunk.data } : m,
+                ),
+              );
+              break;
+            }
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId ? { ...m, error: chunk.data } : m,
@@ -137,6 +151,7 @@ export function useChat(
           images: imagePaths && imagePaths.length > 0 ? imagePaths : null,
           think: think ?? false,
           promptOverride: promptOverride ?? null,
+          skills: skills && skills.length > 0 ? skills : null,
           onEvent: channel,
         });
       } catch (e) {

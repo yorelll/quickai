@@ -16,6 +16,7 @@ describe('errorTitleKey', () => {
     ['bad_request', 'error.badRequest'],
     ['context_length_exceeded', 'error.contextLengthExceeded'],
     ['cancelled', 'error.cancelled'],
+    ['skill_unreadable', 'error.skillUnreadable'],
     ['unknown', 'error.unknown'],
   ] as const)('maps %s to %s', (code, key) => {
     expect(errorTitleKey(code)).toBe(key);
@@ -54,7 +55,7 @@ describe('ErrorCard', () => {
       <ErrorCard code="cancelled" message="Stopped" />,
     );
     const bar = container.querySelector('[data-error-bar]') as HTMLElement;
-    expect(bar.style.background).toBe('rgba(255, 255, 255, 0.2)');
+    expect(bar.style.background).toBe('var(--color-text-secondary)');
     expect(bar.getAttribute('data-kind')).toBe('cancelled');
   });
 
@@ -63,7 +64,7 @@ describe('ErrorCard', () => {
       <ErrorCard code="rate_limited" message="Slow down" />,
     );
     const bar = container.querySelector('[data-error-bar]') as HTMLElement;
-    expect(bar.style.background).toBe('rgb(245, 158, 11)');
+    expect(bar.style.background).toBe('var(--color-tertiary)');
   });
 
   it('uses a red bar for auth failures', () => {
@@ -71,6 +72,8 @@ describe('ErrorCard', () => {
       <ErrorCard code="unauthorized" message="Nope" />,
     );
     const bar = container.querySelector('[data-error-bar]') as HTMLElement;
-    expect(bar.style.background).toBe('rgb(239, 68, 68)');
+    expect(bar.style.background).toBe(
+      'light-dark(rgb(179, 38, 30), rgb(255, 138, 128))',
+    );
   });
 });

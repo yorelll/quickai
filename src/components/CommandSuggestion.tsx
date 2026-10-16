@@ -320,8 +320,8 @@ export function CommandSuggestion({
                 aria-selected={isHighlighted}
                 className={`flex items-center gap-2.5 px-3 py-1.5 cursor-pointer select-none transition-colors duration-100 ${
                   isHighlighted
-                    ? 'bg-white/8 text-text-primary'
-                    : 'text-text-secondary hover:bg-white/5 hover:text-text-primary'
+                    ? 'bg-surface-elevated text-text-primary'
+                    : 'text-text-secondary hover:bg-surface-elevated hover:text-text-primary'
                 }`}
                 onMouseDown={(e) => {
                   // Use mousedown + preventDefault so the textarea doesn't lose

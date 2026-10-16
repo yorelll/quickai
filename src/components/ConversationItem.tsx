@@ -126,7 +126,7 @@ export const ConversationItem = memo(function ConversationItem({
           <button
             type="button"
             onClick={handleConfirmDelete}
-            className="flex-1 px-2 py-1 rounded text-xs font-medium bg-red-500/15 text-red-300 hover:bg-red-500/25 transition-colors duration-150 cursor-pointer"
+            className="flex-1 px-2 py-1 rounded text-xs font-medium bg-[light-dark(rgba(179,38,30,0.12),rgba(255,138,128,0.16))] text-[light-dark(#b3261e,#ff8a80)] hover:bg-[light-dark(rgba(179,38,30,0.20),rgba(255,138,128,0.24))] transition-colors duration-150 cursor-pointer"
           >
             {t('history.deleteAction')}
           </button>
@@ -158,7 +158,7 @@ export const ConversationItem = memo(function ConversationItem({
         className={`flex-1 min-w-0 flex flex-col gap-0.5 text-left px-3 py-2 rounded-lg transition-colors duration-150 cursor-pointer ${
           isActive
             ? 'bg-primary/10 border-l-2 border-primary'
-            : 'hover:bg-white/5'
+            : 'hover:bg-surface-elevated'
         }`}
       >
         <span
@@ -175,7 +175,7 @@ export const ConversationItem = memo(function ConversationItem({
         type="button"
         onClick={() => onDelete(conversation.id)}
         aria-label={t('history.delete')}
-        className="shrink-0 mr-2 p-1 rounded text-text-secondary opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-red-500/10 transition-colors duration-150 cursor-pointer"
+        className="shrink-0 mr-2 p-1 rounded text-text-secondary opacity-0 group-hover:opacity-100 hover:text-[light-dark(#b3261e,#ff8a80)] hover:bg-[light-dark(rgba(179,38,30,0.08),rgba(255,138,128,0.10))] transition-colors duration-150 cursor-pointer"
       >
         {DELETE_ICON}
       </button>
@@ -197,14 +197,14 @@ export const ConversationItem = memo(function ConversationItem({
             <button
               type="button"
               onClick={startRename}
-              className="px-3 py-1.5 text-left text-xs text-text-primary hover:bg-white/5 transition-colors duration-150 cursor-pointer"
+              className="px-3 py-1.5 text-left text-xs text-text-primary hover:bg-surface-elevated transition-colors duration-150 cursor-pointer"
             >
               {t('history.rename')}
             </button>
             <button
               type="button"
               onClick={() => setMode('confirm-delete')}
-              className="px-3 py-1.5 text-left text-xs text-red-300 hover:bg-red-500/10 transition-colors duration-150 cursor-pointer"
+              className="px-3 py-1.5 text-left text-xs text-[light-dark(#b3261e,#ff8a80)] hover:bg-[light-dark(rgba(179,38,30,0.08),rgba(255,138,128,0.10))] transition-colors duration-150 cursor-pointer"
             >
               {t('history.deleteAction')}
             </button>

@@ -291,7 +291,7 @@ export function HistoryPanel({
 
       {/* Rename failure — the row has already been rolled back to its old name. */}
       {renameError && (
-        <p className="px-3 py-2 text-xs text-red-400 text-center border-b border-surface-border">
+        <p className="px-3 py-2 text-xs text-[light-dark(#b3261e,#ff8a80)] text-center border-b border-surface-border">
           {t('history.renameError')}
         </p>
       )}

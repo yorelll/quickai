@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useLayoutEffect } from 'react';
 import { ChatBubble } from '../components/ChatBubble';
 import { TypingIndicator } from '../components/TypingIndicator';
 import { WindowControls } from '../components/WindowControls';
@@ -70,9 +70,10 @@ interface ConversationViewProps {
 /**
  * Renders the expanded chat history area of the QuickAI application.
  *
- * Always fills its parent's available height (flex-1) so the window expands
- * to the morphing container's max-h-[600px] immediately — no dynamic height
- * calculation. Content beyond the visible area scrolls inside the flex child.
+ * Caps its own height at the reply-box budget (`max-h-[600px]`, matching
+ * `CHAT_CONTENT_MAX_HEIGHT` in `src/App.tsx`) so the native window always has
+ * room for the input bar below it. Content beyond the visible area scrolls
+ * inside the flex child.
  *
  * Encapsulates the scrolling logic ("smart auto-scroll") that pins the view
  * to new arriving tokens unless the user intercedes by scrolling up manually.
@@ -182,14 +183,22 @@ export function ConversationView({
    * Force the scroller to the latest message when the parent requests it
    * (conversation load, Ctrl+End). Auto-scroll is re-enabled so the view stays
    * pinned to the bottom for the messages that follow.
+   *
+   * Runs in a layout effect so the jump happens before paint (no visible
+   * "pull-down"), and re-pins on the next frame because images and markdown
+   * rendered in the same commit can still change the content height after it.
    */
-  useEffect(() => {
+  useLayoutEffect(() => {
     shouldAutoScrollRef.current = true;
     const container = scrollContainerRef.current;
     /* v8 ignore start -- ref is always set after mount */
     if (!container) return;
     /* v8 ignore stop */
     container.scrollTop = container.scrollHeight;
+    const raf = requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    });
+    return () => cancelAnimationFrame(raf);
   }, [scrollToBottomSignal]);
 
   /**
@@ -220,7 +229,7 @@ export function ConversationView({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ opacity: { duration: 0.2 } }}
-      className="chat-area flex-1 min-h-0 flex flex-col"
+      className="chat-area flex-1 min-h-0 flex flex-col max-h-[600px]"
     >
       <WindowControls
         onClose={onClose}
@@ -247,9 +256,14 @@ export function ConversationView({
             msg.role === 'assistant';
 
           // Hide the empty assistant placeholder; the TypingIndicator
-          // already covers this visual state. When thinking content is
-          // present, render the bubble so the ThinkingBlock is visible.
-          if (isLastAssistant && !msg.content && !msg.thinkingContent)
+          // already covers this visual state. When thinking content or a
+          // non-fatal notice is present, render the bubble so they are visible.
+          if (
+            isLastAssistant &&
+            !msg.content &&
+            !msg.thinkingContent &&
+            !msg.notice
+          )
             return null;
 
           return (
@@ -263,6 +277,7 @@ export function ConversationView({
               imagePaths={msg.imagePaths}
               onImagePreview={onImagePreview}
               error={msg.error}
+              notice={msg.notice}
               thinkingContent={msg.thinkingContent}
               isThinking={
                 isLastAssistant && !msg.content && !!msg.thinkingContent

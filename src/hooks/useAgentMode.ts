@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { AgentAction, AgentEvent } from '../types/agent';
+import type { AgentAction, AgentEvent, AgentNotice } from '../types/agent';
 
 export type AgentStatus =
   | 'idle'
@@ -12,7 +12,7 @@ export type AgentStatus =
   | 'done'
   | 'error';
 
-export type { AgentAction, AgentEvent };
+export type { AgentAction, AgentEvent, AgentNotice };
 
 interface UseAgentModeReturn {
   isActive: boolean;
@@ -25,9 +25,18 @@ interface UseAgentModeReturn {
   reasoning: string | null;
   /** Model-produced closing summary, shown when the run finishes. */
   summary: string | null;
+  /**
+   * A non-fatal diagnostic raised mid-run (e.g. an unreadable selected skill).
+   * Unlike a terminal error it never ends the run, so the panel stays visible.
+   */
+  notice: AgentNotice | null;
   /** Structured action awaiting user confirmation. */
   pendingConfirmation: AgentAction | null;
-  start: (task: string) => Promise<void>;
+  /**
+   * Starts a run. `skills` names the skills to append to the agent's prompt
+   * for this run, mirroring the chat `ask` parameter.
+   */
+  start: (task: string, skills?: string[]) => Promise<void>;
   stop: () => Promise<void>;
   confirmAction: () => Promise<void>;
   rejectAction: () => Promise<void>;
@@ -48,17 +57,19 @@ export function useAgentMode(): UseAgentModeReturn {
   const [lastResult, setLastResult] = useState<string | null>(null);
   const [reasoning, setReasoning] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
+  const [notice, setNotice] = useState<AgentNotice | null>(null);
   const [pendingConfirmation, setPendingConfirmation] =
     useState<AgentAction | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
 
-  const start = useCallback(async (task: string) => {
+  const start = useCallback(async (task: string, skills?: string[]) => {
     setIsActive(true);
     setStatus('capturing');
     setLastAction(null);
     setLastResult(null);
     setReasoning(null);
     setSummary(null);
+    setNotice(null);
     setPendingConfirmation(null);
 
     // Listen for agent events.
@@ -83,6 +94,14 @@ export function useAgentMode(): UseAgentModeReturn {
           break;
         }
         case 'error': {
+          // `skill_unreadable` is a non-fatal notice: the backend keeps the
+          // loop running, so the status must not flip to `error` and the run
+          // must not be marked inactive — doing so would flash an error and
+          // then hide the agent panel for the rest of the run.
+          if (payload.code === 'skill_unreadable') {
+            setNotice({ code: payload.code, message: payload.message });
+            break;
+          }
           setLastResult(payload.message);
           setStatus('error');
           setIsActive(false);
@@ -100,7 +119,10 @@ export function useAgentMode(): UseAgentModeReturn {
     unlistenRef.current = unlisten;
 
     try {
-      await invoke('start_agent_mode', { task });
+      await invoke('start_agent_mode', {
+        task,
+        skills: skills && skills.length > 0 ? skills : null,
+      });
     } catch (e) {
       console.error('Failed to start agent mode:', e);
       setStatus('error');
@@ -119,6 +141,7 @@ export function useAgentMode(): UseAgentModeReturn {
     }
     setIsActive(false);
     setStatus('idle');
+    setNotice(null);
     setPendingConfirmation(null);
     if (unlistenRef.current) {
       unlistenRef.current();
@@ -156,6 +179,7 @@ export function useAgentMode(): UseAgentModeReturn {
     setLastResult(null);
     setReasoning(null);
     setSummary(null);
+    setNotice(null);
     setPendingConfirmation(null);
   }, []);
 
@@ -166,6 +190,7 @@ export function useAgentMode(): UseAgentModeReturn {
     lastResult,
     reasoning,
     summary,
+    notice,
     pendingConfirmation,
     start,
     stop,

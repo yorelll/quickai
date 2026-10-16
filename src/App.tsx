@@ -4,6 +4,7 @@ import {
   useState,
   useEffect,
   useCallback,
+  useMemo,
   useRef,
   useLayoutEffect,
 } from 'react';
@@ -16,6 +17,7 @@ import { useChat } from './hooks/useChat';
 import type { Message } from './hooks/useChat';
 import { useConversationHistory } from './hooks/useConversationHistory';
 import { useAgentMode } from './hooks/useAgentMode';
+import { useSkills } from './hooks/useSkills';
 import { useConfig } from './contexts/ConfigContext';
 import { AgentIndicator } from './components/AgentIndicator';
 import { TipBar } from './components/TipBar';
@@ -53,8 +55,17 @@ const HIDE_COMMIT_DELAY_MS = 350;
 const OVERLAY_WIDTH = 650;
 /** Total transparent padding around the morphing container: pt-2(8) + pb-6(24) + motion py-2(16). */
 const CONTAINER_VERTICAL_PADDING = 48;
-/** Max morphing-container height in chat mode (matches `max-h-[600px]`) + vertical padding. */
-const MAX_CHAT_WINDOW_HEIGHT = 600 + CONTAINER_VERTICAL_PADDING;
+/**
+ * Max height of the reply box (the chat transcript area) — the morphing
+ * container grows to fit this plus whatever the input bar needs. The window
+ * budget is therefore `reply box + input bar + CONTAINER_VERTICAL_PADDING`, so
+ * the input can never be clipped by the reply box reaching its cap.
+ * Must match `max-h-[600px]` on `.chat-area` in `src/view/ConversationView.tsx`.
+ */
+const CHAT_CONTENT_MAX_HEIGHT = 600;
+/** Window height when the reply box is at its cap and the input bar is minimal. */
+const MAX_CHAT_WINDOW_HEIGHT =
+  CHAT_CONTENT_MAX_HEIGHT + CONTAINER_VERTICAL_PADDING;
 
 /** Must match `OVERLAY_LOGICAL_HEIGHT_COLLAPSED` in `src-tauri/src/lib.rs`. */
 const COLLAPSED_WINDOW_HEIGHT = 60;
@@ -84,6 +95,35 @@ export function parseCommands(text: string): {
 }
 
 /**
+ * Extracts `/add <alias>` skill selections from a message.
+ *
+ * Returns the aliases named after `/add` that match a configured skill, plus
+ * the message with those pairs removed. A bare `/add`, or one followed by an
+ * unknown alias, is left in place for the picker or the command parser.
+ */
+export function extractSkillAdds(
+  text: string,
+  aliases: ReadonlySet<string>,
+): { skills: string[]; stripped: string } {
+  const words = text.trim().split(/\s+/);
+  const skills: string[] = [];
+  const remaining: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    if (
+      words[i] === '/add' &&
+      i + 1 < words.length &&
+      aliases.has(words[i + 1])
+    ) {
+      skills.push(words[i + 1]);
+      i++;
+    } else {
+      remaining.push(words[i]);
+    }
+  }
+  return { skills, stripped: remaining.join(' ') };
+}
+
+/**
  * True when a key event originated in a text field the user could be typing
  * in, so global single-key shortcuts must not hijack their keystrokes.
  */
@@ -96,6 +136,28 @@ function isEditableTarget(target: EventTarget | null): boolean {
     el.tagName === 'TEXTAREA' ||
     el.isContentEditable === true
   );
+}
+
+/**
+ * True when a mousedown at `clientX` landed on the vertical scrollbar of `el`
+ * or of any ancestor. A mousedown on a scrollbar is dispatched to the
+ * scrolling element itself, so without this check the drag-region handler
+ * would start a native window drag and the scrollbar would move the window
+ * instead of scrolling.
+ */
+function isScrollbarHit(el: HTMLElement | null, clientX: number): boolean {
+  let current = el;
+  while (current) {
+    if (current.scrollHeight > current.clientHeight) {
+      const rect = current.getBoundingClientRect();
+      // Content+padding right edge; anything beyond it is the scrollbar gutter.
+      if (clientX >= rect.left + current.clientLeft + current.clientWidth) {
+        return true;
+      }
+    }
+    current = current.parentElement;
+  }
+  return false;
 }
 
 type OverlayVisibilityPayload =
@@ -208,6 +270,26 @@ function App() {
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  /**
+   * Skills configured in Settings, backing the `/add` picker. The overlay
+   * mounts once and is only shown/hidden, and the Settings window is a
+   * separate webview with no event bridge, so the list is re-read on every
+   * overlay show — otherwise a skill added in Settings would need a restart.
+   */
+  const { skills, refresh: refreshSkills } = useSkills();
+  /**
+   * Aliases a typed `/add <alias>` may record. Enabled skills are appended to
+   * the system prompt on every turn, so naming one here would append its text
+   * twice; the picker marks those rows inert for the same reason, keeping the
+   * typed and picked paths in agreement.
+   */
+  const skillAliases = useMemo(
+    () => new Set(skills.filter((s) => !s.enabled).map((s) => s.alias)),
+    [skills],
+  );
+  /** Aliases of the skills selected for the current (unsent) message. */
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+
   /** Images attached to the current (unsent) message. Blob URLs render
    *  immediately; file paths are set asynchronously after Rust processing. */
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
@@ -230,6 +312,7 @@ function App() {
     context: string | undefined;
     think: boolean;
     promptOverride?: string;
+    skills?: string[];
   } | null>(null);
   /** True while waiting for images to finish processing before a deferred
    *  submit. Drives the "waiting" UI state in the ask bar. */
@@ -476,6 +559,7 @@ function App() {
         for (const img of prev) URL.revokeObjectURL(img.blobUrl);
         return [];
       });
+      setSelectedSkills([]);
       pendingSubmitRef.current = null;
       screenCapturePendingRef.current = false;
       screenCaptureInputSnapshotRef.current = null;
@@ -495,9 +579,12 @@ function App() {
       // A fresh session starts with no agent panel: without this, a finished
       // run's summary/error would still be mounted after reopening the overlay.
       void stopAgentMode();
+      // Re-read the skill list so a skill added in the Settings window (a
+      // separate webview) is usable from `/add` without restarting the app.
+      void refreshSkills();
       setOverlayState('visible');
     },
-    [reset, resetHistory, stopAgentMode],
+    [reset, resetHistory, stopAgentMode, refreshSkills],
   );
 
   /**
@@ -519,6 +606,7 @@ function App() {
       for (const img of prev) URL.revokeObjectURL(img.blobUrl);
       return [];
     });
+    setSelectedSkills([]);
     setOverlayState((currentState) => {
       if (currentState === 'hidden' || currentState === 'hiding') {
         return currentState;
@@ -609,13 +697,31 @@ function App() {
     container.style.height = `${startHeight}px`;
     void container.offsetHeight;
 
+    // Target the container's own content height — the reply box at its cap
+    // plus whatever the input bar and chrome need — so the reply box keeps its
+    // full budget instead of being squeezed by a literal height.
+    const targetHeight = Math.max(
+      CHAT_CONTENT_MAX_HEIGHT,
+      container.scrollHeight,
+    );
+
     const frameId = requestAnimationFrame(() => {
       // 0.4s and slightly softer cubic bezier specifically for upward morph
       container.style.transition = 'height 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)';
-      container.style.height = '600px';
+      container.style.height = `${targetHeight}px`;
     });
 
-    return () => cancelAnimationFrame(frameId);
+    // Release the inline height once the morph lands so later content (tip bar,
+    // agent panel) can still grow the container instead of being clipped.
+    const releaseHeight = (event: TransitionEvent) => {
+      if (event.propertyName === 'height') container.style.height = '';
+    };
+    container.addEventListener('transitionend', releaseHeight);
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      container.removeEventListener('transitionend', releaseHeight);
+    };
     /* v8 ignore stop */
   }, [growsUpward, isChatMode, isHistoryOpen]);
 
@@ -731,14 +837,20 @@ function App() {
         // Land at the bottom of the transcript so the input bar (below the
         // scroller) is in view; the user scrolls up to re-read.
         setScrollToBottomSignal((n) => n + 1);
-        requestAnimationFrame(() => inputRef.current?.focus());
+        // Re-apply the window size once the new transcript has laid out, so the
+        // header (above the scroller) is never left clipped while the native
+        // window catches up with the changed content height.
+        requestAnimationFrame(() => {
+          syncWindowSize();
+          inputRef.current?.focus();
+        });
       } catch {
         // Load failed — current session is preserved intact.
       } finally {
         setIsHistoryOpen(false);
       }
     },
-    [loadConversation, loadMessages],
+    [loadConversation, loadMessages, syncWindowSize],
   );
 
   /**
@@ -762,14 +874,17 @@ function App() {
         loadMessages(loaded);
         // Land at the bottom of the transcript so the input bar is in view.
         setScrollToBottomSignal((n) => n + 1);
-        requestAnimationFrame(() => inputRef.current?.focus());
+        requestAnimationFrame(() => {
+          syncWindowSize();
+          inputRef.current?.focus();
+        });
       } catch {
         // Load failed — save already committed; dismiss panel, keep current view.
       } finally {
         setIsHistoryOpen(false);
       }
     },
-    [save, messages, loadConversation, loadMessages, chatModel],
+    [save, messages, loadConversation, loadMessages, chatModel, syncWindowSize],
   );
 
   /**
@@ -802,6 +917,7 @@ function App() {
       for (const img of prev) URL.revokeObjectURL(img.blobUrl);
       return [];
     });
+    setSelectedSkills([]);
     pendingSubmitRef.current = null;
     screenCapturePendingRef.current = false;
     screenCaptureInputSnapshotRef.current = null;
@@ -995,6 +1111,18 @@ function App() {
     [attachedImages],
   );
 
+  /** Adds a skill to the current message, ignoring duplicates. */
+  const handleSkillAdd = useCallback((alias: string) => {
+    setSelectedSkills((prev) =>
+      prev.includes(alias) ? prev : [...prev, alias],
+    );
+  }, []);
+
+  /** Removes a selected skill so it can be re-picked from `/add`. */
+  const handleSkillRemove = useCallback((alias: string) => {
+    setSelectedSkills((prev) => prev.filter((a) => a !== alias));
+  }, []);
+
   /** Opens the preview modal for a chat history image (identified by file path). */
   const handleChatImagePreview = useCallback((path: string) => {
     setPreviewImageUrl(path.startsWith('blob:') ? path : convertFileSrc(path));
@@ -1002,14 +1130,20 @@ function App() {
 
   /** Fires the actual ask() call and cleans up attached images + input. */
   const executeSubmit = useCallback(
-    (submitQuery: string, context: string | undefined, think?: boolean) => {
+    (
+      submitQuery: string,
+      context: string | undefined,
+      think?: boolean,
+      skills?: string[],
+    ) => {
       const readyPaths = attachedImages
         .filter((img) => img.filePath !== null)
         .map((img) => img.filePath as string);
       const images = readyPaths.length > 0 ? readyPaths : undefined;
-      ask(submitQuery, context, images, think);
+      ask(submitQuery, context, images, think, undefined, skills);
       setSelectedContext(null);
       setQuery('');
+      setSelectedSkills([]);
       for (const img of attachedImages) {
         URL.revokeObjectURL(img.blobUrl);
       }
@@ -1027,7 +1161,7 @@ function App() {
    * images and calls ask(). On error, restores the query so no input is lost.
    */
   const handleScreenSubmit = useCallback(
-    async (fullQuery: string, think?: boolean) => {
+    async (fullQuery: string, think?: boolean, skills?: string[]) => {
       // eslint-disable-next-line no-control-regex
       const CONTROL_CHARS = /[\x00-\x08\x0b\x0c\x0e-\x1f]/g;
       const sanitized = selectedContext
@@ -1107,11 +1241,12 @@ function App() {
         .map((img) => img.filePath as string);
       readyPaths.push(screenshotPath);
 
-      ask(fullQuery, context, readyPaths, think);
+      ask(fullQuery, context, readyPaths, think, undefined, skills);
       for (const img of attachedImages) {
         URL.revokeObjectURL(img.blobUrl);
       }
       setAttachedImages([]);
+      setSelectedSkills([]);
     },
     [selectedContext, attachedImages, ask, setSelectedContext, setCaptureError],
   );
@@ -1126,8 +1261,28 @@ function App() {
     // Clear any stale capture error from a previous attempt.
     setCaptureError(null);
 
+    // Resolve `/add <alias>` selections typed directly. Valid aliases are
+    // recorded as skills for this turn and removed from the message; a bare
+    // `/add` is left for the picker.
+    const rawQuery = query.trim();
+    const { skills: typedSkills, stripped } = extractSkillAdds(
+      rawQuery,
+      skillAliases,
+    );
+    if (typedSkills.length > 0) {
+      setSelectedSkills((prev) =>
+        Array.from(new Set([...prev, ...typedSkills])),
+      );
+      if (!stripped) {
+        // Only `/add <alias>` was typed: record the skill and wait for a prompt.
+        setQuery('');
+        return;
+      }
+    }
+    const turnSkills = Array.from(new Set([...selectedSkills, ...typedSkills]));
+
     // Parse all valid commands from anywhere in the message.
-    const trimmedQuery = query.trim();
+    const trimmedQuery = stripped;
     const { found, strippedMessage } = parseCommands(trimmedQuery);
     const hasScreen = found.has('/screen');
     const hasThink = found.has('/think');
@@ -1156,7 +1311,7 @@ function App() {
       const intent = detectComputerUseIntent(strippedMessage);
       if (intent === 'vision') {
         // Treat as a /screen request with the user's message as the query.
-        void handleScreenSubmit(trimmedQuery, hasThink);
+        void handleScreenSubmit(trimmedQuery, hasThink, turnSkills);
         return;
       }
       if (intent === 'agent') {
@@ -1166,14 +1321,15 @@ function App() {
         setQuery('');
         setSelectedContext(null);
         setAttachedImages([]);
-        void agentMode.start(strippedMessage);
+        setSelectedSkills([]);
+        void agentMode.start(strippedMessage, turnSkills);
         return;
       }
     }
 
     if (hasScreen) {
       // Fire-and-forget: the async path handles cleanup and ask() invocation.
-      void handleScreenSubmit(trimmedQuery, hasThink);
+      void handleScreenSubmit(trimmedQuery, hasThink, turnSkills);
       return;
     }
 
@@ -1186,7 +1342,8 @@ function App() {
       setQuery('');
       setSelectedContext(null);
       setAttachedImages([]);
-      void agentMode.start(task);
+      setSelectedSkills([]);
+      void agentMode.start(task, turnSkills);
       return;
     }
 
@@ -1225,9 +1382,11 @@ function App() {
           images,
           hasThink || undefined,
           composedPrompt,
+          turnSkills,
         );
         setSelectedContext(null);
         setQuery('');
+        setSelectedSkills([]);
         for (const img of attachedImages) {
           URL.revokeObjectURL(img.blobUrl);
         }
@@ -1243,6 +1402,7 @@ function App() {
         context,
         think: hasThink,
         promptOverride: composedPrompt,
+        skills: turnSkills,
       };
       setIsSubmitPending(true);
       setPendingUserMessage({
@@ -1273,7 +1433,7 @@ function App() {
       (img) => img.filePath === null,
     );
     if (!hasPendingImages) {
-      executeSubmit(trimmedQuery, context, hasThink || undefined);
+      executeSubmit(trimmedQuery, context, hasThink || undefined, turnSkills);
       return;
     }
 
@@ -1283,6 +1443,7 @@ function App() {
       query: trimmedQuery,
       context,
       think: hasThink,
+      skills: turnSkills,
     };
     setIsSubmitPending(true);
 
@@ -1311,6 +1472,8 @@ function App() {
     attachedImages,
     setCaptureError,
     agentMode,
+    skillAliases,
+    selectedSkills,
   ]);
 
   // When a pending submit exists and all images finish processing, fire it.
@@ -1341,6 +1504,7 @@ function App() {
       context,
       think,
       promptOverride,
+      skills: pendingSkills,
     } = pendingSubmitRef.current;
     pendingSubmitRef.current = null;
     setIsSubmitPending(false);
@@ -1348,10 +1512,18 @@ function App() {
     setPendingUserMessage(null);
 
     const images = attachedImages.map((img) => img.filePath as string);
-    void ask(pendingQuery, context, images, think || undefined, promptOverride);
+    void ask(
+      pendingQuery,
+      context,
+      images,
+      think || undefined,
+      promptOverride,
+      pendingSkills,
+    );
     // Note: the display content in the pending bubble (set in handleSubmit)
     // already includes command triggers for visibility in the chat.
     setSelectedContext(null);
+    setSelectedSkills([]);
     for (const img of attachedImages) {
       URL.revokeObjectURL(img.blobUrl);
     }
@@ -1506,8 +1678,11 @@ function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       // Agent confirmation is mouse-only by default, which is unusable while
       // the agent is driving the mouse. While a confirmation is pending, 1
-      // allows, 2 denies and Ctrl+C aborts — never while the user is typing.
-      if (agentPendingConfirmation && !isEditableTarget(e.target)) {
+      // allows, 2 denies and Ctrl+C aborts. The editable-target guard is
+      // deliberately not applied here: the input box holds focus whenever the
+      // overlay is open, so gating on a non-editable target would make the
+      // shortcuts unreachable in exactly the case they exist for.
+      if (agentPendingConfirmation) {
         if (e.key === '1') {
           e.preventDefault();
           void confirmAgentAction();
@@ -1656,6 +1831,9 @@ function App() {
       current = current.parentElement;
     }
 
+    // 3. A mousedown on a scrollbar must scroll, not move the window.
+    if (isScrollbarHit(el, e.clientX)) return;
+
     // Suppress the default mousedown side-effect (focus transfer / blur)
     // so the textarea retains keyboard input during window repositioning.
     e.preventDefault();
@@ -1719,7 +1897,7 @@ function App() {
                   transition:
                     'height 0.25s cubic-bezier(0.16, 1, 0.3, 1), min-height 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
                 }}
-                className={`morphing-container relative flex flex-col bg-surface-base max-h-[600px] overflow-hidden`}
+                className={`morphing-container relative flex flex-col bg-surface-base overflow-hidden`}
               >
                 {/* Chat Messages Area — morphs in when in chat mode */}
                 <AnimatePresence>
@@ -1794,8 +1972,8 @@ function App() {
                 {/* Capture error banner: shown when /screen capture fails so
                     the user knows why the message was not sent. */}
                 {captureError && (
-                  <div className="px-4 py-2 border-t border-red-900/30">
-                    <p className="text-red-400 text-xs leading-relaxed">
+                  <div className="px-4 py-2 border-t border-[light-dark(rgba(179,38,30,0.35),rgba(255,138,128,0.30))]">
+                    <p className="text-[light-dark(#b3261e,#ff8a80)] text-xs leading-relaxed">
                       {captureError}
                     </p>
                   </div>
@@ -1809,6 +1987,7 @@ function App() {
                   lastResult={agentMode.lastResult}
                   reasoning={agentMode.reasoning}
                   summary={agentMode.summary}
+                  notice={agentMode.notice}
                   pendingConfirmation={agentMode.pendingConfirmation}
                   onStop={agentMode.stop}
                   onConfirm={agentMode.confirmAction}
@@ -1842,6 +2021,10 @@ function App() {
                   onImagePreview={handleAskBarImagePreview}
                   onScreenshot={handleScreenshot}
                   isDragOver={isDragOver ?? undefined}
+                  skills={skills}
+                  selectedSkills={selectedSkills}
+                  onSkillAdd={handleSkillAdd}
+                  onSkillRemove={handleSkillRemove}
                 />
               </div>
 

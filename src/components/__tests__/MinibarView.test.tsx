@@ -70,22 +70,24 @@ describe('MinibarView', () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
+  /** Class list of the status dot (the absolutely positioned badge). */
+  function dotClass(): string {
+    return document.querySelector('span.absolute')?.className ?? '';
+  }
+
   it('should render with idle status dot', () => {
     render(<MinibarView status="idle" onClick={() => {}} />);
-    const dot = document.querySelector('.bg-emerald-400');
-    expect(dot).not.toBeNull();
+    expect(dotClass()).toContain('bg-[light-dark(#1a7f37,#4ade80)]');
   });
 
   it('should render with executing status dot', () => {
     render(<MinibarView status="executing" onClick={() => {}} />);
-    const dot = document.querySelector('.bg-amber-400');
-    expect(dot).not.toBeNull();
+    expect(dotClass()).toContain('bg-tertiary');
   });
 
   it('should render with error status dot', () => {
     render(<MinibarView status="error" onClick={() => {}} />);
-    const dot = document.querySelector('.bg-red-400');
-    expect(dot).not.toBeNull();
+    expect(dotClass()).toContain('bg-[light-dark(#b3261e,#ff8a80)]');
   });
 
   it('should pulse during active agent status', () => {
@@ -98,7 +100,7 @@ describe('MinibarView', () => {
     render(
       <MinibarView status={'mystery' as AgentStatus} onClick={() => {}} />,
     );
-    expect(document.querySelector('.bg-neutral-400')).not.toBeNull();
+    expect(dotClass()).toContain('bg-text-secondary');
   });
 
   it('starts a native drag when the pointer moves past the threshold', () => {

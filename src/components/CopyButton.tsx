@@ -43,7 +43,7 @@ export function CopyButton({ content, align }: CopyButtonProps) {
     >
       <button
         onClick={handleCopy}
-        className="transition-opacity duration-150 text-white/40 hover:text-white/70 p-0.5 rounded cursor-pointer"
+        className="transition-opacity duration-150 text-text-secondary hover:text-text-primary p-0.5 rounded cursor-pointer"
         aria-label={copied ? t('message.copied') : t('message.copy')}
       >
         <AnimatePresence mode="wait" initial={false}>

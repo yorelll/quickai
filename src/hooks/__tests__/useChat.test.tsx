@@ -88,7 +88,44 @@ describe('useChat', () => {
         images: null,
         think: false,
         promptOverride: null,
+        skills: null,
       }),
+    );
+  });
+
+  it('forwards selected skill aliases to the ask command', async () => {
+    const { result } = renderHook(() => useChat());
+
+    await act(async () => {
+      await result.current.ask('hi', undefined, undefined, false, undefined, [
+        'translate',
+        'assistant',
+      ]);
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      'ask',
+      expect.objectContaining({ skills: ['translate', 'assistant'] }),
+    );
+  });
+
+  it('normalizes an empty skill list to null', async () => {
+    const { result } = renderHook(() => useChat());
+
+    await act(async () => {
+      await result.current.ask(
+        'hi',
+        undefined,
+        undefined,
+        false,
+        undefined,
+        [],
+      );
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      'ask',
+      expect.objectContaining({ skills: null }),
     );
   });
 
@@ -256,6 +293,36 @@ describe('useChat', () => {
       code: 'rate_limited',
       message: 'slow down',
     });
+    expect(result.current.isGenerating).toBe(false);
+  });
+
+  it('treats skill_unreadable as a non-fatal notice', async () => {
+    const { result } = renderHook(() => useChat());
+    await act(async () => {
+      await result.current.ask('hi');
+    });
+
+    act(() => {
+      channel().onmessage({
+        type: 'Error',
+        data: { code: 'skill_unreadable', message: 'translate: not found' },
+      });
+    });
+
+    expect(result.current.messages[1].notice).toEqual({
+      code: 'skill_unreadable',
+      message: 'translate: not found',
+    });
+    expect(result.current.messages[1].error).toBeUndefined();
+    // The turn is still streaming — the answer must not be hidden.
+    expect(result.current.isGenerating).toBe(true);
+
+    act(() => {
+      channel().onmessage({ type: 'Token', data: 'answer' });
+      channel().onmessage({ type: 'Done' });
+    });
+
+    expect(result.current.messages[1].content).toBe('answer');
     expect(result.current.isGenerating).toBe(false);
   });
 

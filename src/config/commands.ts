@@ -37,6 +37,11 @@ export const COMMANDS: readonly Command[] = [
     descriptionKey: 'command.think.desc',
   },
   {
+    trigger: '/add',
+    label: '/add',
+    descriptionKey: 'command.add.desc',
+  },
+  {
     trigger: '/translate',
     label: '/translate',
     descriptionKey: 'command.translate.desc',

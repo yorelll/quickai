@@ -18,6 +18,7 @@ export type ApiErrorCode =
   | 'bad_request'
   | 'context_length_exceeded'
   | 'cancelled'
+  | 'skill_unreadable'
   | 'unknown';
 
 export interface ApiError {
@@ -39,6 +40,12 @@ export interface Message {
   thinkingContent?: string;
   /** Present on assistant messages that represent a provider error callout. */
   error?: ApiError;
+  /**
+   * A non-fatal notice streamed during the turn (e.g. a selected skill whose
+   * file could not be read). Unlike `error` it never replaces the answer: the
+   * turn continues and the notice is shown alongside the content.
+   */
+  notice?: ApiError;
 }
 
 /** Streaming chunks emitted by the `ask` command over the Tauri channel. */

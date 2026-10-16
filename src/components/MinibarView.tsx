@@ -8,20 +8,23 @@ interface MinibarViewProps {
   onClick: () => void;
 }
 
+const SUCCESS_DOT = 'bg-[light-dark(#1a7f37,#4ade80)]';
+const ERROR_DOT = 'bg-[light-dark(#b3261e,#ff8a80)]';
+
 const statusDotColors: Record<string, string> = {
-  idle: 'bg-emerald-400',
-  capturing: 'bg-amber-400',
-  analyzing: 'bg-amber-400',
-  executing: 'bg-amber-400',
-  done: 'bg-emerald-400',
-  error: 'bg-red-400',
+  idle: SUCCESS_DOT,
+  capturing: 'bg-tertiary',
+  analyzing: 'bg-tertiary',
+  executing: 'bg-tertiary',
+  done: SUCCESS_DOT,
+  error: ERROR_DOT,
 };
 
 export function MinibarView({ status, onClick }: MinibarViewProps) {
   const { t } = useTranslation();
   const dotColor = status
-    ? (statusDotColors[status] ?? 'bg-neutral-400')
-    : 'bg-emerald-400';
+    ? (statusDotColors[status] ?? 'bg-text-secondary')
+    : SUCCESS_DOT;
   const isPulsing =
     status === 'executing' || status === 'analyzing' || status === 'capturing';
 

@@ -37,7 +37,7 @@ const INTENSITY_CLASS: Record<Intensity, string> = {
   active: 'bg-primary',
   trail1: 'bg-primary/50',
   trail2: 'bg-primary/[0.22]',
-  idle: 'bg-white/[0.18]',
+  idle: 'bg-text-secondary/20',
 };
 
 /** Returns the brightness level of a dot given the current animation state. */

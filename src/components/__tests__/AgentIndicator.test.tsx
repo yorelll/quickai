@@ -33,6 +33,7 @@ function renderIndicator(
       lastResult={null}
       reasoning={null}
       summary={null}
+      notice={null}
       pendingConfirmation={null}
       onStop={noop}
       onConfirm={noop}
@@ -96,6 +97,24 @@ describe('AgentIndicator', () => {
     expect(screen.getByText('Error')).toBeDefined();
   });
 
+  it('shows a non-fatal notice alongside the running state', () => {
+    const { container } = renderIndicator({
+      isActive: true,
+      status: 'executing',
+      notice: { code: 'skill_unreadable', message: 'translate: missing' },
+    });
+
+    // The panel stays in its running state — the notice must not flip it.
+    expect(screen.getByText('Executing action...')).toBeDefined();
+    expect(container.querySelector('[data-error-bar]')).not.toBeNull();
+    expect(screen.getByText('translate: missing')).toBeDefined();
+  });
+
+  it('renders no notice block when there is none', () => {
+    const { container } = renderIndicator({ isActive: true, status: 'idle' });
+    expect(container.querySelector('[data-error-bar]')).toBeNull();
+  });
+
   it('renders the localized last action', () => {
     renderIndicator({
       status: 'executing',
@@ -134,6 +153,7 @@ describe('AgentIndicator', () => {
         lastResult={null}
         reasoning={null}
         summary="All done."
+        notice={null}
         pendingConfirmation={null}
         onStop={onStop}
         onConfirm={noop}

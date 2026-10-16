@@ -178,7 +178,7 @@ export const WindowControls = memo(function WindowControls({
                 aria-label={isSaved ? t('window.unsave') : t('window.save')}
                 className={`w-7 h-7 flex items-center justify-center rounded-lg transition-colors duration-150 cursor-pointer disabled:cursor-default ${
                   isSaved
-                    ? 'text-primary hover:text-text-secondary hover:bg-white/5'
+                    ? 'text-primary hover:text-text-secondary hover:bg-surface-elevated'
                     : canSave
                       ? 'text-text-secondary hover:text-primary hover:bg-primary/8'
                       : 'text-text-secondary opacity-30'
@@ -196,7 +196,7 @@ export const WindowControls = memo(function WindowControls({
                 onClick={onNewConversation}
                 aria-label={t('window.new')}
                 data-history-toggle
-                className="w-7 h-7 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-white/5 transition-colors duration-150 cursor-pointer"
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-elevated transition-colors duration-150 cursor-pointer"
               >
                 {NEW_CONVERSATION_ICON}
               </button>
@@ -210,7 +210,7 @@ export const WindowControls = memo(function WindowControls({
                 onClick={onHistoryOpen}
                 aria-label={t('window.history')}
                 data-history-toggle
-                className="w-7 h-7 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-white/5 transition-colors duration-150 cursor-pointer"
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-elevated transition-colors duration-150 cursor-pointer"
               >
                 {HISTORY_ICON}
               </button>
@@ -229,7 +229,7 @@ export const WindowControls = memo(function WindowControls({
                 className={`w-7 h-7 flex items-center justify-center rounded-lg transition-colors duration-150 cursor-pointer ${
                   isPinned
                     ? 'text-primary bg-primary/10'
-                    : 'text-text-secondary hover:text-text-primary hover:bg-white/5'
+                    : 'text-text-secondary hover:text-text-primary hover:bg-surface-elevated'
                 }`}
               >
                 {PIN_ICON}

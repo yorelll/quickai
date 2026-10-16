@@ -91,7 +91,7 @@ export const SwitchConfirmation = memo(function SwitchConfirmation({
         <button
           type="button"
           onClick={onJustSwitch}
-          className="w-full text-left px-3 py-2 rounded-lg text-xs text-text-primary hover:bg-white/5 transition-colors duration-150 cursor-pointer"
+          className="w-full text-left px-3 py-2 rounded-lg text-xs text-text-primary hover:bg-surface-elevated transition-colors duration-150 cursor-pointer"
         >
           {t(text.proceed)}
         </button>
@@ -100,7 +100,7 @@ export const SwitchConfirmation = memo(function SwitchConfirmation({
           type="button"
           onClick={onCancel}
           aria-label={t('common.cancel')}
-          className="w-full text-left px-3 py-2 rounded-lg text-xs text-text-secondary hover:bg-white/5 transition-colors duration-150 cursor-pointer"
+          className="w-full text-left px-3 py-2 rounded-lg text-xs text-text-secondary hover:bg-surface-elevated transition-colors duration-150 cursor-pointer"
         >
           {t('common.cancel')}
         </button>

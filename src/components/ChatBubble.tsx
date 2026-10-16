@@ -51,6 +51,9 @@ function renderUserContent(content: string): React.ReactNode {
       );
     }
     // The command itself, styled (first occurrence only)
+    // The command trigger is highlighted against the fixed brand gradient of
+    // the user bubble (`.chat-bubble-user`), which does not change with the
+    // theme — so a fixed dark hue is correct here and must not be tokenised.
     parts.push(
       <span key={parts.length} className="font-semibold text-[#7C2D12]">
         {matchedTrigger}
@@ -76,6 +79,11 @@ interface ChatBubbleProps {
   isStreaming?: boolean;
   /** When set, renders an ErrorCard callout instead of markdown. */
   error?: ApiError;
+  /**
+   * A non-fatal notice streamed during the turn. Rendered above the answer,
+   * which keeps streaming — unlike `error`, it never replaces the content.
+   */
+  notice?: ApiError;
   /** Accumulated thinking/reasoning content from the model, if thinking mode was used. */
   thinkingContent?: string;
   /** Whether the model is currently in the thinking phase (streaming thinking tokens). */
@@ -125,6 +133,7 @@ export function ChatBubble({
   imagePaths,
   onImagePreview,
   error,
+  notice,
   thinkingContent,
   isThinking,
 }: ChatBubbleProps) {
@@ -191,6 +200,9 @@ export function ChatBubble({
                 thinkingContent={thinkingContent}
                 isThinking={isThinking ?? false}
               />
+            )}
+            {notice && (
+              <ErrorCard code={notice.code} message={notice.message} />
             )}
             {error ? (
               <ErrorCard code={error.code} message={error.message} />

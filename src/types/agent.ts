@@ -7,6 +7,8 @@
  * (`text`, `result`, `summary`) that is shown verbatim.
  */
 
+import type { ApiError } from './chat';
+
 /** A desktop action in its wire form. `type` is the serde tag. */
 export type AgentAction =
   | { type: 'click'; x: number; y: number }
@@ -19,7 +21,20 @@ export type AgentAction =
   | { type: 'launch'; app: string }
   | { type: 'done' };
 
-/** An event emitted by the agent loop. `kind` is the serde tag. */
+/**
+ * A non-fatal agent diagnostic, carried separately from the terminal `error`
+ * event. The backend reuses the `ApiError` codes; `skill_unreadable` means one
+ * selected skill's file could not be read and was left out of the prompt. The
+ * run continues, so a notice never ends the run or hides the agent panel.
+ */
+export type AgentNotice = ApiError;
+
+/**
+ * An event emitted by the agent loop. `kind` is the serde tag.
+ *
+ * There is no non-fatal chunk variant: a recoverable problem arrives as an
+ * `error` event whose `code` the consumer classifies (see `AgentNotice`).
+ */
 export type AgentEvent =
   | { kind: 'reasoning'; text: string }
   | { kind: 'action_executed'; action: AgentAction; result: string }

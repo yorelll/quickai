@@ -993,7 +993,7 @@ describe('AskBarView', () => {
       );
       const btn = screen.getByRole('button', { name: 'Take a screenshot' });
       expect(btn.className).not.toContain('hover:text-text-primary');
-      expect(btn.className).not.toContain('hover:bg-white/8');
+      expect(btn.className).not.toContain('hover:bg-surface-elevated');
     });
 
     it('has hover classes when below max images', () => {
@@ -1012,7 +1012,7 @@ describe('AskBarView', () => {
       );
       const btn = screen.getByRole('button', { name: 'Take a screenshot' });
       expect(btn.className).toContain('hover:text-text-primary');
-      expect(btn.className).toContain('hover:bg-white/8');
+      expect(btn.className).toContain('hover:bg-surface-elevated');
     });
 
     it('shows tooltip explaining limit when camera button is hovered at max images', () => {
@@ -1467,7 +1467,7 @@ describe('AskBarView', () => {
       expect(mirror!.classList.contains('pointer-events-none')).toBe(true);
     });
 
-    it('highlights /screen command in violet in the mirror div', () => {
+    it('highlights /screen command in the brand colour in the mirror div', () => {
       const { container } = render(
         <AskBarView
           {...IMAGE_DEFAULTS}
@@ -1481,7 +1481,7 @@ describe('AskBarView', () => {
         />,
       );
       const mirror = container.querySelector('[aria-hidden="true"]');
-      const highlighted = mirror!.querySelector('.text-violet-400');
+      const highlighted = mirror!.querySelector('.text-primary');
       expect(highlighted).not.toBeNull();
       expect(highlighted!.textContent).toBe('/screen');
     });
@@ -1500,7 +1500,7 @@ describe('AskBarView', () => {
         />,
       );
       const mirror = container.querySelector('[aria-hidden="true"]');
-      const highlighted = mirror!.querySelectorAll('.text-violet-400');
+      const highlighted = mirror!.querySelectorAll('.text-primary');
       expect(highlighted).toHaveLength(2);
       expect(highlighted[0].textContent).toBe('/screen');
       expect(highlighted[1].textContent).toBe('/think');
@@ -1520,7 +1520,7 @@ describe('AskBarView', () => {
         />,
       );
       const mirror = container.querySelector('[aria-hidden="true"]');
-      expect(mirror!.querySelector('.text-violet-400')).toBeNull();
+      expect(mirror!.querySelector('.text-primary')).toBeNull();
       expect(mirror!.textContent).toBe('/screensaver is nice');
     });
 
@@ -1538,7 +1538,7 @@ describe('AskBarView', () => {
         />,
       );
       const mirror = container.querySelector('[aria-hidden="true"]');
-      expect(mirror!.querySelector('.text-violet-400')).toBeNull();
+      expect(mirror!.querySelector('.text-primary')).toBeNull();
       expect(mirror!.textContent).toBe('hello world');
     });
 
@@ -1648,6 +1648,338 @@ describe('AskBarView', () => {
       const btn = screen.getByRole('button', { name: 'Open settings' });
       fireEvent.mouseEnter(btn.parentElement!);
       expect(screen.getByText('Open settings')).toBeInTheDocument();
+    });
+  });
+
+  describe('skill picker (/add)', () => {
+    const SKILLS = [
+      { id: 's1', alias: 'assistant', path: '/a.md', enabled: true },
+      { id: 's2', alias: 'translate', path: '/b.md', enabled: false },
+      { id: 's3', alias: 'summarize', path: '/c.md', enabled: false },
+    ];
+
+    function renderWithQuery(
+      query: string,
+      options: {
+        skills?: typeof SKILLS;
+        onSkillAdd?: (alias: string) => void;
+        busy?: boolean;
+      } = {},
+    ) {
+      const setQuery = vi.fn();
+      const onSkillAdd = options.onSkillAdd ?? vi.fn();
+      render(
+        <AskBarView
+          {...IMAGE_DEFAULTS}
+          query={query}
+          setQuery={setQuery}
+          isChatMode={false}
+          isGenerating={options.busy ?? false}
+          onSubmit={vi.fn()}
+          onCancel={vi.fn()}
+          inputRef={makeRef()}
+          skills={options.skills ?? SKILLS}
+          selectedSkills={[]}
+          onSkillAdd={onSkillAdd}
+          onSkillRemove={vi.fn()}
+        />,
+      );
+      return { setQuery, onSkillAdd };
+    }
+
+    it('shows the picker when the query ends with a bare /add', () => {
+      renderWithQuery('/add');
+      expect(
+        screen.getByRole('listbox', { name: 'Skill suggestions' }),
+      ).toBeInTheDocument();
+      expect(screen.getByText('translate')).toBeInTheDocument();
+    });
+
+    it('lists every configured skill', () => {
+      renderWithQuery('/add');
+      expect(screen.getByText('assistant')).toBeInTheDocument();
+      expect(screen.getByText('translate')).toBeInTheDocument();
+      expect(screen.getByText('summarize')).toBeInTheDocument();
+    });
+
+    it('opens with the highlight on the first addable skill', () => {
+      renderWithQuery('/add');
+      const options = screen.getAllByRole('option');
+      expect(options[0]).toHaveAttribute('aria-selected', 'false');
+      expect(options[1]).toHaveAttribute('aria-selected', 'true');
+    });
+
+    it('opens with no selection when every skill is enabled', () => {
+      renderWithQuery('/add', {
+        skills: [SKILLS[0]],
+      });
+      const options = screen.getAllByRole('option');
+      expect(options).toHaveLength(1);
+      expect(options[0]).toHaveAttribute('aria-selected', 'false');
+    });
+
+    it('suppresses the command popover while the picker is open', () => {
+      renderWithQuery('/add');
+      expect(
+        screen.queryByRole('listbox', { name: /command suggestions/i }),
+      ).toBeNull();
+    });
+
+    it('shows the empty state when no skills are configured', () => {
+      renderWithQuery('/add', { skills: [] });
+      expect(screen.getByText('No skills configured')).toBeInTheDocument();
+    });
+
+    it('does not show the picker when busy (generating)', () => {
+      renderWithQuery('/add', { busy: true });
+      expect(
+        screen.queryByRole('listbox', { name: 'Skill suggestions' }),
+      ).toBeNull();
+    });
+
+    it('shows the picker for /add completed with a trailing space', () => {
+      renderWithQuery('/add ');
+      expect(
+        screen.getByRole('listbox', { name: 'Skill suggestions' }),
+      ).toBeInTheDocument();
+    });
+
+    it('does not show the picker when /add is followed by more text', () => {
+      renderWithQuery('/add translate');
+      expect(
+        screen.queryByRole('listbox', { name: 'Skill suggestions' }),
+      ).toBeNull();
+    });
+
+    it('ArrowDown moves the highlight to the next row', () => {
+      renderWithQuery('/add');
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.keyDown(textarea, { key: 'ArrowDown' });
+      const options = screen.getAllByRole('option');
+      expect(options[2]).toHaveAttribute('aria-selected', 'true');
+    });
+
+    it('ArrowUp walks onto enabled rows and wraps around', () => {
+      renderWithQuery('/add');
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      // Up from the first addable row lands on the enabled built-in.
+      fireEvent.keyDown(textarea, { key: 'ArrowUp' });
+      let options = screen.getAllByRole('option');
+      expect(options[0]).toHaveAttribute('aria-disabled', 'true');
+      expect(options[0]).toHaveAttribute('aria-selected', 'false');
+
+      // Up again wraps past it to the last row.
+      fireEvent.keyDown(textarea, { key: 'ArrowUp' });
+      options = screen.getAllByRole('option');
+      expect(options[2]).toHaveAttribute('aria-selected', 'true');
+    });
+
+    it('ArrowDown and ArrowUp do nothing when no skills are configured', () => {
+      renderWithQuery('/add', { skills: [] });
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.keyDown(textarea, { key: 'ArrowDown' });
+      fireEvent.keyDown(textarea, { key: 'ArrowUp' });
+      expect(screen.getByText('No skills configured')).toBeInTheDocument();
+    });
+
+    it('Enter adds the highlighted skill and clears the /add word', () => {
+      const onSkillAdd = vi.fn();
+      const { setQuery } = renderWithQuery('/add', { onSkillAdd });
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+
+      expect(onSkillAdd).toHaveBeenCalledWith('translate');
+      expect(setQuery).toHaveBeenCalledWith('');
+    });
+
+    it('Enter on an enabled skill does not add it and stays in the picker', () => {
+      const onSkillAdd = vi.fn();
+      const { setQuery } = renderWithQuery('/add', { onSkillAdd });
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      // Up onto the enabled built-in row.
+      fireEvent.keyDown(textarea, { key: 'ArrowUp' });
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+
+      expect(onSkillAdd).not.toHaveBeenCalled();
+      expect(setQuery).not.toHaveBeenCalled();
+      expect(
+        screen.getByRole('listbox', { name: 'Skill suggestions' }),
+      ).toBeInTheDocument();
+    });
+
+    it('marks an enabled skill as inert with an explanation', () => {
+      renderWithQuery('/add');
+
+      const options = screen.getAllByRole('option');
+      expect(options[0]).toHaveAttribute('aria-disabled', 'true');
+      expect(options[0]).toHaveAttribute('aria-selected', 'false');
+      expect(screen.getByText('Already enabled')).toBeInTheDocument();
+    });
+
+    it('marks the highlighted enabled row so navigation stays legible', () => {
+      renderWithQuery('/add', {
+        skills: [
+          { id: 'e1', alias: 'assistant', path: '/a.md', enabled: true },
+          { id: 'e2', alias: 'legacy', path: '/d.md', enabled: true },
+        ],
+      });
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      // Nothing is addable, so the picker opens with no selection; the first
+      // ArrowDown lands on the first enabled row.
+      fireEvent.keyDown(textarea, { key: 'ArrowDown' });
+
+      const options = screen.getAllByRole('option');
+      expect(options[0].className).toContain('bg-surface-elevated/40');
+      expect(options[1].className).not.toContain('bg-surface-elevated/40');
+      // Still inert — the marker is feedback only.
+      expect(options[0]).toHaveAttribute('aria-disabled', 'true');
+      expect(options[0]).toHaveAttribute('aria-selected', 'false');
+    });
+
+    it('clicking an enabled skill row does not add it', () => {
+      const onSkillAdd = vi.fn();
+      renderWithQuery('/add', { onSkillAdd });
+
+      fireEvent.mouseDown(screen.getByText('assistant'));
+
+      expect(onSkillAdd).not.toHaveBeenCalled();
+    });
+
+    it('Enter keeps any text typed before /add', () => {
+      const onSkillAdd = vi.fn();
+      const { setQuery } = renderWithQuery('hello /add', { onSkillAdd });
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+
+      expect(onSkillAdd).toHaveBeenCalledWith('translate');
+      expect(setQuery).toHaveBeenCalledWith('hello');
+    });
+
+    it('Ctrl+Enter adds the skill and stays in the picker', () => {
+      const onSkillAdd = vi.fn();
+      const { setQuery } = renderWithQuery('/add', { onSkillAdd });
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+
+      expect(onSkillAdd).toHaveBeenCalledWith('translate');
+      expect(setQuery).not.toHaveBeenCalled();
+      expect(
+        screen.getByRole('listbox', { name: 'Skill suggestions' }),
+      ).toBeInTheDocument();
+    });
+
+    it('Cmd+Enter also stays in the picker', () => {
+      const onSkillAdd = vi.fn();
+      const { setQuery } = renderWithQuery('/add', { onSkillAdd });
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
+
+      expect(onSkillAdd).toHaveBeenCalledWith('translate');
+      expect(setQuery).not.toHaveBeenCalled();
+    });
+
+    it('Enter does nothing when no skills are configured', () => {
+      const onSkillAdd = vi.fn();
+      renderWithQuery('/add', { skills: [], onSkillAdd });
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+
+      expect(onSkillAdd).not.toHaveBeenCalled();
+    });
+
+    it('clicking a skill row adds it and clears the /add word', () => {
+      const onSkillAdd = vi.fn();
+      const { setQuery } = renderWithQuery('/add', { onSkillAdd });
+
+      fireEvent.mouseDown(screen.getByText('translate'));
+
+      expect(onSkillAdd).toHaveBeenCalledWith('translate');
+      expect(setQuery).toHaveBeenCalledWith('');
+    });
+
+    it('Escape dismisses the picker without changing the query', () => {
+      const { setQuery } = renderWithQuery('/add');
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.keyDown(textarea, { key: 'Escape' });
+
+      expect(setQuery).not.toHaveBeenCalled();
+      expect(
+        screen.queryByRole('listbox', { name: 'Skill suggestions' }),
+      ).toBeNull();
+    });
+
+    it('leaves other keys alone while the picker is open', () => {
+      const onSkillAdd = vi.fn();
+      const { setQuery } = renderWithQuery('/add', { onSkillAdd });
+
+      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      fireEvent.keyDown(textarea, { key: 'a' });
+
+      expect(onSkillAdd).not.toHaveBeenCalled();
+      expect(setQuery).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('skill chips', () => {
+    function renderChips(
+      selectedSkills: string[],
+      onSkillRemove?: (alias: string) => void,
+    ) {
+      render(
+        <AskBarView
+          {...IMAGE_DEFAULTS}
+          query=""
+          setQuery={vi.fn()}
+          isChatMode={false}
+          isGenerating={false}
+          onSubmit={vi.fn()}
+          onCancel={vi.fn()}
+          inputRef={makeRef()}
+          skills={[]}
+          selectedSkills={selectedSkills}
+          onSkillAdd={vi.fn()}
+          onSkillRemove={onSkillRemove}
+        />,
+      );
+    }
+
+    it('renders a chip per selected skill', () => {
+      renderChips(['translate'], vi.fn());
+      expect(
+        screen.getByRole('list', { name: 'Selected skills' }),
+      ).toBeInTheDocument();
+      expect(screen.getByText('translate')).toBeInTheDocument();
+    });
+
+    it('renders nothing when no skills are selected', () => {
+      renderChips([], vi.fn());
+      expect(
+        screen.queryByRole('list', { name: 'Selected skills' }),
+      ).toBeNull();
+    });
+
+    it('renders nothing when no remove handler is provided', () => {
+      renderChips(['translate']);
+      expect(
+        screen.queryByRole('list', { name: 'Selected skills' }),
+      ).toBeNull();
+    });
+
+    it('calls onSkillRemove when the chip remove button is clicked', () => {
+      const onSkillRemove = vi.fn();
+      renderChips(['translate'], onSkillRemove);
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Remove skill translate' }),
+      );
+      expect(onSkillRemove).toHaveBeenCalledWith('translate');
     });
   });
 });

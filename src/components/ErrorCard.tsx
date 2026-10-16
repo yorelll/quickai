@@ -29,6 +29,8 @@ export function errorTitleKey(code: string): TranslationKey | null {
       return 'error.contextLengthExceeded';
     case 'cancelled':
       return 'error.cancelled';
+    case 'skill_unreadable':
+      return 'error.skillUnreadable';
     case 'unknown':
       return 'error.unknown';
     default:
@@ -58,19 +60,20 @@ export function ErrorCard({ code, message }: ErrorCardProps) {
     code === 'model_not_found' ||
     code === 'bad_request' ||
     code === 'rate_limited' ||
+    code === 'skill_unreadable' ||
     code === 'context_length_exceeded';
 
   const barColor = muted
-    ? 'rgba(255,255,255,0.2)'
+    ? 'var(--color-text-secondary)'
     : warning
-      ? '#f59e0b'
-      : '#ef4444';
+      ? 'var(--color-tertiary)'
+      : 'light-dark(#b3261e, #ff8a80)';
 
   const title = titleKey ? t(titleKey) : message;
   const subtitle = titleKey && message ? message : null;
 
   return (
-    <div className="flex items-stretch gap-3 px-1 py-2 rounded-md bg-white/[0.025]">
+    <div className="flex items-stretch gap-3 px-1 py-2 rounded-md bg-surface-elevated">
       <div
         data-error-bar
         data-kind={code}
@@ -78,11 +81,11 @@ export function ErrorCard({ code, message }: ErrorCardProps) {
         style={{ background: barColor }}
       />
       <div>
-        <p className="text-[12.5px] font-[590] text-white/[0.82] leading-snug tracking-[-0.01em]">
+        <p className="text-[12.5px] font-[590] text-text-primary leading-snug tracking-[-0.01em]">
           {title}
         </p>
         {subtitle && (
-          <p className="text-[11.5px] text-white/[0.38] leading-snug mt-0.5">
+          <p className="text-[11.5px] text-text-secondary leading-snug mt-0.5">
             {subtitle}
           </p>
         )}

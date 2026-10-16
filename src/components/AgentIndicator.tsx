@@ -1,8 +1,9 @@
 import { memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentStatus } from '../hooks/useAgentMode';
-import type { AgentAction } from '../types/agent';
+import type { AgentAction, AgentNotice } from '../types/agent';
 import { formatAgentAction } from '../utils/agentAction';
+import { ErrorCard } from './ErrorCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { useTranslation, type TranslationKey } from '../i18n';
 
@@ -14,6 +15,8 @@ interface AgentIndicatorProps {
   lastResult: string | null;
   reasoning: string | null;
   summary: string | null;
+  /** Non-fatal diagnostic raised mid-run; shown without ending the run. */
+  notice: AgentNotice | null;
   pendingConfirmation: AgentAction | null;
   onStop: () => void;
   onConfirm: () => void;
@@ -33,13 +36,13 @@ const statusLabels: Record<AgentStatus, TranslationKey> = {
 };
 
 const statusColors: Record<AgentStatus, string> = {
-  idle: 'bg-neutral-500',
-  capturing: 'bg-amber-400',
-  analyzing: 'bg-amber-400',
-  executing: 'bg-amber-400',
-  waiting_confirmation: 'bg-yellow-400',
-  done: 'bg-emerald-400',
-  error: 'bg-red-400',
+  idle: 'bg-text-secondary',
+  capturing: 'bg-tertiary',
+  analyzing: 'bg-tertiary',
+  executing: 'bg-tertiary',
+  waiting_confirmation: 'bg-tertiary',
+  done: 'bg-[light-dark(#1a7f37,#4ade80)]',
+  error: 'bg-[light-dark(#b3261e,#ff8a80)]',
 };
 
 /** Hoisted dismiss (X) icon. */
@@ -72,28 +75,30 @@ const AgentConfirmation = memo(function AgentConfirmation({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col gap-2 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
-      <p className="text-xs text-yellow-200 font-medium">
+    <div className="flex flex-col gap-2 p-3 bg-tertiary/10 border border-tertiary/30 rounded-lg">
+      <p className="text-xs text-text-primary font-medium">
         {t('agent.confirmPrompt')}
       </p>
-      <p className="text-xs text-neutral-300 leading-relaxed">
+      <p className="text-xs text-text-secondary leading-relaxed">
         {formatAgentAction(action, t)}
       </p>
       <div className="flex gap-2 mt-1">
         <button
           onClick={onConfirm}
-          className="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 transition-colors cursor-pointer"
+          className="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-tertiary/20 text-text-primary hover:bg-tertiary/30 transition-colors cursor-pointer"
         >
           {t('agent.allow')}
         </button>
         <button
           onClick={onReject}
-          className="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-neutral-700/50 text-neutral-400 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+          className="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-surface-elevated text-text-secondary hover:text-[light-dark(#b3261e,#ff8a80)] hover:bg-[light-dark(rgba(179,38,30,0.08),rgba(255,138,128,0.10))] transition-colors cursor-pointer"
         >
           {t('agent.deny')}
         </button>
       </div>
-      <p className="text-[10px] text-neutral-500">{t('agent.keyboardHint')}</p>
+      <p className="text-[10px] text-text-secondary">
+        {t('agent.keyboardHint')}
+      </p>
     </div>
   );
 });
@@ -105,6 +110,7 @@ export function AgentIndicator({
   lastResult,
   reasoning,
   summary,
+  notice,
   pendingConfirmation,
   onStop,
   onConfirm,
@@ -126,20 +132,20 @@ export function AgentIndicator({
           transition={{ duration: 0.2 }}
           className="flex flex-col gap-1"
         >
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 border border-amber-500/30 rounded-lg text-sm">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-tertiary/10 border border-tertiary/30 rounded-lg text-sm">
             <span
               className={`w-2 h-2 rounded-full ${statusColors[status]} animate-pulse`}
             />
-            <span className="text-amber-200 font-medium">
+            <span className="text-text-primary font-medium">
               {t(statusLabels[status])}
             </span>
             {lastAction && (
-              <span className="text-neutral-400 text-xs truncate max-w-[200px]">
+              <span className="text-text-secondary text-xs truncate max-w-[200px]">
                 {formatAgentAction(lastAction, t)}
               </span>
             )}
             {reasoning && status === 'analyzing' && (
-              <span className="text-neutral-500 text-xs truncate max-w-[300px]">
+              <span className="text-text-secondary text-xs truncate max-w-[300px]">
                 {reasoning}
               </span>
             )}
@@ -149,7 +155,7 @@ export function AgentIndicator({
               {isActive ? (
                 <button
                   onClick={onStop}
-                  className="text-neutral-400 hover:text-red-400 transition-colors text-xs font-medium cursor-pointer"
+                  className="text-text-secondary hover:text-[light-dark(#b3261e,#ff8a80)] transition-colors text-xs font-medium cursor-pointer"
                 >
                   {t('agent.stop')}
                 </button>
@@ -158,15 +164,16 @@ export function AgentIndicator({
                   type="button"
                   onClick={onDismiss}
                   aria-label={t('agent.dismiss')}
-                  className="w-5 h-5 flex items-center justify-center rounded text-neutral-400 hover:text-text-primary hover:bg-white/8 transition-colors duration-150 cursor-pointer"
+                  className="w-5 h-5 flex items-center justify-center rounded text-text-secondary hover:text-text-primary hover:bg-surface-elevated transition-colors duration-150 cursor-pointer"
                 >
                   {CLOSE_ICON}
                 </button>
               )}
             </div>
           </div>
+          {notice && <ErrorCard code={notice.code} message={notice.message} />}
           {status === 'error' && lastResult && (
-            <div className="px-3 py-1.5 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-300 leading-relaxed">
+            <div className="px-3 py-1.5 bg-[light-dark(rgba(179,38,30,0.08),rgba(255,138,128,0.10))] border border-[light-dark(rgba(179,38,30,0.35),rgba(255,138,128,0.30))] rounded-lg text-xs text-[light-dark(#b3261e,#ff8a80)] leading-relaxed">
               {lastResult}
             </div>
           )}

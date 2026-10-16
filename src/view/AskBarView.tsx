@@ -5,12 +5,18 @@ import { formatQuotedText } from '../utils/formatQuote';
 import { quote } from '../config';
 import { ImageThumbnails } from '../components/ImageThumbnails';
 import { CommandSuggestion } from '../components/CommandSuggestion';
+import { SkillPicker } from '../components/SkillPicker';
+import { SkillChips } from '../components/SkillChips';
 import { Tooltip } from '../components/Tooltip';
 import type { AttachedImage } from '../types/image';
+import type { Skill } from '../types/skill';
 import { MAX_IMAGE_SIZE_BYTES } from '../types/image';
 import { COMMANDS } from '../config/commands';
 import { useTranslation } from '../i18n';
 import { useConfig } from '../contexts/ConfigContext';
+
+/** The slash trigger that opens the skill picker. */
+const SKILL_TRIGGER = '/add';
 
 /**
  * Hoisted static SVG — prevents re-allocation on every render cycle.
@@ -180,7 +186,7 @@ export function renderHighlightedText(text: string): React.ReactNode {
       );
     }
     parts.push(
-      <span key={parts.length} className="text-violet-400">
+      <span key={parts.length} className="text-primary">
         {matchedTrigger}
       </span>,
     );
@@ -239,6 +245,18 @@ interface AskBarViewProps {
    * "normal" = violet ring; "max" = red ring + label; undefined = no ring.
    */
   isDragOver?: 'normal' | 'max';
+  /**
+   * Skills listed by the `/add` picker, in their persisted order. The full
+   * list, enabled ones included: they are shown dimmed and inert because they
+   * already ride the system prompt on every turn.
+   */
+  skills?: Skill[];
+  /** Aliases of the skills selected for the current message. */
+  selectedSkills?: string[];
+  /** Called with the alias when the user picks a skill from `/add`. */
+  onSkillAdd?: (alias: string) => void;
+  /** Called with the alias when the user removes a selected skill. */
+  onSkillRemove?: (alias: string) => void;
 }
 
 /**
@@ -265,6 +283,10 @@ export function AskBarView({
   onImagePreview,
   onScreenshot,
   isDragOver,
+  skills = [],
+  selectedSkills = [],
+  onSkillAdd,
+  onSkillRemove,
 }: AskBarViewProps) {
   const { t } = useTranslation();
   const { window: windowConfig } = useConfig();
@@ -305,6 +327,12 @@ export function AskBarView({
   const [dismissedQuery, setDismissedQuery] = useState('');
 
   /**
+   * Index of the highlighted row in the skill picker. Reset whenever the
+   * picker opens so it always starts at the first skill.
+   */
+  const [skillHighlightedIndex, setSkillHighlightedIndex] = useState(0);
+
+  /**
    * Finds the last word starting with "/" in the query to use as the active
    * command prefix. This allows command suggestions to appear anywhere in the
    * text, not just at the start.
@@ -316,8 +344,39 @@ export function AskBarView({
     return match ? match[1] : '';
   }, [rawQuery]);
 
+  /**
+   * The query with trailing whitespace removed. Completing `/add` from the
+   * command popover appends a trailing space, so the skill trigger is matched
+   * against this rather than the raw text.
+   */
+  const trimmedQuery = rawQuery.trimEnd();
+  const skillWord = useMemo(() => {
+    const match = trimmedQuery.match(/(?:^|\s)(\/\S*)$/);
+    return match ? match[1] : '';
+  }, [trimmedQuery]);
+
+  /**
+   * True when the query's last word is a bare `/add`: the skill picker takes
+   * over from the command popover and lists the skills it was given.
+   */
+  const showSkillPicker =
+    !isBusy && skillWord === SKILL_TRIGGER && skillWord !== dismissedQuery;
+
+  /**
+   * Index of the first skill that can actually be added, or -1 when every
+   * skill is enabled. The picker opens with the highlight here so Enter does
+   * something useful; with nothing addable it opens with no selection at all.
+   */
+  const firstAddableIndex = useMemo(
+    () => skills.findIndex((s) => !s.enabled),
+    [skills],
+  );
+
   const showSuggestions =
-    !isBusy && lastSlashWord.length > 0 && lastSlashWord !== dismissedQuery;
+    !isBusy &&
+    !showSkillPicker &&
+    lastSlashWord.length > 0 &&
+    lastSlashWord !== dismissedQuery;
 
   /** The active command prefix (e.g. "/sc"). Empty when not suggesting. */
   const commandPrefix = showSuggestions ? lastSlashWord : '';
@@ -364,6 +423,17 @@ export function AskBarView({
   }, [commandPrefix]);
   /* eslint-enable @eslint-react/set-state-in-effect */
 
+  // Reset the skill highlight whenever the picker opens or when the skill list
+  // changes, so a fresh `/add` starts on the first skill that can actually be
+  // added. Enabled rows stay listed but are inert, so highlighting one would
+  // make Enter do nothing on open.
+  /* eslint-disable @eslint-react/set-state-in-effect -- intentional: same
+     derived-index reset pattern as the command popover above. */
+  useEffect(() => {
+    setSkillHighlightedIndex(firstAddableIndex);
+  }, [showSkillPicker, firstAddableIndex]);
+  /* eslint-enable @eslint-react/set-state-in-effect */
+
   /**
    * Applies the selected trigger by replacing the partial slash word at the
    * end of the query with the full trigger + trailing space.
@@ -380,6 +450,30 @@ export function AskBarView({
       setQuery(beforeSlash + trigger + ' ');
     },
     [setQuery, rawQuery, lastSlashWord],
+  );
+
+  /**
+   * Adds the picked skill to the message.
+   *
+   * Enabled skills are already appended to the system prompt every turn, so
+   * they are inert here — picking one does nothing and leaves the picker open.
+   * A plain pick (Enter, click) also removes the `/add` word so the box is
+   * left empty for the prompt; Ctrl+Enter keeps it, leaving the user in the
+   * picker to select further skills.
+   */
+  const handleSkillSelect = useCallback(
+    (alias: string, stayOpen: boolean) => {
+      if (skills.some((s) => s.alias === alias && s.enabled)) return;
+      onSkillAdd?.(alias);
+      if (stayOpen) return;
+      setDismissedQuery('');
+      const beforeSlash = trimmedQuery.slice(
+        0,
+        trimmedQuery.length - skillWord.length,
+      );
+      setQuery(beforeSlash.trimEnd());
+    },
+    [skills, onSkillAdd, setQuery, trimmedQuery, skillWord],
   );
 
   /**
@@ -406,6 +500,12 @@ export function AskBarView({
    * Catches `Enter` without `Shift` to submit the form proactively,
    * avoiding accidental line breaks for power users.
    *
+   * When the skill picker is open (`/add`), handles:
+   * - ArrowDown / ArrowUp: move the highlighted skill (wraps around)
+   * - Enter: add the highlighted skill and leave the picker
+   * - Ctrl+Enter / Cmd+Enter: add the highlighted skill and stay in the picker
+   * - Escape: dismiss the picker without changing the query
+   *
    * When the command suggestion popover is open, also handles:
    * - ArrowDown / ArrowUp: move the highlighted row (wraps around)
    * - Tab: complete the highlighted command trigger into the input
@@ -414,6 +514,38 @@ export function AskBarView({
    */
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (showSkillPicker) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (skills.length > 0) {
+            setSkillHighlightedIndex((i) => (i + 1) % skills.length);
+          }
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          if (skills.length > 0) {
+            // From no selection (-1) or the first row, wrap to the last row.
+            setSkillHighlightedIndex((i) =>
+              i <= 0 ? skills.length - 1 : i - 1,
+            );
+          }
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const skill =
+            skills[Math.min(skillHighlightedIndex, skills.length - 1)];
+          if (!skill) return;
+          handleSkillSelect(skill.alias, e.metaKey || e.ctrlKey);
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setDismissedQuery(skillWord);
+          return;
+        }
+      }
       if (showSuggestions) {
         if (e.key === 'ArrowDown') {
           e.preventDefault();
@@ -475,6 +607,11 @@ export function AskBarView({
       handleCommandSelect,
       lastSlashWord,
       onSubmit,
+      showSkillPicker,
+      skills,
+      skillHighlightedIndex,
+      handleSkillSelect,
+      skillWord,
     ],
   );
 
@@ -545,7 +682,7 @@ export function AskBarView({
         </div>
       )}
       {showMaxLabel && (
-        <p className="px-4 pt-2 pb-0 text-xs text-red-400">
+        <p className="px-4 pt-2 pb-0 text-xs text-[light-dark(#b3261e,#ff8a80)]">
           {t('ask.maxImages', { count: maxImages })}
         </p>
       )}
@@ -561,6 +698,11 @@ export function AskBarView({
             onRemove={onImageRemove}
             size={56}
           />
+        </div>
+      )}
+      {selectedSkills.length > 0 && onSkillRemove && (
+        <div className="px-4 pt-2 pb-0">
+          <SkillChips skills={selectedSkills} onRemove={onSkillRemove} />
         </div>
       )}
       {/* Command suggestion renders above the input row in the normal DOM
@@ -589,6 +731,32 @@ export function AskBarView({
           </motion.div>
         )}
       </AnimatePresence>
+      {/* Skill picker — the `/add` counterpart to the command popover, in the
+          same slot so the two never stack. */}
+      <AnimatePresence>
+        {showSkillPicker && (
+          <motion.div
+            key="skill-picker"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{
+              height: { duration: 0.2, ease: [0.16, 1, 0.3, 1] },
+              opacity: { duration: 0.15 },
+            }}
+            style={{ overflow: 'hidden' }}
+          >
+            <SkillPicker
+              skills={skills}
+              highlightedIndex={Math.min(
+                skillHighlightedIndex,
+                Math.max(skills.length - 1, 0),
+              )}
+              onSelect={(alias) => handleSkillSelect(alias, false)}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
       <div className="relative">
         <div className="flex items-center w-full px-3 py-2.5 gap-2">
           <img
@@ -608,7 +776,7 @@ export function AskBarView({
                 type="button"
                 onClick={onHistoryOpen}
                 aria-label={t('ask.openHistory')}
-                className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-white/8 transition-colors duration-150 cursor-pointer outline-none"
+                className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-elevated transition-colors duration-150 cursor-pointer outline-none"
               >
                 {HISTORY_ICON}
               </button>
@@ -622,7 +790,7 @@ export function AskBarView({
                 type="button"
                 onClick={onSettingsOpen}
                 aria-label={t('ask.openSettings')}
-                className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-white/8 transition-colors duration-150 cursor-pointer outline-none"
+                className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-elevated transition-colors duration-150 cursor-pointer outline-none"
               >
                 <svg
                   width="16"
@@ -691,7 +859,7 @@ export function AskBarView({
                 onClick={onScreenshot}
                 disabled={isBusy}
                 aria-label={t('ask.screenshot')}
-                className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-white/8 transition-colors duration-150 disabled:opacity-40 disabled:cursor-default cursor-pointer"
+                className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-elevated transition-colors duration-150 disabled:opacity-40 disabled:cursor-default cursor-pointer"
               >
                 {CAMERA_ICON}
               </button>
@@ -706,7 +874,7 @@ export function AskBarView({
             whileTap={canSubmit || isBusy ? { scale: 0.92 } : undefined}
             className={`shrink-0 w-9 h-9 rounded-lg flex items-center justify-center transition-colors duration-200 ${
               isBusy
-                ? 'stop-btn-ring bg-red-500/10 text-red-400 cursor-pointer'
+                ? 'stop-btn-ring bg-[light-dark(rgba(179,38,30,0.10),rgba(255,138,128,0.10))] text-[light-dark(#b3261e,#ff8a80)] cursor-pointer'
                 : canSubmit
                   ? 'bg-primary text-neutral cursor-pointer'
                   : 'bg-surface-elevated text-text-secondary cursor-default'

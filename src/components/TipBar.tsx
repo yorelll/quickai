@@ -62,7 +62,7 @@ export function TipBar({ tip, tipKey }: TipBarProps) {
           addTimer(
             () => {
               /* v8 ignore next -- flicker color is visual-only */
-              el.style.color = '#ff8d5c';
+              el.style.color = 'var(--color-primary)';
               el.textContent =
                 NOISE_CHARS[Math.floor(Math.random() * NOISE_CHARS.length)];
             },
@@ -73,7 +73,7 @@ export function TipBar({ tip, tipKey }: TipBarProps) {
         addTimer(
           () => {
             /* v8 ignore next -- color reset is visual-only */
-            el.style.color = '#8a8a8e';
+            el.style.color = 'var(--color-text-secondary)';
             el.textContent = ch;
           },
           i * CHAR_DELAY + FLICKER_COUNT * FLICKER_MS,
@@ -113,17 +113,16 @@ export function TipBar({ tip, tipKey }: TipBarProps) {
         onClick={() => {
           void invoke('open_url', { url });
         }}
-        className="flex w-full items-center justify-center gap-1.5 border-t border-white/5 px-4 py-[5px] cursor-pointer transition-colors hover:bg-white/[0.03]"
+        className="flex w-full items-center justify-center gap-1.5 border-t border-surface-border px-4 py-[5px] cursor-pointer transition-colors hover:bg-surface-elevated"
         data-testid="tip-bar"
         aria-label={t('tip.openLink', { url })}
       >
-        <span className="text-[9px] font-bold tracking-widest uppercase text-[#ff8d5c] bg-[#ff8d5c]/10 rounded px-1.5 py-0.5 flex-shrink-0">
+        <span className="text-[9px] font-bold tracking-widest uppercase text-primary bg-primary/10 rounded px-1.5 py-0.5 flex-shrink-0">
           {t('tip.badge')}
         </span>
         <span
           ref={spanRef}
-          className="text-[10px] underline decoration-dotted underline-offset-2 decoration-[#ff8d5c]/40"
-          style={{ color: '#8a8a8e' }}
+          className="text-[10px] text-text-secondary underline decoration-dotted underline-offset-2 decoration-primary/40"
           data-testid="tip-text"
         />
       </button>
@@ -132,16 +131,15 @@ export function TipBar({ tip, tipKey }: TipBarProps) {
 
   return (
     <div
-      className="flex items-center justify-center gap-1.5 border-t border-white/5 px-4 py-[5px]"
+      className="flex items-center justify-center gap-1.5 border-t border-surface-border px-4 py-[5px]"
       data-testid="tip-bar"
     >
-      <span className="text-[9px] font-bold tracking-widest uppercase text-[#ff8d5c] bg-[#ff8d5c]/10 rounded px-1.5 py-0.5 flex-shrink-0">
+      <span className="text-[9px] font-bold tracking-widest uppercase text-primary bg-primary/10 rounded px-1.5 py-0.5 flex-shrink-0">
         {t('tip.badge')}
       </span>
       <span
         ref={spanRef}
-        className="text-[10px]"
-        style={{ color: '#8a8a8e' }}
+        className="text-[10px] text-text-secondary"
         data-testid="tip-text"
       />
     </div>

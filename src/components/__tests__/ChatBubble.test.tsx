@@ -410,5 +410,21 @@ describe('ChatBubble', () => {
         container.querySelector('[data-streamdown="strong"]'),
       ).not.toBeNull();
     });
+
+    it('renders a notice alongside the answer, not instead of it', () => {
+      const { container } = render(
+        <ChatBubble
+          role="assistant"
+          content="**bold**"
+          index={0}
+          notice={{ code: 'skill_unreadable', message: 'translate: not found' }}
+        />,
+      );
+      expect(container.querySelector('[data-error-bar]')).not.toBeNull();
+      expect(screen.getByText('translate: not found')).toBeInTheDocument();
+      expect(
+        container.querySelector('[data-streamdown="strong"]'),
+      ).not.toBeNull();
+    });
   });
 });

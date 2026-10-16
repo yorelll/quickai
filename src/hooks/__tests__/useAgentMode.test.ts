@@ -45,6 +45,20 @@ describe('useAgentMode', () => {
     expect(result.current.status).toBe('capturing');
     expect(mockInvoke).toHaveBeenCalledWith('start_agent_mode', {
       task: 'Open notepad',
+      skills: null,
+    });
+  });
+
+  it('forwards selected skill aliases to start_agent_mode', async () => {
+    const { result } = renderHook(() => useAgentMode());
+
+    await act(async () => {
+      await result.current.start('Open notepad', ['translate', 'assistant']);
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith('start_agent_mode', {
+      task: 'Open notepad',
+      skills: ['translate', 'assistant'],
     });
   });
 
@@ -189,6 +203,33 @@ describe('useAgentMode', () => {
       expect(result.current.status).toBe('error');
       expect(result.current.isActive).toBe(false);
       expect(result.current.lastResult).toBe('slow down');
+    });
+
+    it('treats skill_unreadable as a non-fatal notice', async () => {
+      const { result } = await startedAgent();
+      await act(async () => {
+        emitTauriEvent(AGENT_EVENT, {
+          kind: 'error',
+          code: 'skill_unreadable',
+          message: 'translate: not found',
+        });
+      });
+
+      expect(result.current.notice).toEqual({
+        code: 'skill_unreadable',
+        message: 'translate: not found',
+      });
+      // The run must not be ended or flipped into the error state.
+      expect(result.current.isActive).toBe(true);
+      expect(result.current.status).not.toBe('error');
+      expect(result.current.lastResult).toBeNull();
+
+      // A later event still drives the panel, so it never vanishes mid-run.
+      await act(async () => {
+        emitTauriEvent(AGENT_EVENT, { kind: 'reasoning', text: 'thinking' });
+      });
+      expect(result.current.status).toBe('analyzing');
+      expect(result.current.isActive).toBe(true);
     });
 
     it('surfaces the model summary and finishes', async () => {

@@ -61,11 +61,11 @@ export function ImageThumbnails({
             {item.placeholder ? (
               /* Screen-capture in-flight: clean minimal tile, no image yet */
               <div
-                className="rounded-lg bg-black/15 flex items-center justify-center"
+                className="rounded-lg bg-surface-elevated flex items-center justify-center"
                 style={{ width: size, height: size }}
                 aria-label={t('ask.capturingScreen')}
               >
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white/80 rounded-full animate-spin" />
+                <div className="w-4 h-4 border-2 border-text-secondary/30 border-t-text-secondary rounded-full animate-spin" />
               </div>
             ) : (
               <button
@@ -83,7 +83,7 @@ export function ImageThumbnails({
                 />
                 {item.loading && (
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                    <div className="w-4 h-4 border-2 border-text-secondary/30 border-t-text-secondary rounded-full animate-spin" />
                   </div>
                 )}
               </button>
@@ -93,7 +93,7 @@ export function ImageThumbnails({
                 type="button"
                 onClick={() => onRemove(item.id)}
                 aria-label={t('ask.removeImage')}
-                className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center rounded-full bg-neutral border border-surface-border text-text-secondary hover:text-red-400 hover:border-red-400/40 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center rounded-full bg-neutral border border-surface-border text-text-secondary hover:text-[light-dark(#b3261e,#ff8a80)] hover:border-[light-dark(rgba(179,38,30,0.35),rgba(255,138,128,0.30))] transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
               >
                 <svg
                   width="8"
