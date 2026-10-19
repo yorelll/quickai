@@ -77,7 +77,7 @@ describe('MinibarView', () => {
 
   it('should render with idle status dot', () => {
     render(<MinibarView status="idle" onClick={() => {}} />);
-    expect(dotClass()).toContain('bg-[light-dark(#1a7f37,#4ade80)]');
+    expect(dotClass()).toContain('bg-status-success');
   });
 
   it('should render with executing status dot', () => {
@@ -87,7 +87,7 @@ describe('MinibarView', () => {
 
   it('should render with error status dot', () => {
     render(<MinibarView status="error" onClick={() => {}} />);
-    expect(dotClass()).toContain('bg-[light-dark(#b3261e,#ff8a80)]');
+    expect(dotClass()).toContain('bg-status-error');
   });
 
   it('should pulse during active agent status', () => {

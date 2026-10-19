@@ -7,6 +7,15 @@ interface Props {
   onComplete: () => void;
 }
 
+/**
+ * The translucent "glass" panel shared by both onboarding steps. Every colour
+ * is a theme token (mixed with `transparent` via `color-mix()` where a
+ * translucent layer is needed) so the panel follows the theme switch instead
+ * of being pinned to the dark palette.
+ */
+const PANEL_BG =
+  'radial-gradient(ellipse 80% 55% at 50% 0%, color-mix(in srgb, var(--color-primary) 10%, transparent) 0%, color-mix(in srgb, var(--color-surface-elevated) 97%, transparent) 60%), color-mix(in srgb, var(--color-surface-elevated) 97%, transparent)';
+
 export function IntroStep({ onComplete }: Props) {
   const { t } = useTranslation();
 
@@ -23,8 +32,7 @@ export function IntroStep({ onComplete }: Props) {
         alignItems: 'center',
         justifyContent: 'center',
         background: 'transparent',
-        fontFamily:
-          "Inter, 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif",
+        fontFamily: 'var(--font-sans)',
       }}
     >
       <motion.div
@@ -33,12 +41,12 @@ export function IntroStep({ onComplete }: Props) {
         transition={{ type: 'spring', stiffness: 300, damping: 28 }}
         style={{
           width: 420,
-          background:
-            'radial-gradient(ellipse 80% 55% at 50% 0%, rgba(255,141,92,0.10) 0%, rgba(32,32,32,0.97) 60%), rgba(32,32,32,0.97)',
-          border: '1px solid rgba(255, 255, 255, 0.08)',
+          background: PANEL_BG,
+          border: '1px solid var(--color-surface-border)',
           borderRadius: 8,
           padding: '32px 26px 26px',
-          boxShadow: '0 0 40px rgba(255,100,40,0.07)',
+          boxShadow:
+            '0 0 40px color-mix(in srgb, var(--color-primary) 12%, transparent)',
           position: 'relative',
         }}
       >
@@ -62,7 +70,7 @@ export function IntroStep({ onComplete }: Props) {
             style={{
               fontSize: 21,
               fontWeight: 700,
-              color: '#f0f0f2',
+              color: 'var(--color-text-primary)',
               letterSpacing: '-0.5px',
               lineHeight: 1.25,
               margin: '0 0 6px',
@@ -73,7 +81,7 @@ export function IntroStep({ onComplete }: Props) {
           <p
             style={{
               fontSize: 13,
-              color: 'rgba(255,255,255,0.3)',
+              color: 'var(--color-text-secondary)',
               lineHeight: 1.6,
               margin: 0,
             }}
@@ -133,7 +141,7 @@ export function IntroStep({ onComplete }: Props) {
         <div
           style={{
             height: 1,
-            background: 'rgba(255,255,255,0.05)',
+            background: 'var(--color-divider)',
             margin: '16px 0',
           }}
         />
@@ -146,15 +154,17 @@ export function IntroStep({ onComplete }: Props) {
             display: 'block',
             width: '100%',
             padding: '12px',
-            background: 'linear-gradient(135deg, #ff8d5c 0%, #d45a1e 100%)',
-            color: 'white',
+            background:
+              'linear-gradient(135deg, var(--color-primary) 0%, color-mix(in srgb, var(--color-primary) 85%, #000) 100%)',
+            color: 'var(--color-on-primary)',
             fontSize: 14,
             fontWeight: 600,
             border: 'none',
             borderRadius: 8,
             cursor: 'pointer',
             letterSpacing: '-0.1px',
-            boxShadow: '0 4px 20px rgba(255,100,40,0.28)',
+            boxShadow:
+              '0 4px 20px color-mix(in srgb, var(--color-primary) 30%, transparent)',
             textAlign: 'center',
           }}
         >
@@ -166,7 +176,7 @@ export function IntroStep({ onComplete }: Props) {
           style={{
             textAlign: 'center',
             fontSize: 11,
-            color: 'rgba(255,255,255,0.18)',
+            color: 'var(--color-text-disabled)',
             marginTop: 14,
             lineHeight: 1.5,
           }}
@@ -195,7 +205,7 @@ function Fact({ icon, title, desc, last = false }: FactProps) {
         alignItems: 'flex-start',
         gap: 14,
         padding: '11px 0',
-        borderBottom: last ? 'none' : '1px solid rgba(255,255,255,0.05)',
+        borderBottom: last ? 'none' : '1px solid var(--color-divider)',
       }}
     >
       <div
@@ -206,7 +216,7 @@ function Fact({ icon, title, desc, last = false }: FactProps) {
           justifyContent: 'center',
           flexShrink: 0,
           paddingTop: 1,
-          color: 'rgba(255,141,92,0.65)',
+          color: 'var(--color-primary)',
         }}
       >
         {icon}
@@ -216,7 +226,7 @@ function Fact({ icon, title, desc, last = false }: FactProps) {
           style={{
             fontSize: 13,
             fontWeight: 600,
-            color: 'rgba(240,240,242,0.9)',
+            color: 'var(--color-text-primary)',
             marginBottom: 2,
             display: 'flex',
             alignItems: 'center',
@@ -230,7 +240,7 @@ function Fact({ icon, title, desc, last = false }: FactProps) {
         <div
           style={{
             fontSize: 11,
-            color: 'rgba(255,255,255,0.28)',
+            color: 'var(--color-text-secondary)',
             lineHeight: 1.5,
           }}
         >
@@ -247,12 +257,12 @@ function KeyChip({ children }: { children: React.ReactNode }) {
       style={{
         display: 'inline-block',
         padding: '1px 6px',
-        background: 'rgba(255,255,255,0.06)',
-        border: '1px solid rgba(255,255,255,0.12)',
-        borderBottom: '2px solid rgba(255,255,255,0.08)',
+        background: 'var(--color-state-hover)',
+        border: '1px solid var(--color-surface-border)',
+        borderBottom: '2px solid var(--color-divider)',
         borderRadius: 4,
         fontSize: 11,
-        color: 'rgba(255,255,255,0.55)',
+        color: 'var(--color-text-secondary)',
         lineHeight: 1.5,
         verticalAlign: 'middle',
       }}
@@ -268,11 +278,12 @@ function MonoChip({ children }: { children: React.ReactNode }) {
       style={{
         display: 'inline-block',
         padding: '1px 6px',
-        background: 'rgba(255,141,92,0.08)',
-        border: '1px solid rgba(255,141,92,0.15)',
+        background: 'color-mix(in srgb, var(--color-primary) 12%, transparent)',
+        border:
+          '1px solid color-mix(in srgb, var(--color-primary) 28%, transparent)',
         borderRadius: 4,
         fontSize: 11,
-        color: 'rgba(255,141,92,0.75)',
+        color: 'var(--color-primary)',
         fontFamily: "'Cascadia Code', 'Consolas', 'Fira Mono', monospace",
         lineHeight: 1.5,
         verticalAlign: 'middle',
@@ -403,7 +414,7 @@ function FloatIcon() {
         width="12"
         height="8"
         rx="2"
-        fill="rgba(22,18,15,0.98)"
+        fill="var(--color-surface-base)"
         stroke="currentColor"
         strokeWidth="1.5"
       />

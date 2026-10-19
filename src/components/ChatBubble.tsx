@@ -50,12 +50,14 @@ function renderUserContent(content: string): React.ReactNode {
         <span key={parts.length}>{remaining.slice(0, earliest)}</span>,
       );
     }
-    // The command itself, styled (first occurrence only)
-    // The command trigger is highlighted against the fixed brand gradient of
-    // the user bubble (`.chat-bubble-user`), which does not change with the
-    // theme — so a fixed dark hue is correct here and must not be tokenised.
+    // The command itself, styled (first occurrence only). The trigger is
+    // highlighted against the user bubble, which is itself token-driven now,
+    // so the accent is a token too — it stays legible in both themes.
     parts.push(
-      <span key={parts.length} className="font-semibold text-[#7C2D12]">
+      <span
+        key={parts.length}
+        className="font-semibold text-bubble-user-accent"
+      >
         {matchedTrigger}
       </span>,
     );
@@ -152,7 +154,7 @@ export function ChatBubble({
         <div className="flex flex-col max-w-[80%]">
           <div className="chat-bubble chat-bubble-user relative px-4 py-2.5 text-sm leading-relaxed select-text rounded-lg rounded-br-sm">
             {quotedText && (
-              <p className="border-l-2 border-white/40 pl-2 mb-2 italic text-xs text-white/60 whitespace-pre-wrap">
+              <p className="border-l-2 border-bubble-user-text/40 pl-2 mb-2 italic text-xs text-bubble-user-text/80 whitespace-pre-wrap">
                 {formatQuotedText(
                   quotedText,
                   quote.maxDisplayLines,
@@ -180,7 +182,7 @@ export function ChatBubble({
               </div>
             )}
             {content && (
-              <span className="text-white/95 font-medium whitespace-pre-wrap">
+              <span className="text-bubble-user-text font-medium whitespace-pre-wrap">
                 {renderUserContent(content)}
               </span>
             )}

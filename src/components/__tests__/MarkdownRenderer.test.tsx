@@ -1,6 +1,18 @@
-import { render } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
+/// <reference types="node" />
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { render, waitFor } from '@testing-library/react';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { MarkdownRenderer } from '../MarkdownRenderer';
+
+/**
+ * The shipped stylesheet, read off disk so the theme-mapping tests below run
+ * against the real rules rather than a copy.
+ */
+const APP_CSS = readFileSync(
+  resolve(import.meta.dirname, '../../App.css'),
+  'utf8',
+);
 
 describe('MarkdownRenderer', () => {
   describe('Basic rendering', () => {
@@ -196,6 +208,120 @@ describe('MarkdownRenderer', () => {
       const firstOutput = container.innerHTML;
       rerender(<MarkdownRenderer content="stable" />);
       expect(container.innerHTML).toBe(firstOutput);
+    });
+  });
+
+  describe('Syntax highlighting (item 15)', () => {
+    /** Waits for shiki's lazily-loaded highlighter to paint the token spans. */
+    async function renderHighlighted(container: HTMLElement) {
+      await waitFor(
+        () => {
+          const styled = tokenSpans(container).filter((s) =>
+            s.getAttribute('style')?.includes('--shiki-dark'),
+          );
+          expect(styled.length).toBeGreaterThan(0);
+        },
+        { timeout: 10_000 },
+      );
+      return tokenSpans(container);
+    }
+
+    function tokenSpans(container: HTMLElement): HTMLElement[] {
+      return [
+        ...container.querySelectorAll<HTMLElement>(
+          "[data-streamdown='code-block-body'] code span span",
+        ),
+      ];
+    }
+
+    it('paints real token colours instead of collapsing to inherit', async () => {
+      const { container } = render(
+        <MarkdownRenderer content={'```ts\n// a comment\nconst x = 1;\n```'} />,
+      );
+      const spans = await renderHighlighted(container);
+      const comment = spans.find(
+        (s) => s.textContent === '// a comment',
+      ) as HTMLElement;
+
+      // End-to-end: the plugin really resolved through Streamdown into the DOM.
+      expect(comment).toBeDefined();
+      expect(comment.getAttribute('style')).toContain('--sdm-c: #66707B');
+      expect(comment.getAttribute('style')).toContain('--shiki-dark: #8B949E');
+    });
+
+    it('carries both palettes so a theme switch needs no re-highlight', async () => {
+      const { container } = render(
+        <MarkdownRenderer content={'```ts\nconst x = 1;\n```'} />,
+      );
+      const spans = await renderHighlighted(container);
+      for (const span of spans) {
+        const style = span.getAttribute('style') ?? '';
+        expect(style).toContain('--sdm-c:');
+        expect(style).toContain('--shiki-dark:');
+      }
+    });
+  });
+
+  describe('App.css theme mapping (item 19)', () => {
+    /**
+     * jsdom applies the cascade but does not evaluate `var()`, so
+     * `getComputedStyle` returns the winning declaration's literal text. That
+     * is exactly what needs guarding: the two rules are the whole theme swap,
+     * and a dark↔light inversion would be silent.
+     */
+    const BASE_SELECTOR = "[data-streamdown='code-block-body'] code span span";
+    const LIGHT_SELECTOR = `:root[data-theme='light'] ${BASE_SELECTOR}`;
+
+    function ruleText(selector: string): string {
+      const at = APP_CSS.indexOf(`\n${selector} {`);
+      expect(at).toBeGreaterThan(-1);
+      const open = APP_CSS.indexOf('{', at);
+      const close = APP_CSS.indexOf('}', open);
+      return `${selector} ${APP_CSS.slice(open, close + 1)}`;
+    }
+
+    let styleEl: HTMLStyleElement;
+
+    beforeEach(() => {
+      styleEl = document.createElement('style');
+      styleEl.textContent = `${ruleText(BASE_SELECTOR)}\n${ruleText(LIGHT_SELECTOR)}`;
+      document.head.appendChild(styleEl);
+    });
+
+    afterEach(() => {
+      styleEl.remove();
+      delete document.documentElement.dataset.theme;
+    });
+
+    async function mappedColour(theme: 'light' | 'dark') {
+      const { container } = render(
+        <MarkdownRenderer content={'```ts\nconst x = 1;\n```'} />,
+      );
+      await waitFor(
+        () => {
+          expect(
+            container.querySelector(
+              "[data-streamdown='code-block-body'] code span span[style*='--shiki-dark']",
+            ),
+          ).not.toBeNull();
+        },
+        { timeout: 10_000 },
+      );
+      document.documentElement.dataset.theme = theme;
+      const span = container.querySelector<HTMLElement>(
+        "[data-streamdown='code-block-body'] code span span[style*='--shiki-dark']",
+      )!;
+      return getComputedStyle(span).color;
+    }
+
+    it('resolves dark through --shiki-dark', async () => {
+      expect(await mappedColour('dark')).toContain('--shiki-dark');
+    });
+
+    it('resolves light through --sdm-c', async () => {
+      const colour = await mappedColour('light');
+      expect(colour).toContain('--sdm-c');
+      expect(colour).not.toContain('--shiki-dark');
     });
   });
 });

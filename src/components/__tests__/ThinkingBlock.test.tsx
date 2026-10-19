@@ -175,15 +175,21 @@ describe('ThinkingBlock', () => {
     expect(chevron.style.transform).toBe('rotate(180deg)');
   });
 
-  it('renders thinking text in normal color (not grayed out)', () => {
+  it('renders reasoning on a distinct, token-driven surface when expanded', () => {
     render(<ThinkingBlock thinkingContent="Normal text." isThinking={false} />);
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Toggle thinking details' }),
     );
 
-    // The thinking text container should NOT have text-secondary/70 class
-    const textContainer = screen.getByText(/Normal text/).closest('div');
-    expect(textContainer?.className).not.toContain('text-text-secondary');
+    // The reasoning box must be distinguishable from the answer by surface,
+    // not by opacity (item 1): semantic thinking tokens, no opacity-70.
+    const surface = screen.getByTestId('thinking-surface');
+    expect(surface.className).toContain('bg-surface-thinking');
+    expect(surface.className).toContain('border-border-thinking');
+    expect(surface.className).toContain('text-text-thinking');
+    expect(surface.className).not.toContain('opacity-70');
+    // And it must not fall back to the plain body text colour.
+    expect(surface.className).not.toContain('text-text-secondary');
   });
 });

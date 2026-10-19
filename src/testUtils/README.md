@@ -146,7 +146,9 @@ it('shows overlay on visibility event', async () => {
     emitTauriEvent('quickai://visibility', { state: 'show' });
   });
 
-  expect(screen.getByPlaceholderText('Ask QuickAI anything...')).toBeInTheDocument();
+  expect(
+    screen.getByPlaceholderText('Ask a question, or type / to see commands'),
+  ).toBeInTheDocument();
 });
 ```
 

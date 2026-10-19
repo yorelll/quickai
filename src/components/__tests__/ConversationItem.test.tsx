@@ -75,7 +75,7 @@ describe('ConversationItem', () => {
       name: /how does react work/i,
     });
     expect(button).toHaveAttribute('aria-current', 'true');
-    expect(button.className).toContain('bg-primary/10');
+    expect(button.className).toContain('bg-state-selected');
     expect(button.className).toContain('border-primary');
   });
 
@@ -85,7 +85,7 @@ describe('ConversationItem', () => {
       name: /how does react work/i,
     });
     expect(button).not.toHaveAttribute('aria-current');
-    expect(button.className).not.toContain('bg-primary/10');
+    expect(button.className).not.toContain('bg-state-selected');
   });
 
   describe('context menu', () => {

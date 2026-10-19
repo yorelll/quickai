@@ -63,4 +63,19 @@ describe('PermissionsStep', () => {
     fireEvent.mouseLeave(button);
     expect(button.style.filter).toBe('none');
   });
+
+  it('paints the panel from theme tokens, not fixed colours (item 19)', () => {
+    const { container } = render(<PermissionsStep />);
+    const panel = container.querySelector(
+      'div[style*="radial-gradient"]',
+    ) as HTMLElement;
+    expect(panel).not.toBeNull();
+    // Read the raw attribute: jsdom's CSS parser drops gradients from
+    // `style.background`, so asserting on the serialized style is reliable.
+    const style = panel.getAttribute('style')!;
+    expect(style).toContain('var(--color-primary)');
+    expect(style).toContain('var(--color-surface-elevated)');
+    expect(style).not.toMatch(/#[0-9a-f]{6}/i);
+    expect(style).not.toContain('rgba(');
+  });
 });

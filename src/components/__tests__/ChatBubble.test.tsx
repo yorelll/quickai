@@ -206,7 +206,7 @@ describe('ChatBubble', () => {
         screen.getByRole('list', { name: /attached images/i }),
       ).toBeInTheDocument();
       // The content span should not be rendered when content is empty
-      expect(container.querySelector('.text-white\\/95')).toBeNull();
+      expect(container.querySelector('.text-bubble-user-text')).toBeNull();
       // CopyButton should also be hidden — nothing to copy
       expect(screen.queryByRole('button', { name: /copy/i })).toBeNull();
     });
@@ -221,7 +221,7 @@ describe('ChatBubble', () => {
           index={0}
         />,
       );
-      const contentSpan = container.querySelector('.text-white\\/95');
+      const contentSpan = container.querySelector('.text-bubble-user-text');
       expect(contentSpan).not.toBeNull();
       expect(contentSpan?.classList.contains('whitespace-pre-wrap')).toBe(true);
     });
@@ -234,7 +234,7 @@ describe('ChatBubble', () => {
           index={0}
         />,
       );
-      const contentSpan = container.querySelector('.text-white\\/95');
+      const contentSpan = container.querySelector('.text-bubble-user-text');
       expect(contentSpan?.classList.contains('whitespace-pre-wrap')).toBe(true);
     });
   });
@@ -245,7 +245,7 @@ describe('ChatBubble', () => {
         <ChatBubble role="user" content="/screen explain this" index={0} />,
       );
       const styled = container.querySelector(
-        '.font-semibold.text-\\[\\#7C2D12\\]',
+        '.font-semibold.text-bubble-user-accent',
       );
       expect(styled).not.toBeNull();
       expect(styled!.textContent).toBe('/screen');
@@ -260,7 +260,7 @@ describe('ChatBubble', () => {
         />,
       );
       const styled = container.querySelector(
-        '.font-semibold.text-\\[\\#7C2D12\\]',
+        '.font-semibold.text-bubble-user-accent',
       );
       expect(styled).not.toBeNull();
       expect(styled!.textContent).toBe('/think');
@@ -275,7 +275,7 @@ describe('ChatBubble', () => {
         />,
       );
       const styled = container.querySelectorAll(
-        '.font-semibold.text-\\[\\#7C2D12\\]',
+        '.font-semibold.text-bubble-user-accent',
       );
       expect(styled).toHaveLength(2);
       expect(styled[0].textContent).toBe('/screen');
@@ -287,7 +287,7 @@ describe('ChatBubble', () => {
         <ChatBubble role="user" content="please /think about this" index={0} />,
       );
       const styled = container.querySelector(
-        '.font-semibold.text-\\[\\#7C2D12\\]',
+        '.font-semibold.text-bubble-user-accent',
       );
       expect(styled).not.toBeNull();
       expect(styled!.textContent).toBe('/think');
@@ -298,7 +298,7 @@ describe('ChatBubble', () => {
         <ChatBubble role="user" content="/screensaver is nice" index={0} />,
       );
       const styled = container.querySelector(
-        '.font-semibold.text-\\[\\#7C2D12\\]',
+        '.font-semibold.text-bubble-user-accent',
       );
       expect(styled).toBeNull();
     });
@@ -315,7 +315,7 @@ describe('ChatBubble', () => {
         <ChatBubble role="user" content="do /think" index={0} />,
       );
       const styled = container.querySelector(
-        '.font-semibold.text-\\[\\#7C2D12\\]',
+        '.font-semibold.text-bubble-user-accent',
       );
       expect(styled).not.toBeNull();
       expect(styled!.textContent).toBe('/think');

@@ -41,7 +41,9 @@ describe('AskBarView', () => {
         inputRef={makeRef()}
       />,
     );
-    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    const textarea = screen.getByPlaceholderText(
+      'Ask a question, or type / to see commands',
+    );
     expect(textarea).not.toBeNull();
   });
 
@@ -76,7 +78,9 @@ describe('AskBarView', () => {
         inputRef={makeRef()}
       />,
     );
-    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    const textarea = screen.getByPlaceholderText(
+      'Ask a question, or type / to see commands',
+    );
     fireEvent.change(textarea, { target: { value: 'hello' } });
     expect(setQuery).toHaveBeenCalledWith('hello');
   });
@@ -94,7 +98,9 @@ describe('AskBarView', () => {
         inputRef={makeRef()}
       />,
     );
-    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    const textarea = screen.getByPlaceholderText(
+      'Ask a question, or type / to see commands',
+    );
     expect((textarea as HTMLTextAreaElement).disabled).toBe(true);
   });
 
@@ -112,7 +118,9 @@ describe('AskBarView', () => {
         inputRef={makeRef()}
       />,
     );
-    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    const textarea = screen.getByPlaceholderText(
+      'Ask a question, or type / to see commands',
+    );
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
@@ -131,7 +139,9 @@ describe('AskBarView', () => {
         inputRef={makeRef()}
       />,
     );
-    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    const textarea = screen.getByPlaceholderText(
+      'Ask a question, or type / to see commands',
+    );
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true });
     expect(onSubmit).not.toHaveBeenCalled();
   });
@@ -511,7 +521,7 @@ describe('AskBarView', () => {
       );
       const wrapper = container.firstElementChild!;
       expect(wrapper.classList.contains('ring-2')).toBe(true);
-      expect(wrapper.classList.contains('ring-red-500/60')).toBe(false);
+      expect(wrapper.classList.contains('ring-status-error/60')).toBe(false);
     });
 
     it('does not apply ring when isDragOver is undefined', () => {
@@ -547,7 +557,7 @@ describe('AskBarView', () => {
       );
       const wrapper = container.firstElementChild!;
       expect(wrapper.classList.contains('ring-2')).toBe(true);
-      expect(wrapper.classList.contains('ring-red-500/60')).toBe(true);
+      expect(wrapper.classList.contains('ring-status-error/60')).toBe(true);
     });
 
     it('shows "Max 3 images" label when isDragOver is "max"', () => {
@@ -612,7 +622,9 @@ describe('AskBarView', () => {
             inputRef={makeRef()}
           />,
         );
-        const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+        const textarea = screen.getByPlaceholderText(
+          'Ask a question, or type / to see commands',
+        );
         const file = new File(['x'], 'img.png', { type: 'image/png' });
         fireEvent.paste(textarea, {
           clipboardData: {
@@ -642,7 +654,9 @@ describe('AskBarView', () => {
             inputRef={makeRef()}
           />,
         );
-        const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+        const textarea = screen.getByPlaceholderText(
+          'Ask a question, or type / to see commands',
+        );
         const file = new File(['x'], 'img.png', { type: 'image/png' });
         fireEvent.paste(textarea, {
           clipboardData: {
@@ -676,7 +690,9 @@ describe('AskBarView', () => {
             inputRef={makeRef()}
           />,
         );
-        const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+        const textarea = screen.getByPlaceholderText(
+          'Ask a question, or type / to see commands',
+        );
         fireEvent.paste(textarea, {
           clipboardData: {
             items: [{ type: 'text/plain', getAsFile: () => null }],
@@ -701,7 +717,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const file = new File(['fake-img'], 'test.png', { type: 'image/png' });
       const clipboardData = {
         items: [{ type: 'image/png', getAsFile: () => file }],
@@ -728,7 +746,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const clipboardData = {
         items: [{ type: 'text/plain', getAsFile: () => null }],
       };
@@ -751,7 +771,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.paste(textarea, { clipboardData: { items: null } });
       expect(onImagesAttached).not.toHaveBeenCalled();
     });
@@ -771,7 +793,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const file = new File(['x'], 'img.png', { type: 'image/png' });
       const clipboardData = {
         items: [{ type: 'image/png', getAsFile: () => file }],
@@ -795,7 +819,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const clipboardData = {
         items: [{ type: 'image/png', getAsFile: () => null }],
       };
@@ -823,7 +849,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const file = new File(['x'], 'img.png', { type: 'image/png' });
       const clipboardData = {
         items: [{ type: 'image/png', getAsFile: () => file }],
@@ -1113,7 +1141,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       expect((textarea as HTMLTextAreaElement).disabled).toBe(true);
     });
 
@@ -1133,7 +1163,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const file = new File(['x'], 'img.png', { type: 'image/png' });
       const clipboardData = {
         items: [{ type: 'image/png', getAsFile: () => file }],
@@ -1211,7 +1243,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.keyDown(textarea, { key: 'Tab' });
       expect(setQuery).toHaveBeenCalledWith('/screen ');
     });
@@ -1231,7 +1265,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
       expect(setQuery).toHaveBeenCalledWith('/screen ');
       expect(onSubmit).not.toHaveBeenCalled();
@@ -1252,7 +1288,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
       expect(onSubmit).toHaveBeenCalledOnce();
       expect(setQuery).not.toHaveBeenCalled();
@@ -1272,7 +1310,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.keyDown(textarea, { key: 'Escape' });
       // setQuery is NOT called (query is unchanged)
       expect(setQuery).not.toHaveBeenCalled();
@@ -1295,7 +1335,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       // Initially row 0 is highlighted (only one command, so index stays 0)
       fireEvent.keyDown(textarea, { key: 'ArrowDown' });
       // ArrowDown from index 0 moves to index 1
@@ -1316,7 +1358,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.keyDown(textarea, { key: 'ArrowUp' });
       // ArrowUp wraps to the last option
       const options = screen.getAllByRole('option');
@@ -1358,7 +1402,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.keyDown(textarea, { key: 'Tab' });
       expect(setQuery).not.toHaveBeenCalled();
       expect(onSubmit).not.toHaveBeenCalled();
@@ -1378,7 +1424,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.keyDown(textarea, { key: 'Escape' });
       expect(setQuery).not.toHaveBeenCalled();
     });
@@ -1402,7 +1450,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
       expect(onSubmit).toHaveBeenCalledOnce();
     });
@@ -1420,7 +1470,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       // Should not throw
       fireEvent.keyDown(textarea, { key: 'ArrowDown' });
       fireEvent.keyDown(textarea, { key: 'ArrowUp' });
@@ -1442,7 +1494,9 @@ describe('AskBarView', () => {
           inputRef={makeRef()}
         />,
       );
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.keyDown(textarea, { key: 'Tab' });
       expect(setQuery).not.toHaveBeenCalled();
     });
@@ -1753,7 +1807,9 @@ describe('AskBarView', () => {
 
     it('ArrowDown moves the highlight to the next row', () => {
       renderWithQuery('/add');
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.keyDown(textarea, { key: 'ArrowDown' });
       const options = screen.getAllByRole('option');
       expect(options[2]).toHaveAttribute('aria-selected', 'true');
@@ -1761,7 +1817,9 @@ describe('AskBarView', () => {
 
     it('ArrowUp walks onto enabled rows and wraps around', () => {
       renderWithQuery('/add');
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       // Up from the first addable row lands on the enabled built-in.
       fireEvent.keyDown(textarea, { key: 'ArrowUp' });
       let options = screen.getAllByRole('option');
@@ -1776,7 +1834,9 @@ describe('AskBarView', () => {
 
     it('ArrowDown and ArrowUp do nothing when no skills are configured', () => {
       renderWithQuery('/add', { skills: [] });
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.keyDown(textarea, { key: 'ArrowDown' });
       fireEvent.keyDown(textarea, { key: 'ArrowUp' });
       expect(screen.getByText('No skills configured')).toBeInTheDocument();
@@ -1786,7 +1846,9 @@ describe('AskBarView', () => {
       const onSkillAdd = vi.fn();
       const { setQuery } = renderWithQuery('/add', { onSkillAdd });
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.keyDown(textarea, { key: 'Enter' });
 
       expect(onSkillAdd).toHaveBeenCalledWith('translate');
@@ -1797,7 +1859,9 @@ describe('AskBarView', () => {
       const onSkillAdd = vi.fn();
       const { setQuery } = renderWithQuery('/add', { onSkillAdd });
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       // Up onto the enabled built-in row.
       fireEvent.keyDown(textarea, { key: 'ArrowUp' });
       fireEvent.keyDown(textarea, { key: 'Enter' });
@@ -1826,7 +1890,9 @@ describe('AskBarView', () => {
         ],
       });
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       // Nothing is addable, so the picker opens with no selection; the first
       // ArrowDown lands on the first enabled row.
       fireEvent.keyDown(textarea, { key: 'ArrowDown' });
@@ -1852,7 +1918,9 @@ describe('AskBarView', () => {
       const onSkillAdd = vi.fn();
       const { setQuery } = renderWithQuery('hello /add', { onSkillAdd });
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.keyDown(textarea, { key: 'Enter' });
 
       expect(onSkillAdd).toHaveBeenCalledWith('translate');
@@ -1863,7 +1931,9 @@ describe('AskBarView', () => {
       const onSkillAdd = vi.fn();
       const { setQuery } = renderWithQuery('/add', { onSkillAdd });
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
 
       expect(onSkillAdd).toHaveBeenCalledWith('translate');
@@ -1877,7 +1947,9 @@ describe('AskBarView', () => {
       const onSkillAdd = vi.fn();
       const { setQuery } = renderWithQuery('/add', { onSkillAdd });
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
 
       expect(onSkillAdd).toHaveBeenCalledWith('translate');
@@ -1888,7 +1960,9 @@ describe('AskBarView', () => {
       const onSkillAdd = vi.fn();
       renderWithQuery('/add', { skills: [], onSkillAdd });
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.keyDown(textarea, { key: 'Enter' });
 
       expect(onSkillAdd).not.toHaveBeenCalled();
@@ -1907,7 +1981,9 @@ describe('AskBarView', () => {
     it('Escape dismisses the picker without changing the query', () => {
       const { setQuery } = renderWithQuery('/add');
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.keyDown(textarea, { key: 'Escape' });
 
       expect(setQuery).not.toHaveBeenCalled();
@@ -1920,7 +1996,9 @@ describe('AskBarView', () => {
       const onSkillAdd = vi.fn();
       const { setQuery } = renderWithQuery('/add', { onSkillAdd });
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.keyDown(textarea, { key: 'a' });
 
       expect(onSkillAdd).not.toHaveBeenCalled();
@@ -1980,6 +2058,50 @@ describe('AskBarView', () => {
         screen.getByRole('button', { name: 'Remove skill translate' }),
       );
       expect(onSkillRemove).toHaveBeenCalledWith('translate');
+    });
+  });
+
+  describe('input surface (item 18)', () => {
+    it('wraps the textarea in the themed input shell', () => {
+      const { container } = render(
+        <AskBarView
+          {...IMAGE_DEFAULTS}
+          query=""
+          setQuery={vi.fn()}
+          isChatMode={false}
+          isGenerating={false}
+          onSubmit={vi.fn()}
+          onCancel={vi.fn()}
+          inputRef={makeRef()}
+        />,
+      );
+      const shell = container.querySelector('.ask-input-shell');
+      expect(shell).not.toBeNull();
+      expect(shell!.querySelector('textarea')).not.toBeNull();
+      // The mirror must sit inside the same shell so the highlight overlay
+      // stays aligned with the textarea's padding.
+      expect(shell!.querySelector('[aria-hidden="true"]')).not.toBeNull();
+    });
+
+    it('uses the placeholder token for the input placeholder', () => {
+      const { container } = render(
+        <AskBarView
+          {...IMAGE_DEFAULTS}
+          query=""
+          setQuery={vi.fn()}
+          isChatMode={false}
+          isGenerating={false}
+          onSubmit={vi.fn()}
+          onCancel={vi.fn()}
+          inputRef={makeRef()}
+        />,
+      );
+      const textarea = container.querySelector('textarea')!;
+      expect(
+        textarea.classList.contains('placeholder:text-text-placeholder'),
+      ).toBe(true);
+      // A visible caret on summon, independent of the transparent text.
+      expect(textarea.style.caretColor).toBe('var(--color-text-primary)');
     });
   });
 });

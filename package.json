@@ -1,6 +1,6 @@
 {
   "name": "quickai",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "A bilingual AI assistant overlay for Windows, powered by OpenAI, Anthropic, and OpenAI-compatible cloud models",
   "license": "Apache-2.0",
   "repository": {
@@ -33,11 +33,13 @@
     "validate-build": "bun run lint && bun run format:check && bun run typecheck && bun run build:all"
   },
   "dependencies": {
+    "@streamdown/code": "^2.0.0",
     "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-notification": "^2.7.0",
     "framer-motion": "^12.38.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "shiki": "^4.5.0",
     "streamdown": "^2.5.0"
   },
   "overrides": {

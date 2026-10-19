@@ -17,11 +17,60 @@
   --color-surface-base: #202020;
   --color-surface-elevated: #2c2c2c;
   --color-surface-border: rgba(255, 255, 255, 0.08);
+  /* The ask-bar input's own surface: a step above the float so the field
+   * reads as an input rather than as empty toolbar background. */
+  --color-surface-input: #2a2a2c;
+  /* Reasoning ("thinking") box — its own surface so it is distinguishable
+   * from the answer by surface, not by opacity. */
+  --color-surface-thinking: #26232e;
+  --color-border-thinking: rgba(178, 158, 222, 0.24);
 
   /* Text tokens. Secondary clears 4.5:1 on both the base and the elevated
    * surface, so muted copy stays AA on cards as well as on the window. */
   --color-text-primary: #f0f0f2;
   --color-text-secondary: #9a9a9e;
+  --color-text-placeholder: #949499;
+  --color-text-disabled: #616166;
+  --color-text-thinking: #c9c2d4;
+
+  /* Interaction states — hover tint, selected/active tint, focus accent. */
+  --color-state-hover: rgba(255, 255, 255, 0.07);
+  --color-state-selected: rgba(255, 141, 92, 0.16);
+  --color-state-focus: #ff8d5c;
+
+  /* Status hues (success / warning / error) */
+  --color-status-success: #4ade80;
+  --color-status-warning: #e69c05;
+  --color-status-error: #ff8a80;
+
+  /* Foreground for text/icons sitting on `--color-primary`. Measured:
+   * #1c1c1c on #ff8d5c is 7.36:1 (AA). */
+  --color-on-primary: #1c1c1c;
+
+  /* User message bubble. Measured: #ffffff on #c2551f is 4.55:1 (AA), and
+   * 5.25:1 against the gradient's darker end. */
+  --color-bubble-user-bg: #c2551f;
+  --color-bubble-user-text: #ffffff;
+  --color-bubble-user-accent: #ffe08a;
+
+  /* Code block — an independent, complete surface. These must never fall
+   * back to the body text colour (item 19): the block is rendered on its own
+   * background and every layer is token-driven. */
+  --color-code-bg: #12121a;
+  --color-code-text: #e6e6e9;
+  --color-code-border: rgba(255, 141, 92, 0.18);
+  --color-code-header: #d98a5e;
+  --color-code-copy: #9a9aa5;
+  --color-code-scrollbar: rgba(255, 255, 255, 0.18);
+  --color-code-line-number: #8b8b96;
+
+  /* Structural borders */
+  --color-divider: rgba(255, 255, 255, 0.1);
+  --color-border-strong: rgba(255, 255, 255, 0.24);
+
+  /* Toggle/switch knob. Sits on the brand-primary track, which stays a
+   * saturated orange in both themes, so the knob is light in both. */
+  --color-control-knob: #ffffff;
 
   /* Streamdown theme tokens (shadcn/ui convention) */
   --color-muted: #2c2c2c;
@@ -42,9 +91,11 @@
 
 /* Dark is the base palette; `data-theme="light"` swaps the token values.
  * Every token is redefined here so token-backed utilities follow the theme
- * with no per-component work. `color-scheme` also themes native widgets
- * (scrollbars, select menus) and drives the `light-dark()` accents used for
- * the few non-palette hues (error/destructive red). */
+ * with no per-component work — including elements that are already mounted
+ * (an open conversation, a help dialog, the skill picker, the mini bar, the
+ * agent-confirmation panel), because they are painted from custom properties
+ * that the attribute change re-resolves in place. `color-scheme` also themes
+ * native widgets (scrollbars, select menus). */
 :root {
   color-scheme: dark;
 }
@@ -60,9 +111,49 @@
   --color-surface-base: #f6f4f1;
   --color-surface-elevated: #ffffff;
   --color-surface-border: rgba(0, 0, 0, 0.14);
+  --color-surface-input: #ffffff;
+  --color-surface-thinking: #f0ecf6;
+  --color-border-thinking: rgba(90, 70, 140, 0.24);
 
   --color-text-primary: #1f1c1a;
   --color-text-secondary: #5c5855;
+  --color-text-placeholder: #6e6963;
+  --color-text-disabled: #9a948d;
+  --color-text-thinking: #4a4453;
+
+  --color-state-hover: rgba(0, 0, 0, 0.06);
+  --color-state-selected: rgba(176, 73, 26, 0.12);
+  --color-state-focus: #b0491a;
+
+  --color-status-success: #1a7f37;
+  --color-status-warning: #8a5f00;
+  --color-status-error: #b3261e;
+  /* Measured: #ffffff on #b0491a is 5.51:1 (AA). */
+  --color-on-primary: #ffffff;
+
+  /* White on the old #ff8d5c → #e06b30 gradient measured 2.28:1 → 3.33:1,
+   * well under AA. The light palette therefore uses the light-orange +
+   * dark-text direction: #4a1f07 on #ffdcc7 measures 10.95:1 (9.17:1 against
+   * the gradient's darker end). */
+  --color-bubble-user-bg: #ffdcc7;
+  --color-bubble-user-text: #4a1f07;
+  --color-bubble-user-accent: #c2410c;
+
+  /* White, not a warm off-white: the light syntax palette's comment colour
+   * (`#66707B`) measures 4.48:1 on the previous `#f4f1ee` and 5.04:1 here.
+   * It also separates the block from the `#f6f4f1` window slightly more than
+   * the old value did. */
+  --color-code-bg: #ffffff;
+  --color-code-text: #1f1c1a;
+  --color-code-border: rgba(176, 73, 26, 0.22);
+  --color-code-header: #a05a2c;
+  --color-code-copy: #6b655e;
+  --color-code-scrollbar: rgba(0, 0, 0, 0.22);
+  --color-code-line-number: #6b655e;
+
+  --color-divider: rgba(0, 0, 0, 0.12);
+  --color-border-strong: rgba(0, 0, 0, 0.28);
+  --color-control-knob: #ffffff;
 
   --color-muted: #eceae6;
   --color-muted-foreground: #5c5855;
@@ -94,11 +185,17 @@ body {
 }
 
 /**
- * User bubble — warm gradient from primary brand color to a deeper amber.
- * Subtle inner glow at the top for depth perception.
+ * User bubble — warm gradient from the bubble token to a slightly deeper
+ * shade of itself. Token-driven so the bubble follows the theme; both
+ * endpoints are measured for AA against `--color-bubble-user-text`.
  */
 .chat-bubble-user {
-  background: linear-gradient(135deg, #ff8d5c 0%, #e06b30 100%);
+  background: linear-gradient(
+    135deg,
+    var(--color-bubble-user-bg) 0%,
+    color-mix(in srgb, var(--color-bubble-user-bg) 92%, #000) 100%
+  );
+  color: var(--color-bubble-user-text);
   box-shadow: none;
 }
 
@@ -122,7 +219,7 @@ body {
 }
 .stop-btn-ring > .stop-ring-svg rect {
   fill: none;
-  stroke: #f87171;
+  stroke: var(--color-status-error);
   stroke-width: 1.5;
   stroke-linecap: round;
 }
@@ -198,15 +295,22 @@ body {
  * context (position: relative) and targeting the sticky wrapper with `:has()`
  * to make it absolutely-positioned flush with the header row instead.
  *
+ * The block is a fully independent surface: background, body text, line
+ * numbers, header, copy button, selection and scrollbar all come from the
+ * `--color-code-*` tokens and never inherit the body text colour. Streamdown
+ * emits token colours as `var(--sdm-c, inherit)`; with no code-highlighter
+ * plugin registered that variable is unset, so `inherit` resolves to the
+ * `color` set on the body wrapper below rather than to the window's text.
+ *
  * Plain CSS outside @layer overrides Tailwind utility classes in @layer utilities.
  */
 [data-streamdown='code-block'] {
   position: relative;
-  background: #12121a;
-  border-color: rgba(255, 141, 92, 0.15);
+  background: var(--color-code-bg);
+  border-color: var(--color-code-border);
   box-shadow:
-    0 0 0 1px rgba(255, 141, 92, 0.04),
-    0 4px 16px -4px rgba(0, 0, 0, 0.5);
+    0 0 0 1px color-mix(in srgb, var(--color-code-border) 30%, transparent),
+    0 4px 16px -4px light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.5));
 }
 
 /* Sticky wrapper Streamdown injects around code-block-actions.
@@ -222,15 +326,82 @@ body {
   pointer-events: auto;
 }
 
+/* Language label. The inner <span> carries Tailwind's `text-muted-foreground`
+ * utility, so the token has to be set on both the row and the span; the indent
+ * stays on the row only (the span keeps its own `ml-1`). */
 [data-streamdown='code-block-header'] {
-  color: rgba(255, 141, 92, 0.55);
   padding-left: 8px;
+}
+[data-streamdown='code-block-header'],
+[data-streamdown='code-block-header'] span {
+  color: var(--color-code-header);
 }
 
 [data-streamdown='code-block-body'] {
+  /* The block's own text colour. This is what keeps code from inheriting the
+   * body colour when no syntax tokens are present (item 19). */
+  color: var(--color-code-text);
   background: transparent;
   border: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--color-code-border);
+  /* A thin, themed scrollbar. Without this the webview paints a bright native
+   * scrollbar that clashes with the dark container. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-code-scrollbar) transparent;
+}
+[data-streamdown='code-block-body'] pre,
+[data-streamdown='code-block-body'] code {
+  color: inherit;
+  background: transparent;
+}
+/* Horizontal scrollbar (the body scrolls on the x axis). */
+[data-streamdown='code-block-body']::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+[data-streamdown='code-block-body']::-webkit-scrollbar-track {
+  background: transparent;
+}
+[data-streamdown='code-block-body']::-webkit-scrollbar-thumb {
+  background: var(--color-code-scrollbar);
+  border-radius: 4px;
+}
+[data-streamdown='code-block-body']::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Line numbers. Streamdown renders one <span> per line with a CSS-counter
+ * ::before gutter (`before:text-muted-foreground/50`). Plain CSS outside
+ * @layer wins over that utility, so the gutter follows the code theme. */
+[data-streamdown='code-block-body'] code > span::before {
+  color: var(--color-code-line-number);
+}
+
+/* Syntax-token colours.
+ *
+ * With the code plugin wired, every token span carries an inline `--sdm-c`
+ * (the light palette's colour — shiki emits it as plain `color`, which
+ * Streamdown maps onto `--sdm-c`) plus `--shiki-dark`. Streamdown's own
+ * `dark:text-[var(--shiki-dark,…)]` utility keys off a `.dark` class the app
+ * never sets, so the swap is done here against the app's theme attribute
+ * instead. Dark is the base palette, matching the rest of the app, so an
+ * absent attribute (the moment before `applyTheme` runs) reads as dark.
+ *
+ * When the highlighter has not resolved yet, `--shiki-dark` is absent and
+ * `--sdm-c` is `inherit`, so both rules fall through to the body's
+ * `--color-code-text` — the block never renders unstyled text in the wrong
+ * colour. */
+[data-streamdown='code-block-body'] code span span {
+  color: var(--shiki-dark, var(--sdm-c, inherit));
+}
+:root[data-theme='light'] [data-streamdown='code-block-body'] code span span {
+  color: var(--sdm-c, inherit);
+}
+
+/* Selected text inside a code block. */
+[data-streamdown='code-block'] ::selection {
+  background: color-mix(in srgb, var(--color-primary) 32%, transparent);
+  color: var(--color-code-text);
 }
 
 /* ─── Code Block Copy Button ───
@@ -249,13 +420,40 @@ body {
   align-items: center;
 }
 [data-streamdown='code-block-actions'] button {
-  color: rgba(240, 240, 242, 0.3);
+  color: var(--color-code-copy);
   background: transparent;
   transition: color 150ms ease;
 }
 [data-streamdown='code-block-actions'] button:hover {
-  color: rgba(240, 240, 242, 0.65);
+  color: var(--color-code-text);
   background: transparent;
+}
+
+/* ─── Ask-Bar Input Surface (item 18) ───
+ * The float background is nearly uniform, so the input used to be identifiable
+ * only by its placeholder text. Give the field its own surface plus a
+ * focus-within ring; the caret is set inline on the textarea.
+ */
+.ask-input-shell {
+  background: var(--color-surface-input);
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px var(--color-surface-border);
+  transition:
+    box-shadow 150ms ease,
+    background 150ms ease;
+}
+.ask-input-shell:focus-within {
+  box-shadow:
+    inset 0 0 0 1px var(--color-state-focus),
+    0 0 0 3px color-mix(in srgb, var(--color-state-focus) 22%, transparent);
+}
+.ask-input-shell:hover:not(:focus-within) {
+  box-shadow: inset 0 0 0 1px var(--color-border-strong);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ask-input-shell {
+    transition: none;
+  }
 }
 
 /* ─── Windows Title Bar Buttons ───

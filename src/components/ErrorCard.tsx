@@ -67,7 +67,7 @@ export function ErrorCard({ code, message }: ErrorCardProps) {
     ? 'var(--color-text-secondary)'
     : warning
       ? 'var(--color-tertiary)'
-      : 'light-dark(#b3261e, #ff8a80)';
+      : 'var(--color-status-error)';
 
   const title = titleKey ? t(titleKey) : message;
   const subtitle = titleKey && message ? message : null;

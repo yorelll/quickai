@@ -284,14 +284,14 @@ export function HistoryPanel({
             onChange={handleSearchChange}
             placeholder={t('history.search')}
             autoFocus
-            className="w-full bg-transparent text-xs text-text-primary placeholder:text-text-secondary outline-none"
+            className="w-full bg-transparent text-xs text-text-primary placeholder:text-text-placeholder outline-none"
           />
         </div>
       )}
 
       {/* Rename failure — the row has already been rolled back to its old name. */}
       {renameError && (
-        <p className="px-3 py-2 text-xs text-[light-dark(#b3261e,#ff8a80)] text-center border-b border-surface-border">
+        <p className="px-3 py-2 text-xs text-status-error text-center border-b border-surface-border">
           {t('history.renameError')}
         </p>
       )}

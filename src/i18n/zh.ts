@@ -14,7 +14,7 @@ export const zh: Record<keyof typeof en, string> = {
   'time.daysAgo': '{count} 天前',
   'time.weeksAgo': '{count} 周前',
 
-  'ask.placeholderIdle': '向 QuickAI 提问…',
+  'ask.placeholderIdle': '提问，或输入 / 查看命令',
   'ask.placeholderReply': '回复…',
   'ask.send': '发送消息',
   'ask.stop': '停止生成',
@@ -105,6 +105,7 @@ export const zh: Record<keyof typeof en, string> = {
   'agent.action.keyPress': '按下 {combo}',
   'agent.action.scroll': '向{direction}滚动 {amount}',
   'agent.action.launch': '打开 {app}',
+  'agent.action.listDir': '列出文件夹 {path}',
   'agent.action.done': '完成',
   'agent.direction.up': '上',
   'agent.direction.down': '下',
@@ -277,7 +278,7 @@ export const zh: Record<keyof typeof en, string> = {
   'history.deleteConfirmTitle': '删除该对话？',
   'history.deleteAction': '删除',
   'agent.dismiss': '关闭',
-  'agent.keyboardHint': '按 1 允许，按 2 拒绝，Ctrl+C 中止',
+  'agent.keyboardHint': '←/→ 选择，回车确认，1 允许，2 拒绝，Ctrl+C 中止',
 
   // ─── Batch 2: settings General / Agent / About (T5) ─────────────────────
   'settings.tab.general': '通用',
@@ -394,4 +395,23 @@ export const zh: Record<keyof typeof en, string> = {
   'ask.selectedSkills': '已选技能',
   'ask.removeSkill': '移除技能 {alias}',
   'error.skillUnreadable': '所选技能无法读取，已从本条消息中忽略。',
+
+  // ─── Batch 4: settings skills + connection test (T33) ───────────────────
+  'settings.skills.enableHint':
+    '已启用的技能会在每一轮对话中追加到系统提示词；未启用的技能仅在用 /add 指定时使用。',
+  'settings.skills.errorPathEmpty': '请为该技能填写路径。',
+  'settings.skills.errorPathNotAFile': '该路径是文件夹，请选择文件。',
+  'settings.skills.errorUnsupportedFormat':
+    '不支持的文件类型（{extension}），仅支持 .txt 和 .md 文件。',
+  'settings.skills.errorUnsupportedFormatNoExt':
+    '仅支持 .txt 和 .md 技能文件。',
+  'settings.skills.errorStrayQuote': '路径的首尾仍带有引号。',
+  'settings.skills.errorBuiltinNotDeletable': '内置技能无法删除。',
+  'settings.connection.status': '连接状态',
+  'settings.connection.untested': '尚未测试',
+  'settings.connection.testing': '测试中…',
+  'settings.connection.ok': '连接正常',
+  'settings.connection.test': '测试连接',
+  'error.unsupportedCapability':
+    '服务商拒绝了请求：该模型或端点不支持 QuickAI 所需的能力。',
 };

@@ -5,6 +5,15 @@ import { invoke } from '@tauri-apps/api/core';
 import quickaiLogo from '../../../src-tauri/icons/128x128.png';
 import { useTranslation } from '../../i18n';
 
+/**
+ * The translucent "glass" panel shared by both onboarding steps. Every colour
+ * is a theme token (mixed with `transparent` via `color-mix()` where a
+ * translucent layer is needed) so the panel follows the theme switch instead
+ * of being pinned to the dark palette.
+ */
+const PANEL_BG =
+  'radial-gradient(ellipse 80% 55% at 50% 0%, color-mix(in srgb, var(--color-primary) 14%, transparent) 0%, color-mix(in srgb, var(--color-surface-elevated) 97%, transparent) 60%), color-mix(in srgb, var(--color-surface-elevated) 97%, transparent)';
+
 /** Inline keyboard key chip for showing hotkey symbols. */
 const KeyChip = ({ label }: { label: string }) => (
   <span
@@ -13,23 +22,23 @@ const KeyChip = ({ label }: { label: string }) => (
       alignItems: 'center',
       justifyContent: 'center',
       padding: '1px 5px',
-      background: 'rgba(255,255,255,0.08)',
-      border: '1px solid rgba(255,255,255,0.18)',
-      borderBottom: '2px solid rgba(255,255,255,0.12)',
+      background: 'var(--color-state-hover)',
+      border: '1px solid var(--color-surface-border)',
+      borderBottom: '2px solid var(--color-divider)',
       borderRadius: 4,
       fontSize: 11,
       lineHeight: 1.4,
-      color: 'rgba(255,255,255,0.75)',
+      color: 'var(--color-text-primary)',
       verticalAlign: 'middle',
       margin: '0 1px',
-      fontFamily: "system-ui, 'Segoe UI Variable', 'Segoe UI', sans-serif",
+      fontFamily: 'var(--font-sans)',
     }}
   >
     {label}
   </span>
 );
 
-/** Keyboard icon for the activation-hotkey card. */
+/** Keyboard icon for the activation-hotkey card. Inherits the card's brand hue. */
 const KeyboardIcon = () => (
   <svg
     width="18"
@@ -44,12 +53,12 @@ const KeyboardIcon = () => (
       width="14"
       height="10"
       rx="2"
-      stroke="#ff8d5c"
+      stroke="currentColor"
       strokeWidth="1.5"
     />
     <path
       d="M5 8h1M8 8h1M11 8h1M5 11h8"
-      stroke="#ff8d5c"
+      stroke="currentColor"
       strokeWidth="1.5"
       strokeLinecap="round"
     />
@@ -81,8 +90,7 @@ export function PermissionsStep() {
         alignItems: 'center',
         justifyContent: 'center',
         background: 'transparent',
-        fontFamily:
-          "Inter, 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif",
+        fontFamily: 'var(--font-sans)',
       }}
     >
       <motion.div
@@ -91,14 +99,15 @@ export function PermissionsStep() {
         transition={{ type: 'spring', stiffness: 300, damping: 28 }}
         style={{
           width: 420,
-          background:
-            'radial-gradient(ellipse 80% 55% at 50% 0%, rgba(255,141,92,0.14) 0%, rgba(28,24,20,0.97) 60%), rgba(28,24,20,0.97)',
-          border: '1px solid rgba(255, 141, 92, 0.2)',
+          background: PANEL_BG,
+          border:
+            '1px solid color-mix(in srgb, var(--color-primary) 25%, transparent)',
           borderRadius: 24,
           padding: '32px 26px 26px',
           // Drop shadow handled by the OS window manager. CSS provides the
           // warm inner glow only.
-          boxShadow: '0 0 40px rgba(255,100,40,0.07)',
+          boxShadow:
+            '0 0 40px color-mix(in srgb, var(--color-primary) 12%, transparent)',
           position: 'relative',
           overflow: 'hidden',
         }}
@@ -112,7 +121,7 @@ export function PermissionsStep() {
             right: 0,
             height: 1,
             background:
-              'linear-gradient(90deg, transparent, rgba(255,141,92,0.4), transparent)',
+              'linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-primary) 45%, transparent), transparent)',
           }}
         />
 
@@ -142,7 +151,7 @@ export function PermissionsStep() {
             textAlign: 'center',
             fontSize: 22,
             fontWeight: 700,
-            color: '#f0f0f2',
+            color: 'var(--color-text-primary)',
             letterSpacing: '-0.4px',
             lineHeight: 1.2,
             margin: '0 0 10px',
@@ -155,7 +164,7 @@ export function PermissionsStep() {
           style={{
             textAlign: 'center',
             fontSize: 12,
-            color: '#6b6660',
+            color: 'var(--color-text-secondary)',
             lineHeight: 1.5,
             margin: '0 0 20px',
           }}
@@ -174,8 +183,11 @@ export function PermissionsStep() {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              background: 'rgba(255,141,92,0.12)',
-              border: '1px solid rgba(255,141,92,0.25)',
+              color: 'var(--color-primary)',
+              background:
+                'color-mix(in srgb, var(--color-primary) 14%, transparent)',
+              border:
+                '1px solid color-mix(in srgb, var(--color-primary) 28%, transparent)',
             }}
           >
             <KeyboardIcon />
@@ -185,13 +197,19 @@ export function PermissionsStep() {
               style={{
                 fontSize: 14,
                 fontWeight: 600,
-                color: '#f0f0f2',
+                color: 'var(--color-text-primary)',
                 marginBottom: 2,
               }}
             >
               {t('onboarding.permissions.hotkeyTitle')}
             </div>
-            <div style={{ fontSize: 12, color: '#6b6660', lineHeight: 1.5 }}>
+            <div
+              style={{
+                fontSize: 12,
+                color: 'var(--color-text-secondary)',
+                lineHeight: 1.5,
+              }}
+            >
               {t('onboarding.permissions.hotkeyDesc')}
             </div>
           </div>
@@ -215,7 +233,7 @@ export function PermissionsStep() {
           style={{
             textAlign: 'center',
             fontSize: 11,
-            color: 'rgba(107,102,96,0.8)',
+            color: 'var(--color-text-disabled)',
             lineHeight: 1.4,
             margin: 0,
           }}
@@ -256,8 +274,9 @@ function CTAButton({
         gap: 8,
         width: '100%',
         padding: '13px',
-        background: 'linear-gradient(135deg, #ff8d5c 0%, #d45a1e 100%)',
-        color: 'white',
+        background:
+          'linear-gradient(135deg, var(--color-primary) 0%, color-mix(in srgb, var(--color-primary) 85%, #000) 100%)',
+        color: 'var(--color-on-primary)',
         fontSize: 14,
         fontWeight: 600,
         border: 'none',
@@ -266,7 +285,7 @@ function CTAButton({
         letterSpacing: '-0.1px',
         marginBottom: 10,
         boxShadow:
-          '0 4px 24px rgba(255,100,40,0.35), 0 1px 0 rgba(255,255,255,0.12) inset',
+          '0 4px 24px color-mix(in srgb, var(--color-primary) 35%, transparent), 0 1px 0 color-mix(in srgb, var(--color-control-knob) 12%, transparent) inset',
         filter: hovered ? 'brightness(1.1)' : 'none',
         transition: 'filter 0.15s ease',
       }}
@@ -286,8 +305,9 @@ function StepCard({ children }: { children: React.ReactNode }) {
         gap: 14,
         padding: '14px 16px',
         borderRadius: 16,
-        border: '1px solid rgba(255,141,92,0.25)',
-        background: 'rgba(255,141,92,0.06)',
+        border:
+          '1px solid color-mix(in srgb, var(--color-primary) 28%, transparent)',
+        background: 'color-mix(in srgb, var(--color-primary) 8%, transparent)',
       }}
     >
       {children}

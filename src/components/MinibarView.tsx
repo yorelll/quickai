@@ -8,8 +8,8 @@ interface MinibarViewProps {
   onClick: () => void;
 }
 
-const SUCCESS_DOT = 'bg-[light-dark(#1a7f37,#4ade80)]';
-const ERROR_DOT = 'bg-[light-dark(#b3261e,#ff8a80)]';
+const SUCCESS_DOT = 'bg-status-success';
+const ERROR_DOT = 'bg-status-error';
 
 const statusDotColors: Record<string, string> = {
   idle: SUCCESS_DOT,

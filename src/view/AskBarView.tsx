@@ -661,7 +661,7 @@ export function AskBarView({
   const showMaxLabel = isDragOver === 'max' || (pasteMaxError && !isDragOver);
   const ringClass =
     isDragOver === 'max'
-      ? 'ring-2 ring-red-500/60 ring-inset rounded-lg'
+      ? 'ring-2 ring-status-error/60 ring-inset rounded-lg'
       : isDragOver === 'normal'
         ? 'ring-2 ring-primary/40 ring-inset rounded-lg'
         : '';
@@ -682,7 +682,7 @@ export function AskBarView({
         </div>
       )}
       {showMaxLabel && (
-        <p className="px-4 pt-2 pb-0 text-xs text-[light-dark(#b3261e,#ff8a80)]">
+        <p className="px-4 pt-2 pb-0 text-xs text-status-error">
           {t('ask.maxImages', { count: maxImages })}
         </p>
       )}
@@ -810,13 +810,14 @@ export function AskBarView({
             </Tooltip>
           )}
 
-          <div className="relative flex-1 min-w-0">
+          <div className="ask-input-shell relative flex-1 min-w-0">
             {/* Mirror div: renders the same text with highlighted commands.
-                Sits behind the transparent textarea so colored spans show through. */}
+                Sits behind the transparent textarea so colored spans show through.
+                Padding must match the textarea's exactly or the two drift apart. */}
             <div
               ref={mirrorRef}
               aria-hidden="true"
-              className="absolute inset-0 pointer-events-none bg-transparent text-text-primary text-sm py-2 px-1 leading-relaxed whitespace-pre-wrap break-words overflow-hidden"
+              className="absolute inset-0 pointer-events-none bg-transparent text-text-primary text-sm py-2 px-2.5 leading-relaxed whitespace-pre-wrap break-words overflow-hidden"
             >
               {renderHighlightedText(query)}
             </div>
@@ -835,7 +836,7 @@ export function AskBarView({
                   ? t('ask.placeholderReply')
                   : t('ask.placeholderIdle')
               }
-              className="relative w-full bg-transparent border-none outline-none text-transparent text-sm placeholder:text-text-secondary py-2 px-1 disabled:opacity-50 resize-none leading-relaxed"
+              className="relative w-full bg-transparent border-none outline-none text-transparent text-sm placeholder:text-text-placeholder py-2 px-2.5 disabled:opacity-50 resize-none leading-relaxed"
               style={{ caretColor: 'var(--color-text-primary)' }}
             />
           </div>
@@ -847,7 +848,7 @@ export function AskBarView({
                 onClick={onScreenshot}
                 disabled
                 aria-label={t('ask.screenshot')}
-                className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-text-secondary transition-colors duration-150 disabled:opacity-40 disabled:cursor-default cursor-pointer"
+                className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-text-secondary transition-colors duration-150 disabled:text-text-disabled disabled:cursor-default cursor-pointer"
               >
                 {CAMERA_ICON}
               </button>
@@ -859,7 +860,7 @@ export function AskBarView({
                 onClick={onScreenshot}
                 disabled={isBusy}
                 aria-label={t('ask.screenshot')}
-                className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-elevated transition-colors duration-150 disabled:opacity-40 disabled:cursor-default cursor-pointer"
+                className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-elevated transition-colors duration-150 disabled:text-text-disabled disabled:cursor-default cursor-pointer"
               >
                 {CAMERA_ICON}
               </button>
@@ -874,9 +875,9 @@ export function AskBarView({
             whileTap={canSubmit || isBusy ? { scale: 0.92 } : undefined}
             className={`shrink-0 w-9 h-9 rounded-lg flex items-center justify-center transition-colors duration-200 ${
               isBusy
-                ? 'stop-btn-ring bg-[light-dark(rgba(179,38,30,0.10),rgba(255,138,128,0.10))] text-[light-dark(#b3261e,#ff8a80)] cursor-pointer'
+                ? 'stop-btn-ring bg-status-error/10 text-status-error cursor-pointer'
                 : canSubmit
-                  ? 'bg-primary text-neutral cursor-pointer'
+                  ? 'bg-primary text-on-primary cursor-pointer'
                   : 'bg-surface-elevated text-text-secondary cursor-default'
             }`}
             aria-label={isBusy ? t('ask.stop') : t('ask.send')}

@@ -19,7 +19,7 @@ export const en = {
   'time.weeksAgo': '{count}w ago',
 
   // ─── Ask bar ─────────────────────────────────────────────────────────────
-  'ask.placeholderIdle': 'Ask QuickAI anything...',
+  'ask.placeholderIdle': 'Ask a question, or type / to see commands',
   'ask.placeholderReply': 'Reply...',
   'ask.send': 'Send message',
   'ask.stop': 'Stop generating',
@@ -119,6 +119,7 @@ export const en = {
   'agent.action.keyPress': 'Press {combo}',
   'agent.action.scroll': 'Scroll {direction} by {amount}',
   'agent.action.launch': 'Open {app}',
+  'agent.action.listDir': 'List folder {path}',
   'agent.action.done': 'Finish',
   'agent.direction.up': 'up',
   'agent.direction.down': 'down',
@@ -332,7 +333,8 @@ export const en = {
   'history.deleteConfirmTitle': 'Delete conversation?',
   'history.deleteAction': 'Delete',
   'agent.dismiss': 'Dismiss',
-  'agent.keyboardHint': 'Press 1 to allow, 2 to deny, Ctrl+C to abort',
+  'agent.keyboardHint':
+    '←/→ to select, Enter to confirm, 1 allow, 2 deny, Ctrl+C to abort',
 
   // ─── Batch 2: settings General / Agent / About (T5) ─────────────────────
   'settings.tab.general': 'General',
@@ -454,6 +456,28 @@ export const en = {
   'ask.removeSkill': 'Remove skill {alias}',
   'error.skillUnreadable':
     "A selected skill couldn't be read, so it was left out of this message.",
+
+  // ─── Batch 4: settings skills + connection test (T33) ───────────────────
+  'settings.skills.enableHint':
+    'Enabled skills are added to the system prompt on every turn. Disabled ones are used only when you name them with /add.',
+  'settings.skills.errorPathEmpty': 'Enter a path for this skill.',
+  'settings.skills.errorPathNotAFile':
+    'That path is a folder. Choose a file, not a folder.',
+  'settings.skills.errorUnsupportedFormat':
+    'Unsupported file type ({extension}). Only .txt and .md files are allowed.',
+  'settings.skills.errorUnsupportedFormatNoExt':
+    'Only .txt and .md skill files are allowed.',
+  'settings.skills.errorStrayQuote':
+    'The path still starts or ends with a quote character.',
+  'settings.skills.errorBuiltinNotDeletable':
+    'The built-in skill cannot be deleted.',
+  'settings.connection.status': 'Connection status',
+  'settings.connection.untested': 'Not yet tested',
+  'settings.connection.testing': 'Testing…',
+  'settings.connection.ok': 'Connected',
+  'settings.connection.test': 'Test connection',
+  'error.unsupportedCapability':
+    'The provider rejected the request: this model or endpoint does not support the capability QuickAI needs.',
 } as const;
 
 /** The complete set of translation keys understood by the app. */

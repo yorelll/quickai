@@ -72,8 +72,6 @@ describe('ErrorCard', () => {
       <ErrorCard code="unauthorized" message="Nope" />,
     );
     const bar = container.querySelector('[data-error-bar]') as HTMLElement;
-    expect(bar.style.background).toBe(
-      'light-dark(rgb(179, 38, 30), rgb(255, 138, 128))',
-    );
+    expect(bar.style.background).toBe('var(--color-status-error)');
   });
 });

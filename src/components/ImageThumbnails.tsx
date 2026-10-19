@@ -93,7 +93,7 @@ export function ImageThumbnails({
                 type="button"
                 onClick={() => onRemove(item.id)}
                 aria-label={t('ask.removeImage')}
-                className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center rounded-full bg-neutral border border-surface-border text-text-secondary hover:text-[light-dark(#b3261e,#ff8a80)] hover:border-[light-dark(rgba(179,38,30,0.35),rgba(255,138,128,0.30))] transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center rounded-full bg-neutral border border-surface-border text-text-secondary hover:text-status-error hover:border-status-error/40 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
               >
                 <svg
                   width="8"

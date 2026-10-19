@@ -160,8 +160,14 @@ export function ThinkingBlock({
                   <div className="w-px flex-1 bg-text-secondary/20 min-h-[20px]" />
                 </div>
 
-                {/* Thinking text rendered as markdown (normal text color) */}
-                <div className="flex-1 text-sm select-text min-w-0 opacity-70">
+                {/* Reasoning text on its own surface (token-driven) so the
+                    thinking box is distinguishable from the answer at a
+                    glance — item 1. Uses the semantic thinking tokens T30
+                    defines, never a hardcoded colour. */}
+                <div
+                  data-testid="thinking-surface"
+                  className="flex-1 text-sm select-text min-w-0 rounded-md border border-border-thinking bg-surface-thinking px-3 py-2 text-text-thinking"
+                >
                   <MarkdownRenderer
                     content={displayContent}
                     isStreaming={isThinking}
