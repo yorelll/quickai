@@ -8,9 +8,10 @@
 use std::path::{Path, PathBuf};
 
 use super::{
-    append_enabled_skills, append_skills_by_alias, builtin_skill, ensure_builtin_file, load, save,
-    validate, Skill, SkillError, SkillReadFailure, BUILTIN_ASSISTANT_ALIAS,
-    BUILTIN_ASSISTANT_FILE_NAME, BUILTIN_ASSISTANT_ID, BUILTIN_ASSISTANT_TEXT, SKILLS_FILE_NAME,
+    append_enabled_skills, append_skills_by_alias, builtin_skill, ensure_builtin_file, load,
+    normalize_skill_path, save, validate, Skill, SkillError, SkillReadFailure,
+    BUILTIN_ASSISTANT_ALIAS, BUILTIN_ASSISTANT_FILE_NAME, BUILTIN_ASSISTANT_ID,
+    BUILTIN_ASSISTANT_TEXT, SKILLS_FILE_NAME,
 };
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -101,6 +102,156 @@ fn validate_rejects_duplicate_alias() {
         Err(SkillError::DuplicateAlias { alias }) => assert_eq!(alias, "translate"),
         other => panic!("expected DuplicateAlias, got {other:?}"),
     }
+}
+
+/// A builtin + one custom skill carrying `path`: the smallest list that reaches
+/// `validate`'s per-skill path checks.
+fn list_with_path(path: &str) -> Vec<Skill> {
+    vec![
+        builtin_skill(Path::new("/cfg")),
+        skill("x", "translate", path, false),
+    ]
+}
+
+#[test]
+fn validate_accepts_supported_text_extensions() {
+    let dir = tempdir();
+    for name in ["t.txt", "t.md", "t.markdown"] {
+        let path = dir.join(name).display().to_string();
+        assert!(validate(&list_with_path(&path)).is_ok(), "{name}");
+    }
+}
+
+#[test]
+fn validate_accepts_extensions_case_insensitively() {
+    let dir = tempdir();
+    for name in ["T.MD", "T.Markdown", "T.TXT"] {
+        let path = dir.join(name).display().to_string();
+        assert!(validate(&list_with_path(&path)).is_ok(), "{name}");
+    }
+}
+
+#[test]
+fn validate_accepts_a_normalised_quoted_path() {
+    // Item 9: `save` normalises before validating, so `validate` only ever sees
+    // the unquoted form. The Windows-style string is a single path component on
+    // Linux, where its extension still resolves to `.md`.
+    let windows_style = "\"D:\\Program Files\\QuickAI\\skills\\test.md\"";
+    let normalised = normalize_skill_path(windows_style);
+    assert_eq!(normalised, "D:\\Program Files\\QuickAI\\skills\\test.md");
+    assert!(validate(&list_with_path(&normalised)).is_ok());
+
+    let dir = tempdir();
+    let file = write_file(&dir, "quoted.md", "text");
+    let quoted = format!("\"{}\"", file.display());
+    assert!(validate(&list_with_path(&normalize_skill_path(&quoted))).is_ok());
+}
+
+#[test]
+fn validate_rejects_an_empty_path() {
+    // `validate` receives the normalised path, so the empty string is the only
+    // form it can see; the raw spellings are covered by
+    // `save_rejects_an_empty_path`.
+    match validate(&list_with_path("")) {
+        Err(SkillError::EmptyPath) => {}
+        other => panic!("expected EmptyPath, got {other:?}"),
+    }
+}
+
+#[test]
+fn validate_rejects_a_path_still_wrapped_in_quotes() {
+    // What one strip can leave behind: a doubled pair, an unbalanced leading
+    // quote, and an unbalanced trailing quote. None can be a usable path.
+    for path in ["\"a.md\"", "\"a.md", "a.md\""] {
+        match validate(&list_with_path(path)) {
+            Err(SkillError::StrayQuote) => {}
+            other => panic!("expected StrayQuote for {path:?}, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn validate_rejects_a_directory() {
+    let dir = tempdir();
+    // A directory is refused even when it is named like a text file. The check
+    // is a plain `is_dir` boolean, so it behaves identically on every OS.
+    let folder = dir.join("a-folder.md");
+    std::fs::create_dir(&folder).unwrap();
+    match validate(&list_with_path(&folder.display().to_string())) {
+        Err(SkillError::PathNotAFile) => {}
+        other => panic!("expected PathNotAFile, got {other:?}"),
+    }
+}
+
+#[test]
+fn validate_rejects_unsupported_extensions() {
+    let dir = tempdir();
+    // A PDF, a spreadsheet, a document, and an extensionless file are refused.
+    for name in ["t.pdf", "t.xlsx", "t.docx", "t"] {
+        let path = dir.join(name).display().to_string();
+        match validate(&list_with_path(&path)) {
+            Err(SkillError::UnsupportedFormat { .. }) => {}
+            other => panic!("expected UnsupportedFormat for {name}, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn validate_reports_the_offending_extension() {
+    let dir = tempdir();
+    // The reported extension is lowercased so the frontend can show it.
+    let upper = dir.join("t.PDF").display().to_string();
+    match validate(&list_with_path(&upper)) {
+        Err(SkillError::UnsupportedFormat { extension }) => assert_eq!(extension, "pdf"),
+        other => panic!("expected UnsupportedFormat, got {other:?}"),
+    }
+    // A file with no extension at all reports an empty extension.
+    let bare = dir.join("t").display().to_string();
+    match validate(&list_with_path(&bare)) {
+        Err(SkillError::UnsupportedFormat { extension }) => assert_eq!(extension, ""),
+        other => panic!("expected UnsupportedFormat, got {other:?}"),
+    }
+}
+
+// ─── normalize_skill_path ────────────────────────────────────────────────────
+
+#[test]
+fn normalize_path_trims_and_strips_one_quote_pair() {
+    assert_eq!(normalize_skill_path("  /tmp/t.md  "), "/tmp/t.md");
+    assert_eq!(normalize_skill_path("\"/tmp/t.md\""), "/tmp/t.md");
+    assert_eq!(normalize_skill_path("'/tmp/t.md'"), "/tmp/t.md");
+    assert_eq!(normalize_skill_path("“/tmp/t.md”"), "/tmp/t.md");
+    assert_eq!(normalize_skill_path("‘/tmp/t.md’"), "/tmp/t.md");
+    // A straight-open / curly-close mix, as a paste can produce.
+    assert_eq!(normalize_skill_path("\"/tmp/t.md”"), "/tmp/t.md");
+    // Whitespace inside the quotes is trimmed as well.
+    assert_eq!(normalize_skill_path("\"  /tmp/t.md  \""), "/tmp/t.md");
+}
+
+#[test]
+fn normalize_path_strips_only_one_pair() {
+    // Only the outermost pair goes; an inner pair is part of the value.
+    assert_eq!(normalize_skill_path("\"\"x\"\""), "\"x\"");
+}
+
+#[test]
+fn normalize_path_leaves_an_unquoted_path_alone() {
+    assert_eq!(normalize_skill_path("/tmp/t.md"), "/tmp/t.md");
+    // A quote that is not a surrounding pair is part of the path.
+    assert_eq!(normalize_skill_path("/tmp/a\"b.md"), "/tmp/a\"b.md");
+    assert_eq!(
+        normalize_skill_path("D:\\Program Files\\a b\\t.md"),
+        "D:\\Program Files\\a b\\t.md"
+    );
+}
+
+#[test]
+fn normalize_path_handles_short_and_empty_input() {
+    assert_eq!(normalize_skill_path(""), "");
+    assert_eq!(normalize_skill_path("   "), "");
+    // A lone quote is shorter than a pair, so it is left unchanged.
+    assert_eq!(normalize_skill_path("\""), "\"");
+    assert_eq!(normalize_skill_path("x"), "x");
 }
 
 // ─── builtin_skill ───────────────────────────────────────────────────────────
@@ -275,6 +426,52 @@ fn save_propagates_builtin_file_seed_failure() {
         }
         other => panic!("expected IoError, got {other:?}"),
     }
+}
+
+#[test]
+fn save_persists_the_normalised_path() {
+    let dir = tempdir();
+    let file = write_file(&dir, "s.md", "text");
+    let quoted = format!("\"{}\"", file.display());
+    let list = vec![builtin_skill(&dir), skill("x", "translate", &quoted, false)];
+
+    // The returned list and the store on disk both hold the bare path, not the
+    // quoted paste the frontend submitted.
+    let saved = save(&dir, list).unwrap();
+    assert_eq!(saved[1].path, file.display().to_string());
+
+    let reloaded = load(&dir).unwrap();
+    assert_eq!(reloaded[1].path, file.display().to_string());
+}
+
+#[test]
+fn save_rejects_an_empty_path() {
+    let dir = tempdir();
+    // The raw spellings a user can submit, all of which normalise to empty.
+    for raw in ["", "   ", "\"\"", "  \"\"  "] {
+        let list = vec![builtin_skill(&dir), skill("x", "translate", raw, false)];
+        match save(&dir, list) {
+            Err(SkillError::EmptyPath) => {}
+            other => panic!("expected EmptyPath for {raw:?}, got {other:?}"),
+        }
+    }
+    assert!(!dir.join(SKILLS_FILE_NAME).exists(), "nothing written");
+}
+
+#[test]
+fn save_rejects_a_doubled_quote_pair() {
+    let dir = tempdir();
+    // One strip leaves `"a.md"`, whose extension would be `md"`. It must be
+    // rejected rather than silently stored as a path that is unreadable later.
+    let list = vec![
+        builtin_skill(&dir),
+        skill("x", "translate", "\"\"a.md\"\"", false),
+    ];
+    match save(&dir, list) {
+        Err(SkillError::StrayQuote) => {}
+        other => panic!("expected StrayQuote, got {other:?}"),
+    }
+    assert!(!dir.join(SKILLS_FILE_NAME).exists(), "nothing written");
 }
 
 // ─── ensure_builtin_file ─────────────────────────────────────────────────────
@@ -472,6 +669,15 @@ fn skill_error_display_messages_include_context() {
     }
     .to_string()
     .contains("/tmp/skills.toml"));
+
+    assert!(SkillError::EmptyPath.to_string().contains("empty"));
+    assert!(SkillError::PathNotAFile.to_string().contains("file"));
+    assert!(SkillError::StrayQuote.to_string().contains("quote"));
+    assert!(SkillError::UnsupportedFormat {
+        extension: "pdf".to_string(),
+    }
+    .to_string()
+    .contains("pdf"));
 }
 
 #[test]
@@ -508,4 +714,22 @@ fn skill_error_serializes_with_kind_and_io_detail() {
         .unwrap()["kind"],
         "alias_has_whitespace"
     );
+    assert_eq!(
+        serde_json::to_value(SkillError::EmptyPath).unwrap()["kind"],
+        "empty_path"
+    );
+    assert_eq!(
+        serde_json::to_value(SkillError::PathNotAFile).unwrap()["kind"],
+        "path_not_a_file"
+    );
+    assert_eq!(
+        serde_json::to_value(SkillError::StrayQuote).unwrap()["kind"],
+        "stray_quote"
+    );
+    let unsupported = serde_json::to_value(SkillError::UnsupportedFormat {
+        extension: "pdf".to_string(),
+    })
+    .unwrap();
+    assert_eq!(unsupported["kind"], "unsupported_format");
+    assert_eq!(unsupported["extension"], "pdf");
 }

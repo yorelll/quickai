@@ -15,6 +15,7 @@
 //! - [`get_default_data_dir`] — the resolved OS default app data directory, so
 //!   the General tab can show the real path instead of "default".
 //! - [`pick_folder`] — opens the native folder picker for choosing a data dir.
+//! - [`pick_file`] — opens the native file picker (text formats only) for a skill file.
 //!
 //! ## Security model
 //!
@@ -363,9 +364,44 @@ pub async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
     folder_pick_result(picked)
 }
 
-/// Converts the folder picker's result into the IPC value the frontend expects:
-/// the absolute path string, or `None` when the user cancelled. A picked URL
-/// that cannot be converted to a filesystem path surfaces as an error string.
+/// Opens the native file picker, filtered to the text formats a skill file may
+/// use, and returns the chosen file's absolute path or `null` when the user
+/// cancels.
+///
+/// Mirrors [`pick_folder`]: the dialog is blocking, so it runs on the blocking
+/// thread pool and is parented to the Settings window (falling back to the
+/// overlay) so Windows shows the modal in front of the window that opened it.
+/// The filter is advisory only — the backend re-checks the extension at save
+/// time (`skills::validate`), so a file chosen through another path is still
+/// refused. The conversion is the shared, unit-tested [`folder_pick_result`];
+/// the wrapper itself needs a live window and is coverage-excluded.
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(not(coverage), tauri::command)]
+pub async fn pick_file(app: AppHandle) -> Result<Option<String>, String> {
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let mut builder = app
+            .dialog()
+            .file()
+            .add_filter("Text files", &["txt", "md", "markdown"]);
+        if let Some(window) = app
+            .get_webview_window("settings")
+            .or_else(|| app.get_webview_window("main"))
+        {
+            builder = builder.set_parent(&window);
+        }
+        builder.blocking_pick_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    folder_pick_result(picked)
+}
+
+/// Converts a picker's result into the IPC value the frontend expects: the
+/// absolute path string, or `None` when the user cancelled. A picked URL that
+/// cannot be converted to a filesystem path surfaces as an error string. Shared
+/// by [`pick_folder`] and [`pick_file`] — the conversion does not depend on
+/// which kind of dialog produced the path.
 pub(crate) fn folder_pick_result(
     picked: Option<tauri_plugin_dialog::FilePath>,
 ) -> Result<Option<String>, String> {

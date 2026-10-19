@@ -42,6 +42,12 @@ guidelines in the base system prompt to every reply.
 - Keep replies as short as the question allows.
 - When an obviously useful follow-up exists, mention it in one sentence.";
 
+/// Extensions accepted for a skill file, compared case-insensitively. A skill
+/// file is read as plain text, so only text formats are allowed; a folder, a
+/// PDF, or a spreadsheet is refused at save time rather than failing at use
+/// time.
+const ALLOWED_SKILL_EXTENSIONS: [&str; 3] = ["txt", "md", "markdown"];
+
 /// A single user-defined skill.
 ///
 /// `id` is a stable opaque identifier (the built-in assistant id is fixed);
@@ -82,6 +88,20 @@ pub enum SkillError {
     /// deletable.
     #[error("the built-in assistant skill cannot be deleted")]
     BuiltinNotDeletable,
+    /// A skill path was empty after trimming and unquoting.
+    #[error("skill path must not be empty")]
+    EmptyPath,
+    /// A skill path pointed at a directory rather than a file.
+    #[error("skill path must be a file, not a directory")]
+    PathNotAFile,
+    /// A skill path still carried a surrounding quote after the one pair was
+    /// stripped — a doubled `""a.md""` or an unbalanced `"a.md` — so it cannot
+    /// be a usable path.
+    #[error("skill path must not start or end with a quote character")]
+    StrayQuote,
+    /// A skill file's extension is not one of the supported text formats.
+    #[error("unsupported skill file format: {extension}")]
+    UnsupportedFormat { extension: String },
     /// Filesystem failure reading or writing the skills store.
     #[error("skills file I/O error at {path}: {source}")]
     IoError {
@@ -115,7 +135,16 @@ pub fn builtin_skill(config_dir: &Path) -> Skill {
 
 /// Validates a whole skill list. Every alias must be non-empty, contain no
 /// whitespace, and be unique; the built-in assistant id must be present
-/// (deleting it is rejected).
+/// (deleting it is rejected). Every path must be a non-empty string naming a
+/// file with a supported text extension — a folder, a binary document, or a
+/// value still wrapped in quotes is rejected here, at save time, rather than at
+/// use time.
+///
+/// Paths are expected to be **already normalised** (see [`normalize_skill_path`]).
+/// [`save`] is the single normalisation boundary: it trims and strips the
+/// surrounding quotes before calling this, so the validated value is exactly the
+/// value persisted. Do not normalise a second time here — see
+/// [`validate_skill_path`].
 pub fn validate(skills: &[Skill]) -> Result<(), SkillError> {
     if !skills.iter().any(|s| s.id == BUILTIN_ASSISTANT_ID) {
         return Err(SkillError::BuiltinNotDeletable);
@@ -137,8 +166,96 @@ pub fn validate(skills: &[Skill]) -> Result<(), SkillError> {
             });
         }
         seen.push(alias);
+        validate_skill_path(&skill.path)?;
     }
     Ok(())
+}
+
+/// Checks one **already-normalised** skill path's shape: non-empty, not still
+/// wrapped in a quote character, not a directory, and carrying a supported text
+/// extension.
+///
+/// `path` must come from [`normalize_skill_path`]; [`save`] is the single
+/// normalisation boundary and calls this only after normalising, so the value
+/// checked here is exactly the value persisted. Do **not** normalise again
+/// inside here — a second strip would validate a different string from the one
+/// written to disk (a doubled `""a.md""` would validate as `a.md` yet persist
+/// as `"a.md"`). The file need not exist — a user may add a skill before
+/// creating its file — so only the shape is checked; readability remains the
+/// backstop at use time ([`read_skill`]).
+fn validate_skill_path(path: &str) -> Result<(), SkillError> {
+    if path.is_empty() {
+        return Err(SkillError::EmptyPath);
+    }
+    if has_surrounding_quote(path) {
+        return Err(SkillError::StrayQuote);
+    }
+    if Path::new(path).is_dir() {
+        return Err(SkillError::PathNotAFile);
+    }
+    match skill_extension(path) {
+        Some(extension) if ALLOWED_SKILL_EXTENSIONS.contains(&extension.as_str()) => Ok(()),
+        Some(extension) => Err(SkillError::UnsupportedFormat { extension }),
+        None => Err(SkillError::UnsupportedFormat {
+            extension: String::new(),
+        }),
+    }
+}
+
+/// Whether `s` begins or ends with a quote character. After [`save`] has
+/// stripped one surrounding pair, a remaining leading or trailing quote means
+/// the input was never a plain path — a doubled pair (`""a.md""`) or an
+/// unbalanced one (`"a.md`) — and cannot be used on any platform we ship.
+fn has_surrounding_quote(s: &str) -> bool {
+    s.chars().next().is_some_and(is_quote) || s.chars().next_back().is_some_and(is_quote)
+}
+
+/// Whether `c` is any quote character [`strip_one_quote_pair`] recognises.
+fn is_quote(c: char) -> bool {
+    matches!(c, '"' | '\'' | '“' | '‘' | '”' | '’')
+}
+
+/// The lowercased extension of `path`, or `None` when it has none.
+fn skill_extension(path: &str) -> Option<String> {
+    Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+}
+
+/// Normalises a user-supplied skill path for storage and validation: trims
+/// surrounding whitespace and strips one pair of surrounding quotes.
+///
+/// Users paste a path straight from Explorer — `"D:\Program Files\…\test.md"`
+/// — or from a document editor, which wraps it in curly quotes (`“…”`). The
+/// stored value must be the bare path, so the quotes are removed here, in the
+/// backend, and it is the normalised value that gets persisted (see [`save`]).
+fn normalize_skill_path(raw: &str) -> String {
+    strip_one_quote_pair(raw.trim()).trim().to_string()
+}
+
+/// Strips a single matching pair of surrounding quotes, if present. Accepts the
+/// straight `"`/`'` and curly `“”`/`‘’` pairs, including a straight-open /
+/// curly-close mix that pasting can produce. A string shorter than two
+/// characters is returned unchanged.
+fn strip_one_quote_pair(s: &str) -> &str {
+    let mut chars = s.chars();
+    let (Some(first), Some(last)) = (chars.next(), chars.next_back()) else {
+        return s;
+    };
+    if is_opening_quote(first) && is_closing_quote(last) {
+        &s[first.len_utf8()..s.len() - last.len_utf8()]
+    } else {
+        s
+    }
+}
+
+fn is_opening_quote(c: char) -> bool {
+    matches!(c, '"' | '\'' | '“' | '‘')
+}
+
+fn is_closing_quote(c: char) -> bool {
+    matches!(c, '"' | '\'' | '”' | '’')
 }
 
 /// Loads the skill list from `config_dir/skills.toml`, seeding the built-in
@@ -177,12 +294,21 @@ pub fn load(config_dir: &Path) -> Result<Vec<Skill>, SkillError> {
 /// Validates and persists a whole skill list, returning the persisted list.
 ///
 /// The frontend owns add/delete/edit/reorder and submits the complete list;
-/// this rejects invalid aliases and any attempt to drop the built-in skill.
+/// this rejects invalid aliases, a non-text or directory path, and any attempt
+/// to drop the built-in skill. Paths are normalised (trimmed, unquoted) before
+/// validation so the value written to disk is the clean one, not the raw paste.
 pub fn save(config_dir: &Path, skills: Vec<Skill>) -> Result<Vec<Skill>, SkillError> {
+    let skills: Vec<Skill> = skills.into_iter().map(normalize_skill).collect();
     validate(&skills)?;
     ensure_builtin_file(config_dir)?;
     write_skills_file(&config_dir.join(SKILLS_FILE_NAME), &skills)?;
     Ok(skills)
+}
+
+/// Returns `skill` with its `path` normalised for storage.
+fn normalize_skill(mut skill: Skill) -> Skill {
+    skill.path = normalize_skill_path(&skill.path);
+    skill
 }
 
 /// Writes the built-in assistant skill file if it does not already exist.
