@@ -416,6 +416,11 @@ mod tests {
     }
 
     #[test]
+    fn code_of_reports_none_for_success() {
+        assert_eq!(code_of(&TestOutcome::Success), None);
+    }
+
+    #[test]
     fn failure_preserves_every_configuration_code() {
         for err in [
             ApiError::missing_api_key("api_key_openai"),
@@ -423,22 +428,17 @@ mod tests {
             ApiError::new(CODE_UNKNOWN, "unclassified"),
         ] {
             let expected = err.code.clone();
-            match failure(err) {
-                TestOutcome::Failure { code, .. } => assert_eq!(code, expected),
-                TestOutcome::Success => panic!("a config error must not be a success"),
-            }
+            assert_eq!(code_of(&failure(err)), Some(expected.as_str()));
         }
     }
 
     #[test]
     fn failure_of_a_capability_bad_request_uses_the_new_code() {
-        match failure(ApiError::new(
+        let outcome = failure(ApiError::new(
             CODE_BAD_REQUEST,
             "this endpoint does not support streaming",
-        )) {
-            TestOutcome::Failure { code, .. } => assert_eq!(code, CODE_UNSUPPORTED_CAPABILITY),
-            TestOutcome::Success => panic!("a bad request must not be a success"),
-        }
+        ));
+        assert_eq!(code_of(&outcome), Some(CODE_UNSUPPORTED_CAPABILITY));
     }
 
     // ─── Wire shapes ──────────────────────────────────────────────────────────
