@@ -31,6 +31,12 @@ describe('formatAgentAction', () => {
     expect(formatAgentAction({ type: 'launch', app: 'notepad' }, en)).toBe(
       'Open notepad',
     );
+    expect(
+      formatAgentAction(
+        { type: 'list_dir', path: 'C:\\Users\\me\\Desktop' },
+        en,
+      ),
+    ).toBe('List folder C:\\Users\\me\\Desktop');
     expect(formatAgentAction({ type: 'done' }, en)).toBe('Finish');
   });
 
@@ -59,6 +65,12 @@ describe('formatAgentAction', () => {
     expect(formatAgentAction({ type: 'launch', app: 'notepad' }, zh)).toBe(
       '打开 notepad',
     );
+    expect(
+      formatAgentAction(
+        { type: 'list_dir', path: 'C:\\Users\\me\\Desktop' },
+        zh,
+      ),
+    ).toBe('列出文件夹 C:\\Users\\me\\Desktop');
     expect(formatAgentAction({ type: 'done' }, zh)).toBe('完成');
   });
 });

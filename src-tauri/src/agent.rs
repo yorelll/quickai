@@ -43,6 +43,7 @@ pub enum AgentAction {
     KeyPress { combo: String },
     Scroll { direction: String, amount: i32 },
     Launch { app: String },
+    ListDir { path: String },
     Done,
 }
 
@@ -99,15 +100,21 @@ fn is_dangerous_key_press(modifiers: &[String], key: &str) -> bool {
 /// below; everything else (clicks, drags, scrolling, plain typing) auto-executes
 /// so ordinary automation is not interrupted.
 ///
-/// Dangerous = can start or terminate arbitrary software:
+/// Dangerous = can start or terminate arbitrary software, or read the disk:
 /// - `Launch` starts an arbitrary program, file, or URL.
 /// - `KeyPress` can reach the same capability indirectly (see
 ///   [`is_dangerous_key_press`]).
+/// - `ListDir` is the one silent, headless channel: it produces no visible
+///   window, it reads the filesystem, and it returns disk contents as text
+///   straight into the model's context. Every other action is "loud" — it opens
+///   a GUI surface the user can see — so gating the listing preserves that
+///   loud-and-approvable property. It is always confirmed under `limited`.
 fn requires_confirmation(action: &ComputerAction, permission: AgentPermission) -> bool {
     match permission {
         AgentPermission::Full => false,
         AgentPermission::Limited => match action {
             ComputerAction::Launch { .. } => true,
+            ComputerAction::ListDir { .. } => true,
             ComputerAction::KeyPress { modifiers, key } => is_dangerous_key_press(modifiers, key),
             _ => false,
         },
@@ -250,6 +257,10 @@ fn tool_call_to_action(tc: &ToolCall) -> Option<ComputerAction> {
             let target = args.get("target")?.as_str()?.to_string();
             Some(ComputerAction::Launch { target })
         }
+        "computer_list_dir" => {
+            let path = args.get("path")?.as_str()?.to_string();
+            Some(ComputerAction::ListDir { path })
+        }
         "computer_screenshot" => Some(ComputerAction::Screenshot {}),
         // Anthropic computer_use tool uses a single "computer" name with an "action" field.
         "computer" => {
@@ -338,6 +349,7 @@ fn to_event_action(action: &ComputerAction) -> Option<AgentAction> {
         ComputerAction::Launch { target } => AgentAction::Launch {
             app: target.clone(),
         },
+        ComputerAction::ListDir { path } => AgentAction::ListDir { path: path.clone() },
         ComputerAction::Done { .. } => AgentAction::Done,
         ComputerAction::Screenshot {} => return None,
     })
@@ -357,14 +369,21 @@ fn combo(modifiers: &[String], key: &str) -> String {
 /// System prompt for the tool-calling agent loop. Providers receive this as the
 /// leading system message; the tool definitions themselves carry the exact
 /// argument schema.
+///
+/// Deliberately carries no machine-specific detail — no home directory, no drive
+/// path. Paths are discovered at runtime with `computer_list_dir`, which goes
+/// through the permission model, so nothing about the local filesystem is
+/// disclosed up front.
 const AGENT_SYSTEM_PROMPT: &str = r#"You are a desktop automation agent controlling a Windows computer. On each turn you receive a screenshot of the current screen and must call the tools needed to make progress on the user's task.
 
 Rules:
-1. Respond by calling the available tools (computer_click, computer_double_click, computer_right_click, computer_type, computer_key_press, computer_scroll, computer_launch, computer_screenshot). Do not describe actions in prose when a tool call can perform them.
+1. Respond by calling the available tools (computer_click, computer_double_click, computer_right_click, computer_type, computer_key_press, computer_scroll, computer_launch, computer_list_dir, computer_screenshot). Do not describe actions in prose when a tool call can perform them.
 2. Coordinates are absolute screen pixels. Examine the screenshot carefully before clicking.
 3. Call computer_screenshot when you need to verify a change before continuing.
 4. Use computer_launch to open a program, file, or URL.
-5. When the task is complete, reply with a short summary and no tool calls."#;
+5. Use computer_list_dir to list the entries of a folder (names only, never file contents). Call it to discover what a directory holds instead of guessing at paths.
+6. No path is given to you, so discover one: list a drive root such as `C:\` or `C:\Users` with computer_list_dir to find the account name, then list that account's folder — Desktop, Documents and Downloads live there.
+7. When the task is complete, reply with a short summary and no tool calls."#;
 
 // ─── Iteration limits ───────────────────────────────────────────────────────────
 
@@ -377,6 +396,43 @@ const SCREENSHOT_DELAY_MS: u64 = 500;
 /// Emits an [`AgentEvent`] to the frontend, ignoring delivery errors.
 fn emit(app_handle: &tauri::AppHandle, event: AgentEvent) {
     let _ = app_handle.emit(AGENT_EVENT, event);
+}
+
+/// The generic follow-up line the loop sends the model after a turn's actions.
+const ACTION_RESULT_BASE: &str = "Action executed. Here is the updated screen.";
+
+/// Maps a computer-action outcome to the result string the loop records.
+///
+/// An empty payload is the success marker for actions with no output (every
+/// action but `ListDir`) and becomes `"ok"`; any other payload — a directory
+/// listing — or error text is passed through unchanged. Extracted so the
+/// empty-payload rule is pinned by a unit test rather than living only inside
+/// the loop, where a regression would silently append `"ok"` for every action.
+fn action_result_message(result: Result<String, String>) -> String {
+    match result {
+        Ok(payload) if payload.is_empty() => "ok".to_string(),
+        Ok(payload) => payload,
+        Err(e) => e,
+    }
+}
+
+/// Builds the follow-up user message from a turn's action results.
+///
+/// The [`ACTION_RESULT_BASE`] line is always present; every result that is not
+/// the `"ok"` success marker is appended after it, in order, separated by a
+/// blank line. This is what carries a directory listing (or an error) into the
+/// model's context, since the next turn's screenshot cannot show it. Extracted
+/// as a pure function so the rule is unit-tested on any platform, not only on
+/// the Windows job where this module compiles.
+fn build_action_followup(action_results: &[String]) -> String {
+    let mut output = String::from(ACTION_RESULT_BASE);
+    for result in action_results {
+        if result != "ok" {
+            output.push_str("\n\n");
+            output.push_str(result);
+        }
+    }
+    output
 }
 
 /// Runs the agent loop with provider-based tool use.
@@ -531,6 +587,9 @@ async fn run_tool_use_loop(
         }
 
         // Step 4: Convert and execute tool calls.
+        // Collects each action's result so it can be handed back to the model
+        // below: a `ListDir` listing is text the next screenshot cannot show.
+        let mut action_results: Vec<String> = Vec::new();
         for tc in &tool_calls {
             if state.is_cancelled() {
                 return Ok(());
@@ -603,6 +662,7 @@ async fn run_tool_use_loop(
                         };
                         if let Some(confirmed_action) = confirmed_action {
                             let result = execute_action(&state, &confirmed_action).await?;
+                            action_results.push(result.clone());
                             emit(
                                 &app_handle,
                                 AgentEvent::ActionExecuted {
@@ -621,6 +681,7 @@ async fn run_tool_use_loop(
                 }
             } else {
                 let result = execute_action(&state, &action).await?;
+                action_results.push(result.clone());
                 emit(
                     &app_handle,
                     AgentEvent::ActionExecuted {
@@ -640,10 +701,12 @@ async fn run_tool_use_loop(
             images: None,
         });
 
-        // Add tool result as user message for next iteration.
+        // Add tool result as user message for next iteration: the generic line
+        // plus any payload or error an action produced, so the model reads the
+        // outcome rather than only the fresh screenshot.
         messages.push(crate::commands::ChatMessage {
             role: "user".to_string(),
-            content: "Action executed. Here is the updated screen.".to_string(),
+            content: build_action_followup(&action_results),
             images: None,
         });
 
@@ -680,10 +743,7 @@ async fn execute_action(state: &AgentState, action: &ComputerAction) -> Result<S
     .await
     .map_err(|e| format!("Action execution panicked: {e}"))?;
 
-    let result_msg = match result {
-        Ok(()) => "ok".to_string(),
-        Err(e) => e,
-    };
+    let result_msg = action_result_message(result);
     state.add_to_history(format!("[Action] {} -> {}", action_desc, result_msg));
     Ok(result_msg)
 }
@@ -920,6 +980,12 @@ mod tests {
                 },
                 "launch",
             ),
+            (
+                AgentAction::ListDir {
+                    path: "C:\\Users\\lawrence_lv\\Desktop".to_string(),
+                },
+                "list_dir",
+            ),
             (AgentAction::Done, "done"),
         ];
         for (action, tag) in cases {
@@ -993,6 +1059,14 @@ mod tests {
             })
         );
         assert_eq!(
+            to_event_action(&ComputerAction::ListDir {
+                path: "C:\\dir".to_string()
+            }),
+            Some(AgentAction::ListDir {
+                path: "C:\\dir".to_string()
+            })
+        );
+        assert_eq!(
             to_event_action(&ComputerAction::Done {
                 summary: "s".to_string()
             }),
@@ -1011,6 +1085,83 @@ mod tests {
         assert_eq!(
             combo(&["ctrl".to_string(), "shift".to_string()], "s"),
             "ctrl+shift+s"
+        );
+    }
+
+    #[test]
+    fn action_result_message_maps_the_empty_payload_to_ok() {
+        // The empty payload is the success marker for actions with no output;
+        // it must become "ok" so the follow-up builder skips it. A regression
+        // here would append "ok" for every one of the eight older actions.
+        assert_eq!(action_result_message(Ok(String::new())), "ok");
+        // A listing payload passes through untouched.
+        let listing = "Directory: C:\\Users\\lawrence_lv\\Desktop\nnotes.md\n".to_string();
+        assert_eq!(action_result_message(Ok(listing.clone())), listing);
+        // Error text passes through untouched.
+        assert_eq!(
+            action_result_message(Err("Cannot access 'Z:\\'".to_string())),
+            "Cannot access 'Z:\\'"
+        );
+    }
+
+    #[test]
+    fn build_action_followup_is_byte_identical_when_no_payload_is_present() {
+        // The "no existing action changed" property: an empty turn, a turn of
+        // successes, and an explicit "ok" all leave the follow-up equal to the
+        // constant line the loop sent before the listing tool existed.
+        assert_eq!(build_action_followup(&[]), ACTION_RESULT_BASE);
+        assert_eq!(
+            build_action_followup(&["ok".to_string()]),
+            ACTION_RESULT_BASE
+        );
+        assert_eq!(
+            build_action_followup(&["ok".to_string(), "ok".to_string()]),
+            ACTION_RESULT_BASE
+        );
+        // End to end: two actions that returned an empty payload.
+        assert_eq!(
+            build_action_followup(&[
+                action_result_message(Ok(String::new())),
+                action_result_message(Ok(String::new())),
+            ]),
+            ACTION_RESULT_BASE
+        );
+    }
+
+    #[test]
+    fn build_action_followup_appends_a_listing_after_the_generic_line() {
+        let listing = "Directory: C:\\Users\\lawrence_lv\\Desktop\nnotes.md\n".to_string();
+        let results = vec!["ok".to_string(), listing.clone()];
+        assert_eq!(
+            build_action_followup(&results),
+            format!("{ACTION_RESULT_BASE}\n\n{listing}")
+        );
+    }
+
+    #[test]
+    fn build_action_followup_appends_several_payloads_in_order() {
+        // The realistic case: the model calls the listing tool more than once
+        // in a turn. Both payloads must appear, in call order, after the line.
+        let results = vec![
+            "Directory: C:\\a\n".to_string(),
+            "ok".to_string(),
+            "Directory: C:\\b\n".to_string(),
+        ];
+        assert_eq!(
+            build_action_followup(&results),
+            "Action executed. Here is the updated screen.\n\nDirectory: C:\\a\n\n\nDirectory: C:\\b\n"
+        );
+    }
+
+    #[test]
+    fn build_action_followup_appends_a_raw_empty_string_verbatim() {
+        // A raw empty string is *not* the "ok" marker, so it is appended (as an
+        // empty section). The empty-*payload* case never reaches here because
+        // `action_result_message` maps it to "ok" first — this pins that the
+        // two are deliberately different.
+        assert_eq!(
+            build_action_followup(&[String::new()]),
+            format!("{ACTION_RESULT_BASE}\n\n")
         );
     }
 
@@ -1080,6 +1231,19 @@ mod tests {
         assert!(!AGENT_SYSTEM_PROMPT.is_empty());
         assert!(AGENT_SYSTEM_PROMPT.contains("computer_click"));
         assert!(AGENT_SYSTEM_PROMPT.contains("computer_screenshot"));
+        assert!(AGENT_SYSTEM_PROMPT.contains("computer_list_dir"));
+    }
+
+    #[test]
+    fn system_prompt_discloses_no_local_path() {
+        // The prompt stays machine-independent: it may name *generic* Windows
+        // locations (rule 6's `C:\` and `C:\Users`), but never a real one — a
+        // named user path or this machine's home directory. Regression guard for
+        // the removed environment injection: re-adding a real path fails here.
+        assert!(!AGENT_SYSTEM_PROMPT.contains("C:\\Users\\"));
+        if let Some(home) = std::env::var("USERPROFILE").ok().filter(|h| !h.is_empty()) {
+            assert!(!AGENT_SYSTEM_PROMPT.contains(&home));
+        }
     }
 
     #[test]
@@ -1152,6 +1316,26 @@ mod tests {
         assert!(
             matches!(tool_call_to_action(&tc), Some(ComputerAction::Launch { ref target }) if target == "notepad")
         );
+    }
+
+    #[test]
+    fn tool_call_to_action_list_dir() {
+        let tc = ToolCall {
+            id: "ld".to_string(),
+            name: "computer_list_dir".to_string(),
+            arguments: r#"{"path": "C:\\Users\\lawrence_lv\\Desktop"}"#.to_string(),
+        };
+        assert!(
+            matches!(tool_call_to_action(&tc), Some(ComputerAction::ListDir { ref path }) if path == "C:\\Users\\lawrence_lv\\Desktop")
+        );
+
+        // A missing `path` is unparseable and must not panic.
+        let bad = ToolCall {
+            id: "ld2".to_string(),
+            name: "computer_list_dir".to_string(),
+            arguments: "{}".to_string(),
+        };
+        assert!(tool_call_to_action(&bad).is_none());
     }
 
     #[test]
@@ -1319,6 +1503,17 @@ mod tests {
     }
 
     #[test]
+    fn limited_permission_confirms_directory_listing() {
+        // The listing is a silent, headless read channel: it opens no window and
+        // returns disk contents straight into the model's context, so `limited`
+        // always asks — unlike every other read-only action, which is loud.
+        let list = ComputerAction::ListDir {
+            path: "C:\\Users\\lawrence_lv\\Desktop".to_string(),
+        };
+        assert!(requires_confirmation(&list, AgentPermission::Limited));
+    }
+
+    #[test]
     fn is_dangerous_key_press_rules() {
         let m = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
 
@@ -1353,6 +1548,10 @@ mod tests {
             key: "r".to_string(),
         };
         assert!(!requires_confirmation(&win_r, AgentPermission::Full));
+        let list = ComputerAction::ListDir {
+            path: "C:\\Users\\lawrence_lv\\Desktop".to_string(),
+        };
+        assert!(!requires_confirmation(&list, AgentPermission::Full));
     }
 
     #[test]

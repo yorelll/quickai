@@ -40,6 +40,8 @@ export function formatAgentAction(action: AgentAction, t: Translate): string {
       });
     case 'launch':
       return t('agent.action.launch', { app: action.app });
+    case 'list_dir':
+      return t('agent.action.listDir', { path: action.path });
     case 'done':
       return t('agent.action.done');
   }

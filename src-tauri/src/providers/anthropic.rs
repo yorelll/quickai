@@ -52,14 +52,28 @@ struct AnthropicThinking {
     budget_tokens: u32,
 }
 
+/// A tool definition in the Anthropic Messages API format.
+///
+/// The built-in computer-use tool carries its own `type` discriminator; a
+/// client-defined tool carries only `name` / `description` / `input_schema` and
+/// no `type` field, so the enum is untagged and each variant spells out exactly
+/// the fields it emits.
 #[derive(Serialize)]
-#[serde(tag = "type")]
+#[serde(untagged)]
 pub enum AnthropicTool {
-    #[serde(rename = "computer_20250124")]
+    /// The built-in computer-use tool (`computer_20250124`).
     Computer20250124 {
+        #[serde(rename = "type")]
+        tool_type: String,
         name: String,
         display_width_px: u32,
         display_height_px: u32,
+    },
+    /// A client-defined tool with its own JSON Schema.
+    Custom {
+        name: String,
+        description: String,
+        input_schema: Value,
     },
 }
 
@@ -90,13 +104,32 @@ struct AnthropicStreamDelta {
 
 // ─── Computer use tool ─────────────────────────────────────────────────────────
 
-/// Returns the Anthropic computer_use tool definition with standard screen dimensions.
+/// Returns the Anthropic tool definitions for agent mode: the built-in
+/// computer-use tool plus the directory-listing tool.
+///
+/// The listing tool is a client-defined tool with its own `input_schema`; it is
+/// offered so an Anthropic-model agent can enumerate a folder rather than guess
+/// at paths, mirroring the OpenAI-compatible path.
 pub fn anthropic_computer_tool(width: u32, height: u32) -> Vec<AnthropicTool> {
-    vec![AnthropicTool::Computer20250124 {
-        name: "computer".to_string(),
-        display_width_px: width,
-        display_height_px: height,
-    }]
+    vec![
+        AnthropicTool::Computer20250124 {
+            tool_type: "computer_20250124".to_string(),
+            name: "computer".to_string(),
+            display_width_px: width,
+            display_height_px: height,
+        },
+        AnthropicTool::Custom {
+            name: "computer_list_dir".to_string(),
+            description: "List the entries of a directory on the computer (names only, never file contents). Use it to discover what a folder holds instead of guessing at paths.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Absolute path of the directory to list" },
+                },
+                "required": ["path"],
+            }),
+        },
+    ]
 }
 
 // ─── Message translation ────────────────────────────────────────────────────────
@@ -439,11 +472,23 @@ mod tests {
     #[test]
     fn anthropic_computer_tool_creation() {
         let tools = anthropic_computer_tool(1920, 1080);
-        assert_eq!(tools.len(), 1);
+        assert_eq!(tools.len(), 2);
         let json = serde_json::to_string(&tools[0]).unwrap();
         assert!(json.contains("computer_20250124"));
         assert!(json.contains("1920"));
         assert!(json.contains("1080"));
+    }
+
+    #[test]
+    fn anthropic_list_dir_tool_serializes_without_a_type_field() {
+        // A client-defined tool must carry name / description / input_schema and
+        // no `type` field, which is what untagged serialization buys us.
+        let tools = anthropic_computer_tool(1920, 1080);
+        let json = serde_json::to_value(&tools[1]).unwrap();
+        assert_eq!(json["name"], "computer_list_dir");
+        assert!(json.get("type").is_none());
+        assert_eq!(json["input_schema"]["properties"]["path"]["type"], "string");
+        assert_eq!(json["input_schema"]["required"][0], "path");
     }
 
     #[test]

@@ -1,10 +1,10 @@
-import { memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentStatus } from '../hooks/useAgentMode';
 import type { AgentAction, AgentNotice } from '../types/agent';
 import { formatAgentAction } from '../utils/agentAction';
 import { ErrorCard } from './ErrorCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { AgentConfirmation } from './AgentConfirmation';
 import { useTranslation, type TranslationKey } from '../i18n';
 
 interface AgentIndicatorProps {
@@ -41,8 +41,8 @@ const statusColors: Record<AgentStatus, string> = {
   analyzing: 'bg-tertiary',
   executing: 'bg-tertiary',
   waiting_confirmation: 'bg-tertiary',
-  done: 'bg-[light-dark(#1a7f37,#4ade80)]',
-  error: 'bg-[light-dark(#b3261e,#ff8a80)]',
+  done: 'bg-status-success',
+  error: 'bg-status-error',
 };
 
 /** Hoisted dismiss (X) icon. */
@@ -63,45 +63,6 @@ const CLOSE_ICON = (
     />
   </svg>
 );
-
-const AgentConfirmation = memo(function AgentConfirmation({
-  action,
-  onConfirm,
-  onReject,
-}: {
-  action: AgentAction;
-  onConfirm: () => void;
-  onReject: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex flex-col gap-2 p-3 bg-tertiary/10 border border-tertiary/30 rounded-lg">
-      <p className="text-xs text-text-primary font-medium">
-        {t('agent.confirmPrompt')}
-      </p>
-      <p className="text-xs text-text-secondary leading-relaxed">
-        {formatAgentAction(action, t)}
-      </p>
-      <div className="flex gap-2 mt-1">
-        <button
-          onClick={onConfirm}
-          className="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-tertiary/20 text-text-primary hover:bg-tertiary/30 transition-colors cursor-pointer"
-        >
-          {t('agent.allow')}
-        </button>
-        <button
-          onClick={onReject}
-          className="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-surface-elevated text-text-secondary hover:text-[light-dark(#b3261e,#ff8a80)] hover:bg-[light-dark(rgba(179,38,30,0.08),rgba(255,138,128,0.10))] transition-colors cursor-pointer"
-        >
-          {t('agent.deny')}
-        </button>
-      </div>
-      <p className="text-[10px] text-text-secondary">
-        {t('agent.keyboardHint')}
-      </p>
-    </div>
-  );
-});
 
 export function AgentIndicator({
   isActive,
@@ -155,7 +116,7 @@ export function AgentIndicator({
               {isActive ? (
                 <button
                   onClick={onStop}
-                  className="text-text-secondary hover:text-[light-dark(#b3261e,#ff8a80)] transition-colors text-xs font-medium cursor-pointer"
+                  className="text-text-secondary hover:text-status-error transition-colors text-xs font-medium cursor-pointer"
                 >
                   {t('agent.stop')}
                 </button>
@@ -173,7 +134,7 @@ export function AgentIndicator({
           </div>
           {notice && <ErrorCard code={notice.code} message={notice.message} />}
           {status === 'error' && lastResult && (
-            <div className="px-3 py-1.5 bg-[light-dark(rgba(179,38,30,0.08),rgba(255,138,128,0.10))] border border-[light-dark(rgba(179,38,30,0.35),rgba(255,138,128,0.30))] rounded-lg text-xs text-[light-dark(#b3261e,#ff8a80)] leading-relaxed">
+            <div className="px-3 py-1.5 bg-status-error/10 border border-status-error/30 rounded-lg text-xs text-status-error leading-relaxed">
               {lastResult}
             </div>
           )}

@@ -19,6 +19,7 @@ export type AgentAction =
   | { type: 'key_press'; combo: string }
   | { type: 'scroll'; direction: string; amount: number }
   | { type: 'launch'; app: string }
+  | { type: 'list_dir'; path: string }
   | { type: 'done' };
 
 /**

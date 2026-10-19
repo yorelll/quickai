@@ -220,6 +220,20 @@ pub fn openai_computer_tools() -> Vec<OpenAITool> {
         OpenAITool {
             r#type: "function".to_string(),
             function: OpenAIFunction {
+                name: "computer_list_dir".to_string(),
+                description: "List the entries of a directory on the computer (names only, never file contents). Use it to discover what a folder holds instead of guessing at paths.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Absolute path of the directory to list" },
+                    },
+                    "required": ["path"],
+                }),
+            },
+        },
+        OpenAITool {
+            r#type: "function".to_string(),
+            function: OpenAIFunction {
                 name: "computer_screenshot".to_string(),
                 description: "Take a screenshot to check the current screen state.".to_string(),
                 parameters: serde_json::json!({
@@ -541,7 +555,8 @@ mod tests {
     #[test]
     fn openai_tool_definitions_count() {
         let tools = openai_computer_tools();
-        assert_eq!(tools.len(), 8); // click, double_click, right_click, type, key_press, scroll, launch, screenshot
+        assert_eq!(tools.len(), 9); // click, double_click, right_click, type, key_press, scroll, launch, list_dir, screenshot
+        assert!(tools.iter().any(|t| t.function.name == "computer_list_dir"));
     }
 
     #[test]

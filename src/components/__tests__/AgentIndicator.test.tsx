@@ -200,7 +200,9 @@ describe('AgentIndicator', () => {
       pendingConfirmation: { type: 'click', x: 1, y: 2 },
     });
     expect(
-      screen.getByText('Press 1 to allow, 2 to deny, Ctrl+C to abort'),
+      screen.getByText(
+        '←/→ to select, Enter to confirm, 1 allow, 2 deny, Ctrl+C to abort',
+      ),
     ).toBeDefined();
   });
 
