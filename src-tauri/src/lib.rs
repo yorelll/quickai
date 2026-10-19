@@ -10,6 +10,7 @@
 
 pub mod commands;
 pub mod config;
+pub mod connection_test;
 pub mod database;
 pub mod history;
 pub mod images;
@@ -159,6 +160,12 @@ fn request_overlay_hide(app_handle: &tauri::AppHandle) {
 /// shell honours on every re-evaluation. That style additionally removes the
 /// window from Alt+Tab — intended for these overlay-style windows (see
 /// `windows_focus::apply_tool_window_style`).
+///
+/// **Call this *after* the window has been shown.** tao rewrites the whole
+/// `GWL_EXSTYLE` whenever a window flag changes, and `show`/`hide` and
+/// `set_always_on_top` all do — so a show that happens after this call silently
+/// drops the tool-window style again. Every show path in this file therefore
+/// calls this last (item 4).
 fn hide_from_taskbar(window: &tauri::WebviewWindow) {
     let _ = window.set_skip_taskbar(true);
     #[cfg(target_os = "windows")]
@@ -259,9 +266,13 @@ fn show_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::ActivationCo
 
     if let Some(window) = app_handle.get_webview_window("main") {
         let _ = window.set_always_on_top(true);
-        hide_from_taskbar(&window);
         let _ = window.show();
         let _ = window.set_focus();
+        // After showing: `set_always_on_top`/`show` both make tao rewrite
+        // `GWL_EXSTYLE` from its own flag set, which drops the tool-window style
+        // and restores `WS_EX_APPWINDOW` — the reappearing-taskbar-button bug.
+        // Re-asserting it here is what makes the fix durable (item 4).
+        hide_from_taskbar(&window);
 
         // Store the main window HWND for the focus listener and start listening.
         if let Ok(hwnd) = window.hwnd() {
@@ -336,13 +347,22 @@ fn settings_open_action(window_exists: bool) -> SettingsOpenAction {
 async fn open_settings_window(app_handle: tauri::AppHandle) -> Result<(), String> {
     let existing = app_handle.get_webview_window("settings");
     if settings_open_action(existing.is_some()) == SettingsOpenAction::FocusExisting {
-        if let Some(window) = existing {
-            // Re-show reliably: `show` alone is not enough on Windows when the
-            // window was hidden while minimized.
-            let _ = window.show();
-            let _ = window.unminimize();
-            let _ = window.set_focus();
-        }
+        // Re-show reliably: `show` alone is not enough on Windows when the
+        // window was hidden while minimized. `unminimize` flips tao's
+        // MINIMIZED flag, which makes it rewrite `GWL_EXSTYLE` — so the style
+        // must be re-applied after it, on the same thread, and this whole
+        // sequence must run on the main thread (see the create path below).
+        let handle = app_handle.clone();
+        app_handle
+            .run_on_main_thread(move || {
+                if let Some(window) = handle.get_webview_window("settings") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                    hide_from_taskbar(&window);
+                }
+            })
+            .map_err(|e| e.to_string())?;
         return Ok(());
     }
 
@@ -364,6 +384,10 @@ async fn open_settings_window(app_handle: tauri::AppHandle) -> Result<(), String
     // The window stays resizable so the user can give it more height, but the
     // width floor is pinned to the layout's 580 so it can never be dragged
     // narrow enough to clip the fixed-width frame.
+    //
+    // `visible(false)`: the window is shown only *after* its taskbar style has
+    // been applied, so the shell never observes a visible, taskbar-qualifying
+    // window — which is what produced the stray button (item 4).
     let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png"))
         .expect("failed to load window icon");
 
@@ -376,21 +400,156 @@ async fn open_settings_window(app_handle: tauri::AppHandle) -> Result<(), String
         .decorations(false)
         .always_on_top(true)
         .skip_taskbar(true)
-        .visible(true)
-        .focused(true)
+        .visible(false)
         .icon(icon)
         .map_err(|e| e.to_string())?
         .build()
         .map_err(|e| e.to_string())?;
 
-    // Keep the window out of the taskbar durably. The builder's
-    // `skip_taskbar(true)` covers creation; `hide_from_taskbar` re-applies it
-    // and adds the Windows tool-window style the shell actually honours.
-    hide_from_taskbar(&window);
-
-    let _ = window.show();
-    let _ = window.set_focus();
+    // Show, then apply the durable taskbar style — and do all of it on the
+    // **main thread**.
+    //
+    // This command is `async`, so its body runs on a tokio worker. There,
+    // `show`/`set_focus` are *posted* to the event loop (`send_user_message`
+    // takes the `proxy.send_event` branch off the main thread), while
+    // `apply_tool_window_style` writes `GWL_EXSTYLE` directly on the calling
+    // thread. Source order would therefore not be runtime order: the deferred
+    // `show` would land *after* the style and make tao rewrite `GWL_EXSTYLE`,
+    // restoring `WS_EX_APPWINDOW` and dropping `WS_EX_TOOLWINDOW` — the stray
+    // taskbar button again. Marshalling the whole sequence onto the main thread
+    // makes every call run inline, so `hide_from_taskbar` really is last at
+    // runtime.
+    app_handle
+        .run_on_main_thread(move || {
+            let _ = window.show();
+            let _ = window.set_focus();
+            // Last, at runtime: `show` changed the visibility flag, so tao has
+            // just rewritten `GWL_EXSTYLE` with `WS_EX_APPWINDOW`.
+            hide_from_taskbar(&window);
+        })
+        .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Restores the full overlay from minibar mode.
+///
+/// Shared by the tray toggle and the summon hotkey so the two paths cannot drift
+/// apart. Re-asserts the tool-window style because the resize/show path makes
+/// tao rewrite the extended style (item 4).
+#[cfg(target_os = "windows")]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn restore_overlay_from_minibar(app_handle: &tauri::AppHandle) {
+    // Restore from minibar — the window is already visible, just small.
+    windows_focus::exit_minibar();
+    let handle = app_handle.clone();
+    let _ = app_handle.run_on_main_thread(move || {
+        if let Some(window) = handle.get_webview_window("main") {
+            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
+                OVERLAY_LOGICAL_WIDTH,
+                OVERLAY_LOGICAL_HEIGHT_COLLAPSED,
+            )));
+            let _ = window.set_focus();
+            hide_from_taskbar(&window);
+            let _ = windows_focus::stop_focus_listener();
+            let h = handle.clone();
+            let _ = windows_focus::start_focus_listener(Arc::new(move |_hwnd| {
+                if windows_focus::should_enter_minibar_on_focus_loss() {
+                    windows_focus::enter_minibar();
+                    let _ = h.emit(MINIBAR_EVENT, ());
+                }
+            }));
+        }
+        emit_overlay_visibility(&handle, OVERLAY_VISIBILITY_SHOW, None, None, None, None);
+    });
+}
+
+/// Brings an already-visible overlay to the front without restarting its
+/// session.
+///
+/// No `show` event is emitted, so the frontend does not replay its entrance
+/// animation — that would clear the open conversation. Used when the summon key
+/// is pressed while the overlay is on screen but the user is working elsewhere.
+#[cfg(target_os = "windows")]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn bring_overlay_forward(app_handle: &tauri::AppHandle) {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.set_always_on_top(true);
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        // Last: tao's flag rewrites would otherwise drop the tool-window style.
+        hide_from_taskbar(&window);
+    }
+}
+
+/// What the summon hotkey should do, given the toggle's intent and the window's
+/// real state.
+#[cfg(target_os = "windows")]
+#[derive(Debug, PartialEq, Eq)]
+enum HotkeyAction {
+    /// Summon from hidden — or from a drifted "visible" where the native window
+    /// is gone, which must not be able to swallow the summon.
+    Show,
+    /// On screen, but the user is working elsewhere: bring it forward.
+    BringForward,
+    /// On screen and in front of the user: dismiss it.
+    Hide,
+}
+
+/// Pure decision for the summon hotkey (item 5).
+///
+/// The bug this replaces: `toggle_overlay` keyed the hide purely on the
+/// `OVERLAY_INTENDED_VISIBLE` flag, and the overlay is auto-shown at startup
+/// (`notify_frontend_ready` → `show_overlay`), so the *first* double-tap hid an
+/// overlay the user had not summoned — "double-tap opens the bar" then needed a
+/// second double-tap. Deciding on the native state as well means a double-tap
+/// always opens the bar, while a double-tap on the overlay the user is actually
+/// looking at still dismisses it (the toggle is preserved, not replaced).
+#[cfg(target_os = "windows")]
+fn hotkey_action(intended_visible: bool, natively_visible: bool, foreground: bool) -> HotkeyAction {
+    if !intended_visible || !natively_visible {
+        HotkeyAction::Show
+    } else if foreground {
+        HotkeyAction::Hide
+    } else {
+        HotkeyAction::BringForward
+    }
+}
+
+/// Summon-key entry point (item 5).
+///
+/// Unlike the tray toggle, this decides on the window's *native* state, so one
+/// double-tap always opens the bar from whatever state the user is actually in.
+#[cfg(target_os = "windows")]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn toggle_overlay_from_hotkey(
+    app_handle: &tauri::AppHandle,
+    ctx: crate::context::ActivationContext,
+) {
+    if windows_focus::is_minibar_active() {
+        restore_overlay_from_minibar(app_handle);
+        return;
+    }
+
+    let natively_visible = app_handle
+        .get_webview_window("main")
+        .and_then(|window| window.is_visible().ok())
+        .unwrap_or(false);
+
+    match hotkey_action(
+        OVERLAY_INTENDED_VISIBLE.load(Ordering::SeqCst),
+        natively_visible,
+        windows_focus::is_overlay_foreground(),
+    ) {
+        HotkeyAction::Hide => request_overlay_hide(app_handle),
+        HotkeyAction::BringForward => bring_overlay_forward(app_handle),
+        HotkeyAction::Show => {
+            // Clear a stale "visible" intent so `show_overlay`'s guard cannot
+            // swallow the summon when the flag and the window have drifted.
+            OVERLAY_INTENDED_VISIBLE.store(false, Ordering::SeqCst);
+            show_overlay(app_handle, ctx);
+        }
+    }
 }
 
 /// Toggles the overlay between visible and hidden states.
@@ -400,30 +559,14 @@ async fn open_settings_window(app_handle: tauri::AppHandle) -> Result<(), String
 ///
 /// On Windows, if the overlay is in minibar mode, double-tap Ctrl restores
 /// the full overlay instead of hiding it.
+///
+/// This is the *tray* toggle, so it keeps the plain flag semantics: the user is
+/// interacting with the tray, not the overlay, and expects a hide. The summon
+/// hotkey uses `toggle_overlay_from_hotkey` instead.
 fn toggle_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::ActivationContext) {
     #[cfg(target_os = "windows")]
     if windows_focus::is_minibar_active() {
-        // Restore from minibar — the window is already visible, just small.
-        windows_focus::exit_minibar();
-        let handle = app_handle.clone();
-        let _ = app_handle.run_on_main_thread(move || {
-            if let Some(window) = handle.get_webview_window("main") {
-                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
-                    OVERLAY_LOGICAL_WIDTH,
-                    OVERLAY_LOGICAL_HEIGHT_COLLAPSED,
-                )));
-                let _ = window.set_focus();
-                let _ = windows_focus::stop_focus_listener();
-                let h = handle.clone();
-                let _ = windows_focus::start_focus_listener(Arc::new(move |_hwnd| {
-                    if windows_focus::should_enter_minibar_on_focus_loss() {
-                        windows_focus::enter_minibar();
-                        let _ = h.emit(MINIBAR_EVENT, ());
-                    }
-                }));
-            }
-            emit_overlay_visibility(&handle, OVERLAY_VISIBILITY_SHOW, None, None, None, None);
-        });
+        restore_overlay_from_minibar(app_handle);
         return;
     }
 
@@ -561,6 +704,8 @@ fn exit_minibar_size(app_handle: tauri::AppHandle) {
                 OVERLAY_LOGICAL_HEIGHT_COLLAPSED,
             )));
             let _ = window.set_focus();
+            // The resize/show path rewrites the extended style; re-assert it.
+            hide_from_taskbar(&window);
             // Restart the focus listener so minibar triggers on next focus loss.
             let _ = windows_focus::stop_focus_listener();
             let h = handle.clone();
@@ -701,6 +846,8 @@ fn show_onboarding_window(app_handle: &tauri::AppHandle, stage: onboarding::Onbo
             let _ = window.center();
             let _ = window.show();
             let _ = window.set_focus();
+            // After showing, so tao's flag rewrite cannot drop it (item 4).
+            hide_from_taskbar(&window);
         }
         let _ = handle.emit(ONBOARDING_EVENT, OnboardingPayload { stage });
     });
@@ -813,8 +960,20 @@ pub fn run() {
             // runs. Apply the tool-window style here, once, so no show path —
             // including onboarding — can fall back on tao's non-durable
             // one-shot `DeleteTab`. The per-show `hide_from_taskbar` calls are
-            // belt and braces on top of this.
+            // belt and braces on top of this, and they run *after* each show
+            // because tao rewrites the extended style on every visibility
+            // change (item 4).
             if let Some(window) = app.get_webview_window("main") {
+                // Give the overlay the app icon explicitly. A window whose icon
+                // is never set falls back to the generic Windows icon, which is
+                // what the user saw on the stray taskbar button; with the style
+                // fix the button should never appear, and if it ever does it is
+                // at least identifiable.
+                if let Ok(icon) =
+                    tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png"))
+                {
+                    let _ = window.set_icon(icon);
+                }
                 hide_from_taskbar(&window);
             }
 
@@ -829,7 +988,8 @@ pub fn run() {
                     let handle2 = app_handle.clone();
                     std::thread::spawn(move || {
                         let ctx = crate::context::capture_activation_context(is_visible);
-                        let _ = handle.run_on_main_thread(move || toggle_overlay(&handle2, ctx));
+                        let _ = handle
+                            .run_on_main_thread(move || toggle_overlay_from_hotkey(&handle2, ctx));
                     });
                 });
                 app.manage(activator);
@@ -969,9 +1129,14 @@ pub fn run() {
             settings_commands::get_default_data_dir,
             #[cfg(not(coverage))]
             settings_commands::pick_folder,
+            #[cfg(not(coverage))]
+            settings_commands::pick_file,
             // Skills (dedicated skills.toml)
             skills::get_skills,
             skills::set_skills,
+            // Connection test (item 13)
+            #[cfg(not(coverage))]
+            connection_test::test_connection,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -1080,5 +1245,37 @@ mod tests {
     fn overlay_logical_dimensions() {
         assert_eq!(OVERLAY_LOGICAL_WIDTH, 650.0);
         assert_eq!(OVERLAY_LOGICAL_HEIGHT_COLLAPSED, 60.0);
+    }
+
+    /// Item 5: the summon hotkey must open the bar from the user's actual
+    /// starting state, while still dismissing an overlay the user is looking at.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn hotkey_action_always_opens_from_a_state_the_user_cannot_see() {
+        // Hidden, and the overlay is not in front: summon it.
+        assert_eq!(hotkey_action(false, false, false), HotkeyAction::Show);
+        // Hidden but the window still reports visible (mid-hide animation):
+        // still a summon, so a double-tap can cancel an in-flight hide.
+        assert_eq!(hotkey_action(false, true, true), HotkeyAction::Show);
+        // Drift: the flag says visible but the native window is gone. This is
+        // the case that used to swallow the summon entirely.
+        assert_eq!(hotkey_action(true, false, false), HotkeyAction::Show);
+        assert_eq!(hotkey_action(true, false, true), HotkeyAction::Show);
+    }
+
+    /// The startup auto-show leaves the overlay on screen while the user is in
+    /// another app; a double-tap must bring it forward, not hide it.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn hotkey_action_brings_a_background_overlay_forward() {
+        assert_eq!(hotkey_action(true, true, false), HotkeyAction::BringForward);
+    }
+
+    /// The toggle is preserved: an overlay the user is actually looking at is
+    /// still dismissed by a double-tap.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn hotkey_action_dismisses_an_overlay_in_front() {
+        assert_eq!(hotkey_action(true, true, true), HotkeyAction::Hide);
     }
 }

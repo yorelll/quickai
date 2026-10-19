@@ -74,6 +74,21 @@ pub fn exit_minibar() -> bool {
 /// is a window style the shell honours on every re-evaluation, so it is the
 /// reliable fix; `skip_taskbar` is kept alongside it as belt and braces.
 ///
+/// Two things make the tool-window bit actually stick, both required:
+///
+/// 1. **`WS_EX_APPWINDOW` must be cleared, not just OR-ed over.** tao creates
+///    every *parentless* window with `WS_EX_APPWINDOW` (`WindowFlags::ON_TASKBAR`
+///    is set for `Parent::None` in `to_window_styles`), and `WS_EX_APPWINDOW`
+///    forces a top-level window onto the taskbar, overriding
+///    `WS_EX_TOOLWINDOW`. Setting the tool-window bit alone therefore left the
+///    window free to be re-added — the stray generic-icon button.
+/// 2. **This must run *after* the window is shown.** tao rewrites the whole
+///    `GWL_EXSTYLE` from its own flag set on every flag change, and
+///    `set_visible` (i.e. `show`/`hide`) and `set_always_on_top` both go through
+///    it. A show that happens after this call silently drops
+///    `WS_EX_TOOLWINDOW` and restores `WS_EX_APPWINDOW`; that is why every
+///    caller must call this *last* in its show path.
+///
 /// Removing the window from Alt+Tab is **intended**, not a side effect: these are
 /// overlay-style windows the app already hides from the taskbar, and a tool
 /// window is the correct shell classification for them.
@@ -83,22 +98,27 @@ pub fn exit_minibar() -> bool {
 /// `set_skip_taskbar` in place.
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub fn apply_tool_window_style(hwnd: HWND) {
+    use windows::Win32::Foundation::{GetLastError, SetLastError, WIN32_ERROR};
     use windows::Win32::UI::WindowsAndMessaging::{
         GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, SWP_FRAMECHANGED,
-        SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_TOOLWINDOW,
+        SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
     };
 
     unsafe {
-        // A zero read means the query failed (a real window always has some
-        // extended style). Bail out rather than OR-ing onto 0: `SetWindowLongPtrW`
-        // would then *replace* the window's real extended styles instead of
-        // adding to them. Skipping is the safe choice — the caller keeps its
-        // `set_skip_taskbar` in place.
+        // `GetWindowLongPtrW` returns 0 both for a window whose extended style is
+        // genuinely zero and for a failed query, and only the latter is a hazard:
+        // OR-ing onto a *failed* 0 would drop the window's real styles. The
+        // last-error check is the canonical way to tell the two apart, so a
+        // legitimately-zero style can never make this skip the fix silently.
+        SetLastError(WIN32_ERROR(0));
         let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        if style == 0 {
+        if style == 0 && GetLastError() != WIN32_ERROR(0) {
+            // The query failed (e.g. a stale HWND); leave the caller's
+            // `set_skip_taskbar` in place rather than clobbering the styles.
             return;
         }
-        let with_tool_window = style | (WS_EX_TOOLWINDOW.0 as isize);
+        let with_tool_window =
+            (style | (WS_EX_TOOLWINDOW.0 as isize)) & !(WS_EX_APPWINDOW.0 as isize);
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, with_tool_window);
         // SWP_FRAMECHANGED makes the shell re-read the extended style;
         // NOMOVE/NOSIZE/NOZORDER leave geometry and stacking untouched.
@@ -112,6 +132,31 @@ pub fn apply_tool_window_style(hwnd: HWND) {
             SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
         );
     }
+}
+
+/// Whether the QuickAI overlay is the window the user is currently interacting
+/// with.
+///
+/// The summon hotkey uses this to tell "the overlay is in front of me, dismiss
+/// it" from "the overlay is on screen but I am working elsewhere, bring it
+/// forward". Consulted on the native side rather than from the app's own
+/// visibility flag, so a flag/window drift cannot make the hotkey hide an
+/// overlay the user cannot see.
+///
+/// Best-effort and native-only (it needs a live HWND), so it is
+/// coverage-excluded. When no main HWND is recorded the overlay has never been
+/// shown, and `false` — "not in front, summon it" — is the safe answer.
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub fn is_overlay_foreground() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+
+    #[allow(static_mut_refs)]
+    let main = unsafe { MAIN_HWND };
+    let Some(main) = main else {
+        return false;
+    };
+    let foreground = unsafe { GetForegroundWindow() };
+    !foreground.0.is_null() && foreground == main
 }
 
 /// Focus change callback type. Receives the HWND of the newly focused window.

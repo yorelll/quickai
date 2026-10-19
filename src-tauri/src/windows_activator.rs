@@ -33,8 +33,17 @@ use windows::Win32::UI::WindowsAndMessaging::{GetGUIThreadInfo, GetWindowRect, G
 
 // ─── Constants ──────────────────────────────────────────────────────────────────
 
+/// Maximum gap between the two taps of a double-tap.
+///
+/// There is deliberately **no** cooldown on top of this. A cooldown can only
+/// ever *block* a legitimate double-tap: it cannot stop one physical double-tap
+/// from firing twice, because firing clears `last_trigger` so the next press
+/// starts a fresh sequence, and key auto-repeat is already absorbed by
+/// `is_pressed`. The previous 600 ms cooldown did exactly that harm — it
+/// returned early *after* setting `is_pressed` and without recording
+/// `last_trigger`, so the first tap of a follow-up double-tap was consumed and
+/// the user needed an extra press.
 const ACTIVATION_WINDOW: Duration = Duration::from_millis(400);
-const ACTIVATION_COOLDOWN: Duration = Duration::from_millis(600);
 
 // Left/right virtual-key codes for each selectable summon key. Both sides of
 // the modifier count, so a double-tap of either physical key activates.
@@ -74,7 +83,6 @@ static GLOBAL_ACTIVATION_STATE: LazyLock<Mutex<ActivationState>> = LazyLock::new
     Mutex::new(ActivationState {
         last_trigger: None,
         is_pressed: false,
-        last_activation: None,
     })
 });
 
@@ -89,34 +97,46 @@ static GLOBAL_HOOK_ACTIVE: AtomicBool = AtomicBool::new(false);
 // ─── Activation Logic ──────────────────────────────────────────────────────────
 
 struct ActivationState {
+    /// When the first tap of the current double-tap sequence was seen, if one is
+    /// in progress. Cleared when a sequence fires, so a single physical
+    /// double-tap can never fire twice.
     last_trigger: Option<Instant>,
+    /// Whether the summon key is currently held down. Guards against key
+    /// auto-repeat and duplicate key-downs counting as extra taps.
     is_pressed: bool,
-    last_activation: Option<Instant>,
 }
 
+/// Advances the double-tap state machine on a key transition.
+///
+/// Returns `true` when the press completes a double-tap. A press is **never**
+/// swallowed: one that does not complete a double-tap becomes the first tap of a
+/// new sequence, so the next press can complete it. (The old code returned early
+/// on a cooldown *without* recording `last_trigger`, which consumed the tap and
+/// forced the user into an extra press — item 5.)
 fn evaluate_activation(state: &mut ActivationState, is_press: bool) -> bool {
-    if is_press && !state.is_pressed {
-        state.is_pressed = true;
-        let now = Instant::now();
-
-        if let Some(last_act) = state.last_activation {
-            if now.duration_since(last_act) < ACTIVATION_COOLDOWN {
-                return false;
-            }
-        }
-
-        if let Some(last) = state.last_trigger {
-            if now.duration_since(last) < ACTIVATION_WINDOW {
-                state.last_trigger = None;
-                state.last_activation = Some(now);
-                return true;
-            }
-        }
-        state.last_trigger = Some(now);
-    } else if !is_press {
+    if !is_press {
         state.is_pressed = false;
+        return false;
     }
 
+    if state.is_pressed {
+        // Auto-repeat while the key is held, or a duplicate key-down for the
+        // press already in progress: not a new tap.
+        return false;
+    }
+    state.is_pressed = true;
+
+    let now = Instant::now();
+    let completes_double_tap = state
+        .last_trigger
+        .is_some_and(|last| now.duration_since(last) < ACTIVATION_WINDOW);
+
+    if completes_double_tap {
+        state.last_trigger = None;
+        return true;
+    }
+
+    state.last_trigger = Some(now);
     false
 }
 
@@ -451,7 +471,6 @@ mod tests {
         let mut state = ActivationState {
             last_trigger: None,
             is_pressed: false,
-            last_activation: None,
         };
         assert!(!evaluate_activation(&mut state, true));
         evaluate_activation(&mut state, false);
@@ -463,7 +482,6 @@ mod tests {
         let mut state = ActivationState {
             last_trigger: None,
             is_pressed: false,
-            last_activation: None,
         };
         evaluate_activation(&mut state, true);
         evaluate_activation(&mut state, false);
@@ -476,7 +494,6 @@ mod tests {
         let mut state = ActivationState {
             last_trigger: Some(Instant::now() - Duration::from_millis(400)),
             is_pressed: false,
-            last_activation: None,
         };
         assert!(!evaluate_activation(&mut state, true));
     }
@@ -486,9 +503,57 @@ mod tests {
         let mut state = ActivationState {
             last_trigger: None,
             is_pressed: false,
-            last_activation: None,
         };
         assert!(!evaluate_activation(&mut state, false));
+        assert!(state.last_trigger.is_none());
+    }
+
+    /// Item 5's mechanism 1: the first tap of a follow-up double-tap must not be
+    /// swallowed, so two double-taps in quick succession both fire.
+    #[test]
+    fn consecutive_double_taps_each_fire_without_a_wasted_press() {
+        let mut state = ActivationState {
+            last_trigger: None,
+            is_pressed: false,
+        };
+        // First double-tap.
+        assert!(!evaluate_activation(&mut state, true));
+        evaluate_activation(&mut state, false);
+        assert!(evaluate_activation(&mut state, true));
+        // Second double-tap immediately after — both presses still count.
+        evaluate_activation(&mut state, false);
+        assert!(!evaluate_activation(&mut state, true));
+        evaluate_activation(&mut state, false);
+        assert!(evaluate_activation(&mut state, true));
+    }
+
+    /// Auto-repeat while the summon key is held must not register as new taps.
+    #[test]
+    fn auto_repeat_of_a_held_key_is_ignored() {
+        let mut state = ActivationState {
+            last_trigger: None,
+            is_pressed: false,
+        };
+        assert!(!evaluate_activation(&mut state, true));
+        // The OS delivers repeated key-downs while the key is held; none of them
+        // may complete a double-tap on their own.
+        assert!(!evaluate_activation(&mut state, true));
+        assert!(!evaluate_activation(&mut state, true));
+        assert!(state.last_trigger.is_some());
+    }
+
+    /// A fired sequence is cleared, so one physical double-tap cannot fire twice
+    /// and a fresh sequence starts from the next press.
+    #[test]
+    fn firing_clears_the_sequence() {
+        let mut state = ActivationState {
+            last_trigger: Some(Instant::now()),
+            is_pressed: false,
+        };
+        assert!(evaluate_activation(&mut state, true));
+        assert!(state.last_trigger.is_none());
+        // The same held press cannot fire again.
+        assert!(!evaluate_activation(&mut state, true));
         assert!(state.last_trigger.is_none());
     }
 }
