@@ -5,11 +5,13 @@ GitHub Release. Publishing the release triggers CI, which builds the two
 release assets and uploads them to that release. There is no manual artifact
 build and no manual upload.
 
-[release-please](https://github.com/googleapis/release-please) is still
-configured in the repository (`release-please-config.json`,
-`.release-please-manifest.json`, and the `release-please` job in the workflow),
-but it is **not** the path releases are cut through — the version bump, tag, and
-release are all created manually as described below.
+[release-please](https://github.com/googleapis/release-please) is configured in
+the repository (`release-please-config.json`, `.release-please-manifest.json`,
+and the `release-please` job in the workflow), and that job runs on **every push
+to `main`**, where it opens a release PR proposing the next version bump (which
+CI then checks like any other PR). Those PRs are **not** how releases are cut,
+though: the version bump, tag, and release are all created manually as described
+below, so **close the release PR it opens rather than merging it**.
 
 ## Release artifacts
 
@@ -186,15 +188,16 @@ next version yourself using this guide:
 
 | Commit prefix | Example | Version bump |
 | :--- | :--- | :--- |
-| `feat:` | `feat: add keyboard shortcuts` | Minor (`0.0.2` → `0.1.0`) |
+| `feat:` | `feat: add keyboard shortcuts` | Patch (`0.0.2` → `0.0.3`) |
 | `fix:` | `fix: hotkey not firing` | Patch (`0.0.2` → `0.0.3`) |
 | `feat!:` or `BREAKING CHANGE:` | `feat!: new IPC protocol` | **Minor while pre-1.0** (`0.0.2` → `0.1.0`); **Major** (`1.0.0` → `2.0.0`) once at `1.0.0` or above |
 | `docs:`, `chore:`, `refactor:`, etc. | `docs: update README` | No bump |
 
 ## Files that carry the version
 
-Every release bump must update all of these by hand (release-please would only
-do this on its own PR path, which is not used here):
+Every release bump must update all of these by hand (release-please also opens
+a release PR on every push to `main` that bumps them, but that PR is not the
+path a release is cut through):
 
 - `package.json` `"version"`
 - `src-tauri/Cargo.toml` `version`

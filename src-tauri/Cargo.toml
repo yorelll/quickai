@@ -1,6 +1,6 @@
 [package]
 name = "quickai"
-version = "0.0.3"
+version = "0.0.4"
 description = "QuickAI: a cloud-only, bilingual AI assistant overlay for Windows"
 authors = ["ayzekhdawy", "yorelll"]
 license = "Apache-2.0"

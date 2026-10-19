@@ -8,6 +8,74 @@ and the changelog follows the
 are written by hand as part of the manual release process (see
 [RELEASING.md](RELEASING.md)).
 
+## 0.0.4 (2026-10-19)
+
+An agent directory-listing tool, a provider connection test, and a batch of
+Windows-shell, Settings, chat, and skills fixes.
+
+### Features
+
+* **Agent directory listing** — the `/do` agent can now enumerate a folder
+  (names and a type indicator only, never file contents, capped at 200 entries)
+  instead of guessing at paths. Under the `Limited` permission mode it always
+  requires your approval — it is the one silent, headless read channel — while
+  `Full` never asks.
+* **Test connection** — the AI tab can now probe the configured provider and
+  distinguish an unreachable address, an authentication failure, a model that
+  does not exist, an unsupported capability, and a missing key or model. The
+  default state reads "not yet tested".
+* **Native file picker for skill paths** — a **Browse…** button on the skill
+  path field.
+* **Skill enablement hint** — a line explaining that enabled skills are appended
+  to the system prompt every turn, while disabled ones are used only when named
+  with `/add`.
+* **Code-block syntax highlighting** — real highlighting that follows the
+  light/dark theme.
+* **Overlay input surface** — the input area now has its own surface and a focus
+  ring, with the placeholder "Ask anything, or type / for commands".
+
+### Changed
+
+* **The agent discovers paths by listing a folder, not by being told them.** It
+  is not sent any machine-specific path; when it needs to know what a directory
+  holds, it lists it with `computer_list_dir` — a step you approve and can see.
+  The trade-off: a task like "list every file on my desktop" may take one extra
+  approval, because the agent must list a folder before it can learn the path.
+* **The installer is about 10 MB larger.** The syntax-highlighting dependency
+  bundles one lazy-loaded chunk per programming language; only the chunk for a
+  language actually being highlighted is fetched at runtime (roughly +60 kB
+  gzipped at first paint), but the installer grows by about 10 MB.
+* **Skill paths are now validated** — only `.txt`, `.md`, and `.markdown` are
+  accepted, a directory is rejected, and surrounding quotes (including curly
+  quotes) are stripped so a pasted `"D:\…\test.md"` works. Rejection happens
+  when you save.
+
+### Fixed
+
+* **Settings tab switching no longer lags** — tabs stay mounted after their first
+  visit, so switching no longer re-reads settings over IPC (each revisit
+  previously re-issued up to two IPC calls, one of which spawned a Task
+  Scheduler process).
+* **No more stray taskbar icon** — the real cause was `WS_EX_APPWINDOW`, which
+  tao sets on every unowned window and which overrides `WS_EX_TOOLWINDOW`; the
+  previous fix set only the latter.
+* **The hotkey now opens on one double-tap** — two compounding causes: the
+  hotkey decided on an internal flag rather than the window's real state, so the
+  first double-tap dismissed an overlay you had not summoned; and a cooldown
+  silently swallowed the first tap of a follow-up double-tap.
+* **The chat input is no longer clipped while streaming** — the window was being
+  sized from a measurement that included the entrance animation's scale
+  transform.
+* **Switching conversations lands at the bottom**, so a long conversation no
+  longer stops at a code block in the middle.
+* **`/add` now shows a newly added skill** — the list was stale because the
+  return path from settings (via the mini bar) emitted no show event.
+* **`/do` no longer pops the system "file not found" error dialog** when
+  launching a program — launching now goes through `ShellExecuteW` directly
+  instead of `cmd /c start`, which re-parsed the command line.
+* **The agent confirmation now supports ←/→ to select and Enter to confirm**
+  (allowing is selected by default), and the on-screen hint was updated to match.
+
 ## 0.0.3 (2026-10-15)
 
 A theming and skills release, plus a batch of Settings, chat, and agent fixes.
