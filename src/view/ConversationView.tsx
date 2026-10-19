@@ -97,6 +97,13 @@ export function ConversationView({
   scrollToTopSignal,
 }: ConversationViewProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  /**
+   * The transcript's content wrapper. Its height tracks the transcript's
+   * content height — unlike the scroller's own box, which is capped by
+   * `flex-1` — so a ResizeObserver on it fires whenever late-arriving content
+   * (code blocks, images) changes the scrollable height after a pin has run.
+   */
+  const scrollContentRef = useRef<HTMLDivElement>(null);
 
   /** Threshold in pixels — if within this distance of the bottom, consider "near bottom". */
   const NEAR_BOTTOM_THRESHOLD = 60;
@@ -222,6 +229,32 @@ export function ConversationView({
     container.scrollTop = 0;
   }, [scrollToTopSignal]);
 
+  /**
+   * Keep the transcript pinned to the bottom while auto-scroll is active.
+   *
+   * The load-time pin and the `[messages]` pin each run once, but content can
+   * keep growing afterwards: a code block or image that lays out after the pin
+   * changes `scrollHeight` and leaves the view parked short of the bottom — the
+   * "switching back to a long conversation lands on a middle code block"
+   * symptom. Observing the content wrapper re-pins on every such change, so a
+   * conversation opened from history shows its bottom immediately. The user's
+   * manual scroll-up still wins, because the callback respects auto-scroll mode.
+   */
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    const content = scrollContentRef.current;
+    /* v8 ignore start -- refs are always set after mount */
+    if (!container || !content) return;
+    /* v8 ignore stop */
+
+    const observer = new ResizeObserver(() => {
+      if (!shouldAutoScrollRef.current) return;
+      container.scrollTop = container.scrollHeight;
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <motion.div
       key="chat-area"
@@ -247,52 +280,58 @@ export function ConversationView({
 
       <div
         ref={scrollContainerRef}
-        className="chat-messages-scroll px-5 py-4 flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto"
+        className="chat-messages-scroll px-5 py-4 flex-1 min-h-0 overflow-y-auto"
       >
-        {messages.map((msg, i) => {
-          const isLastAssistant =
-            isGenerating &&
-            i === messages.length - 1 &&
-            msg.role === 'assistant';
+        {/* Content wrapper. Its height is the transcript's content height —
+            what the ResizeObserver above watches so late content (code blocks,
+            images) settling after a pin does not leave the view parked short of
+            the bottom. */}
+        <div ref={scrollContentRef} className="flex flex-col gap-3">
+          {messages.map((msg, i) => {
+            const isLastAssistant =
+              isGenerating &&
+              i === messages.length - 1 &&
+              msg.role === 'assistant';
 
-          // Hide the empty assistant placeholder; the TypingIndicator
-          // already covers this visual state. When thinking content or a
-          // non-fatal notice is present, render the bubble so they are visible.
-          if (
-            isLastAssistant &&
-            !msg.content &&
-            !msg.thinkingContent &&
-            !msg.notice
-          )
-            return null;
+            // Hide the empty assistant placeholder; the TypingIndicator
+            // already covers this visual state. When thinking content or a
+            // non-fatal notice is present, render the bubble so they are visible.
+            if (
+              isLastAssistant &&
+              !msg.content &&
+              !msg.thinkingContent &&
+              !msg.notice
+            )
+              return null;
 
-          return (
-            <ChatBubble
-              key={msg.id}
-              role={msg.role}
-              content={msg.content}
-              quotedText={msg.quotedText}
-              index={i}
-              isStreaming={isLastAssistant}
-              imagePaths={msg.imagePaths}
-              onImagePreview={onImagePreview}
-              error={msg.error}
-              notice={msg.notice}
-              thinkingContent={msg.thinkingContent}
-              isThinking={
-                isLastAssistant && !msg.content && !!msg.thinkingContent
-              }
-            />
-          );
-        })}
+            return (
+              <ChatBubble
+                key={msg.id}
+                role={msg.role}
+                content={msg.content}
+                quotedText={msg.quotedText}
+                index={i}
+                isStreaming={isLastAssistant}
+                imagePaths={msg.imagePaths}
+                onImagePreview={onImagePreview}
+                error={msg.error}
+                notice={msg.notice}
+                thinkingContent={msg.thinkingContent}
+                isThinking={
+                  isLastAssistant && !msg.content && !!msg.thinkingContent
+                }
+              />
+            );
+          })}
 
-        {/* Typing indicator (pulsing dots) shown before first token arrives */}
-        {isGenerating &&
-        messages[messages.length - 1]?.role === 'assistant' &&
-        !messages[messages.length - 1]?.content &&
-        !messages[messages.length - 1]?.thinkingContent ? (
-          <TypingIndicator />
-        ) : null}
+          {/* Typing indicator (pulsing dots) shown before first token arrives */}
+          {isGenerating &&
+          messages[messages.length - 1]?.role === 'assistant' &&
+          !messages[messages.length - 1]?.content &&
+          !messages[messages.length - 1]?.thinkingContent ? (
+            <TypingIndicator />
+          ) : null}
+        </div>
       </div>
 
       <motion.div

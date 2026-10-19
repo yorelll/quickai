@@ -430,12 +430,25 @@ function App() {
   const syncWindowSize = useCallback(() => {
     /* v8 ignore start -- requires a real browser layout and native window */
     const node = morphingContainerNodeRef.current;
-    if (!node || overlayStateRef.current === 'minibar') return;
+    // Only size while the overlay is actually on screen: the ResizeObserver, the
+    // focus resync and `onAnimationComplete` can all fire during the exit
+    // transition, when the container is detached (offsetHeight 0) — sizing then
+    // would shrink the window mid-exit.
+    if (!node || overlayStateRef.current !== 'visible') return;
 
-    const rect = node.getBoundingClientRect();
+    // Measure the container's *layout* height (`offsetHeight`), not
+    // `getBoundingClientRect()`. The bounding rect includes the entrance
+    // animation's `scale` transform, so a measurement taken while the spring is
+    // still ramping (scale 0.96 → 4% short) under-reports the height. Because a
+    // transform change does not fire the ResizeObserver, that shortfall would
+    // never be corrected on its own — the window stays short and the bottom
+    // input is clipped, which is exactly the streaming symptom the user reports.
+    // `offsetHeight` is the transform-independent border-box height, so the
+    // measurement no longer depends on animation/frame timing (the source of the
+    // per-machine variance).
     // Total vertical room: 8px (pt-2) + 24px (pb-6) + 16px (motion py-2) = 48px.
     // This ensures the tightened drop shadows aren't clipped by the native window edge.
-    let targetHeight = Math.ceil(rect.height) + CONTAINER_VERTICAL_PADDING;
+    let targetHeight = node.offsetHeight + CONTAINER_VERTICAL_PADDING;
 
     // During streaming, only allow the window to grow (never shrink) to
     // prevent jitter from Streamdown block reflows.
@@ -474,7 +487,15 @@ function App() {
    */
   useEffect(() => {
     /* v8 ignore start -- window focus/visibility events require a real browser */
-    const resync = () => syncWindowSize();
+    const resync = () => {
+      syncWindowSize();
+      // Returning from the Settings window (a separate webview) refocuses this
+      // one without leaving the visible state — the pinned case, where neither a
+      // show event nor an `overlayState` change fires. Only refresh while the
+      // overlay is actually usable, so window focus during onboarding or while
+      // shrunk to the mini bar does not issue a pointless `get_skills`.
+      if (overlayStateRef.current === 'visible') void refreshSkills();
+    };
     window.addEventListener('focus', resync);
     document.addEventListener('visibilitychange', resync);
     return () => {
@@ -482,7 +503,7 @@ function App() {
       document.removeEventListener('visibilitychange', resync);
     };
     /* v8 ignore stop */
-  }, [syncWindowSize]);
+  }, [syncWindowSize, refreshSkills]);
 
   /**
    * Callback ref to reliably attach the ResizeObserver when the conditionally
@@ -579,12 +600,12 @@ function App() {
       // A fresh session starts with no agent panel: without this, a finished
       // run's summary/error would still be mounted after reopening the overlay.
       void stopAgentMode();
-      // Re-read the skill list so a skill added in the Settings window (a
-      // separate webview) is usable from `/add` without restarting the app.
-      void refreshSkills();
+      // The skill list is re-read by the `overlayState === 'visible'` effect
+      // below, which covers this show path and every other way the overlay can
+      // reappear (mini-bar restore, notification click).
       setOverlayState('visible');
     },
-    [reset, resetHistory, stopAgentMode, refreshSkills],
+    [reset, resetHistory, stopAgentMode],
   );
 
   /**
@@ -1770,13 +1791,25 @@ function App() {
     stopAgentMode,
   ]);
 
-  /** Programmatic focus when the overlay becomes visible. */
+  /**
+   * Focus the input and re-read the skill list whenever the overlay becomes
+   * usable.
+   *
+   * Keyed on `sessionId` as well as `overlayState`, deliberately: every show
+   * event bumps `sessionId` (in `replayEntranceAnimation`), so the refresh
+   * still fires even when `overlayState` is already `'visible'` — a
+   * `setOverlayState('visible')` no-op would otherwise skip the effect and
+   * silently leave `/add` stale. This is the single refresh point for every way
+   * the overlay can (re)appear: the summon show event, restoring from the mini
+   * bar, and a notification click.
+   */
   useEffect(() => {
     if (overlayState === 'visible') {
+      void refreshSkills();
       const raf = requestAnimationFrame(() => inputRef.current?.focus());
       return () => cancelAnimationFrame(raf);
     }
-  }, [overlayState]);
+  }, [overlayState, sessionId, refreshSkills]);
 
   /**
    * Commits the native window hide after a fixed deadline from the start of
@@ -1878,6 +1911,11 @@ function App() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -16, scale: 0.98 }}
             transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+            // Re-apply the window size once the entrance spring has settled, so
+            // a size the ResizeObserver computed mid-animation is never the last
+            // word. `syncWindowSize` is transform-independent and a no-op unless
+            // the overlay is visible, so this is safe to run on any completion.
+            onAnimationComplete={syncWindowSize}
             className="w-full max-w-2xl px-4 py-2 overflow-visible"
           >
             {/* Relative wrapper — serves as the positioning context for the
@@ -1970,10 +2008,11 @@ function App() {
                 )}
 
                 {/* Capture error banner: shown when /screen capture fails so
-                    the user knows why the message was not sent. */}
+                    the user knows why the message was not sent. Colours come
+                    from the semantic status token, not a hardcoded pair. */}
                 {captureError && (
-                  <div className="px-4 py-2 border-t border-[light-dark(rgba(179,38,30,0.35),rgba(255,138,128,0.30))]">
-                    <p className="text-[light-dark(#b3261e,#ff8a80)] text-xs leading-relaxed">
+                  <div className="px-4 py-2 border-t border-status-error/35">
+                    <p className="text-status-error text-xs leading-relaxed">
                       {captureError}
                     </p>
                   </div>

@@ -53,7 +53,9 @@ describe('App', () => {
       });
     });
 
-    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    const textarea = screen.getByPlaceholderText(
+      'Ask a question, or type / to see commands',
+    );
     await act(async () => {
       fireEvent.change(textarea, { target: { value: 'hi' } });
     });
@@ -84,7 +86,9 @@ describe('App', () => {
       });
     });
 
-    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    const textarea = screen.getByPlaceholderText(
+      'Ask a question, or type / to see commands',
+    );
     await act(async () => {
       fireEvent.change(textarea, { target: { value: 'hi' } });
       fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
@@ -122,7 +126,7 @@ describe('App', () => {
     await showOverlay();
 
     expect(
-      screen.getByPlaceholderText('Ask QuickAI anything...'),
+      screen.getByPlaceholderText('Ask a question, or type / to see commands'),
     ).toBeInTheDocument();
   });
 
@@ -134,7 +138,7 @@ describe('App', () => {
 
     // Confirm overlay is visible
     expect(
-      screen.getByPlaceholderText('Ask QuickAI anything...'),
+      screen.getByPlaceholderText('Ask a question, or type / to see commands'),
     ).toBeInTheDocument();
 
     act(() => {
@@ -150,7 +154,9 @@ describe('App', () => {
 
     await showOverlay();
 
-    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    const textarea = screen.getByPlaceholderText(
+      'Ask a question, or type / to see commands',
+    );
 
     // Type a message
     act(() => {
@@ -192,7 +198,7 @@ describe('App', () => {
     // First show overlay
     await showOverlay();
     expect(
-      screen.getByPlaceholderText('Ask QuickAI anything...'),
+      screen.getByPlaceholderText('Ask a question, or type / to see commands'),
     ).toBeInTheDocument();
 
     // Then send hide-request — calls requestHideOverlay() (not handleCloseOverlay)
@@ -202,7 +208,11 @@ describe('App', () => {
 
     // The hide-request path transitions overlay to hiding state (overlayState !== 'visible'),
     // so shouldRenderOverlay becomes false and the overlay is removed from the DOM.
-    expect(screen.queryByPlaceholderText('Ask QuickAI anything...')).toBeNull();
+    expect(
+      screen.queryByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      ),
+    ).toBeNull();
   });
 
   it('hides overlay on Cmd+W key', async () => {
@@ -211,7 +221,7 @@ describe('App', () => {
 
     await showOverlay();
     expect(
-      screen.getByPlaceholderText('Ask QuickAI anything...'),
+      screen.getByPlaceholderText('Ask a question, or type / to see commands'),
     ).toBeInTheDocument();
 
     act(() => {
@@ -260,7 +270,9 @@ describe('App', () => {
 
     await showOverlay();
 
-    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    const textarea = screen.getByPlaceholderText(
+      'Ask a question, or type / to see commands',
+    );
 
     // Press Enter with empty textarea
     act(() => {
@@ -320,7 +332,9 @@ describe('App', () => {
     await showOverlay();
 
     // Send a message to enter chat mode so ChatBubble (with .select-text) renders
-    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    const textarea = screen.getByPlaceholderText(
+      'Ask a question, or type / to see commands',
+    );
     act(() => {
       fireEvent.change(textarea, { target: { value: 'test message' } });
     });
@@ -351,7 +365,9 @@ describe('App', () => {
 
     await showOverlay();
 
-    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    const textarea = screen.getByPlaceholderText(
+      'Ask a question, or type / to see commands',
+    );
     __mockWindow.startDragging.mockClear();
 
     act(() => {
@@ -368,7 +384,9 @@ describe('App', () => {
     await showOverlay();
 
     // Enter chat mode so the transcript scroller is mounted.
-    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    const textarea = screen.getByPlaceholderText(
+      'Ask a question, or type / to see commands',
+    );
     act(() => {
       fireEvent.change(textarea, { target: { value: 'test message' } });
     });
@@ -415,7 +433,9 @@ describe('App', () => {
 
     await showOverlay();
 
-    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    const textarea = screen.getByPlaceholderText(
+      'Ask a question, or type / to see commands',
+    );
     act(() => {
       fireEvent.change(textarea, { target: { value: 'test message' } });
     });
@@ -459,7 +479,9 @@ describe('App', () => {
     // Show with selected context
     await showOverlay('selected snippet');
 
-    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    const textarea = screen.getByPlaceholderText(
+      'Ask a question, or type / to see commands',
+    );
     act(() => {
       fireEvent.change(textarea, { target: { value: 'my question' } });
     });
@@ -535,16 +557,12 @@ describe('App', () => {
     }
 
     function triggerResize(element: Element, contentHeight: number) {
-      vi.spyOn(element, 'getBoundingClientRect').mockReturnValue({
-        height: contentHeight,
-        width: 650,
-        top: 0,
-        left: 0,
-        right: 600,
-        bottom: contentHeight,
-        x: 0,
-        y: 0,
-        toJSON: () => ({}),
+      // `syncWindowSize` measures the container's layout height via
+      // `offsetHeight` (transform-independent), so the mock drives that — not
+      // `getBoundingClientRect`, which the entrance animation's scale would skew.
+      Object.defineProperty(element, 'offsetHeight', {
+        value: contentHeight,
+        configurable: true,
       });
       if (capturedCallback) {
         capturedCallback(
@@ -587,6 +605,62 @@ describe('App', () => {
         y: 756,
         width: 650,
         height: 108,
+      });
+    });
+
+    it('sizes from the layout height, ignoring the entrance animation transform', async () => {
+      spyOnResizeObserver();
+
+      render(<App />);
+      await act(async () => {});
+
+      await act(async () => {
+        emitTauriEvent('quickai://visibility', {
+          state: 'show',
+          selected_text: null,
+          window_x: 100,
+          window_y: 804,
+          screen_bottom_y: 900,
+        });
+      });
+
+      invoke.mockClear();
+
+      const container = document.querySelector('.morphing-container');
+      expect(container).not.toBeNull();
+
+      // Layout height 200. A mid-spring `scale: 0.96` would make the bounding
+      // rect 192 — the old code measured that and sized the window 8px short,
+      // clipping the input. The window must use the layout height: 200 + 48.
+      Object.defineProperty(container!, 'offsetHeight', {
+        value: 200,
+        configurable: true,
+      });
+      vi.spyOn(container!, 'getBoundingClientRect').mockReturnValue({
+        height: 192,
+        width: 650,
+        top: 0,
+        left: 0,
+        right: 600,
+        bottom: 192,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      });
+
+      act(() => {
+        capturedCallback!(
+          [{ target: container! } as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+
+      // bottomY = 804 + 60 = 864; 864 - 248 = 616.
+      expect(invoke).toHaveBeenCalledWith('set_window_frame', {
+        x: 100,
+        y: 616,
+        width: 650,
+        height: 248,
       });
     });
 
@@ -776,7 +850,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'test' } });
       });
@@ -802,7 +878,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'question' } });
       });
@@ -840,7 +918,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'question' } });
       });
@@ -894,7 +974,9 @@ describe('App', () => {
       await showOverlay();
 
       // Send message + Done
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'hello' } });
       });
@@ -934,7 +1016,9 @@ describe('App', () => {
       await showOverlay();
 
       // Get into chat mode with an unsaved turn
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'question' } });
       });
@@ -965,7 +1049,9 @@ describe('App', () => {
       });
 
       expect(
-        screen.getByPlaceholderText('Ask QuickAI anything...'),
+        screen.getByPlaceholderText(
+          'Ask a question, or type / to see commands',
+        ),
       ).toBeInTheDocument();
     });
 
@@ -979,7 +1065,9 @@ describe('App', () => {
       await showOverlay();
 
       // Get into chat mode with an unsaved turn
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'question' } });
       });
@@ -1027,7 +1115,9 @@ describe('App', () => {
       await showOverlay();
 
       // Get into chat mode
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'question' } });
       });
@@ -1056,7 +1146,9 @@ describe('App', () => {
 
       // Should be directly back in ask-bar mode (no confirmation prompt)
       expect(
-        screen.getByPlaceholderText('Ask QuickAI anything...'),
+        screen.getByPlaceholderText(
+          'Ask a question, or type / to see commands',
+        ),
       ).toBeInTheDocument();
     });
 
@@ -1071,7 +1163,9 @@ describe('App', () => {
       await showOverlay();
 
       // Get into chat mode with an unsaved turn
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'question' } });
       });
@@ -1133,7 +1227,9 @@ describe('App', () => {
       await showOverlay();
 
       // Get into chat mode with an unsaved turn
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'question' } });
       });
@@ -1165,7 +1261,9 @@ describe('App', () => {
       });
 
       expect(
-        screen.getByPlaceholderText('Ask QuickAI anything...'),
+        screen.getByPlaceholderText(
+          'Ask a question, or type / to see commands',
+        ),
       ).toBeInTheDocument();
     });
 
@@ -1180,7 +1278,9 @@ describe('App', () => {
       await showOverlay();
 
       // Complete a turn so isSaved = false
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'q' } });
       });
@@ -1247,7 +1347,9 @@ describe('App', () => {
       await showOverlay();
 
       // Complete a turn (unsaved)
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'q' } });
       });
@@ -1306,7 +1408,9 @@ describe('App', () => {
       await showOverlay();
 
       // Complete a turn so isSaved = false
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'q' } });
       });
@@ -1375,7 +1479,9 @@ describe('App', () => {
       await showOverlay();
 
       // Complete a turn
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'q' } });
       });
@@ -1496,7 +1602,9 @@ describe('App', () => {
       await showOverlay();
 
       // Complete a turn to enter chat mode
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'q' } });
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -1532,7 +1640,9 @@ describe('App', () => {
       await showOverlay();
 
       // Complete a turn to enter chat mode
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'q' } });
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -1670,7 +1780,9 @@ describe('App', () => {
       // Panel must close even on failure; app must still be running
       expect(screen.queryByPlaceholderText(/search past chats/i)).toBeNull();
       expect(
-        screen.getByPlaceholderText('Ask QuickAI anything...'),
+        screen.getByPlaceholderText(
+          'Ask a question, or type / to see commands',
+        ),
       ).toBeInTheDocument();
     });
 
@@ -1714,7 +1826,9 @@ describe('App', () => {
   describe('image integration', () => {
     /** Helper: paste an image file into the textarea and wait for thumbnails. */
     async function pasteImage() {
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const file = new File(['fake-img-data'], 'photo.png', {
         type: 'image/png',
       });
@@ -1819,7 +1933,9 @@ describe('App', () => {
       });
 
       // Type a message and submit
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'describe this' } });
       });
@@ -1867,7 +1983,9 @@ describe('App', () => {
       enableChannelCapture();
 
       // Submit with Enter (no text, just images)
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
       });
@@ -2037,7 +2155,9 @@ describe('App', () => {
       await showOverlay();
 
       // Send a plain text message and complete the generation to enter chat mode
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'hello' } });
       });
@@ -2087,7 +2207,9 @@ describe('App', () => {
         '[class*="flex flex-col w-full shrink-0"]',
       )!;
       expect(askBarWrapper.classList.contains('ring-2')).toBe(true);
-      expect(askBarWrapper.classList.contains('ring-red-500/60')).toBe(false);
+      expect(askBarWrapper.classList.contains('ring-status-error/60')).toBe(
+        false,
+      );
     });
 
     it('dragOver shows red ring and max label when already at max images', async () => {
@@ -2100,7 +2222,9 @@ describe('App', () => {
       await showOverlay();
 
       // Paste 3 images to reach max
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       for (let i = 0; i < 3; i++) {
         const file = new File([`data${i}`], `img${i}.png`, {
           type: 'image/png',
@@ -2126,7 +2250,9 @@ describe('App', () => {
       const askBarWrapper = document.querySelector(
         '[class*="flex flex-col w-full shrink-0"]',
       )!;
-      expect(askBarWrapper.classList.contains('ring-red-500/60')).toBe(true);
+      expect(askBarWrapper.classList.contains('ring-status-error/60')).toBe(
+        true,
+      );
       expect(screen.getByText('Max 3 images')).toBeInTheDocument();
     });
 
@@ -2153,7 +2279,9 @@ describe('App', () => {
       await showOverlay();
 
       // Submit to trigger isGenerating
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'hi' } });
       });
@@ -2177,7 +2305,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'hi' } });
       });
@@ -2219,7 +2349,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       for (let i = 0; i < 3; i++) {
         const img = new File([`d${i}`], `i${i}.png`, { type: 'image/png' });
         await act(async () => {
@@ -2284,7 +2416,9 @@ describe('App', () => {
       });
 
       // Type and submit to create a user message with image
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'what is this?' } });
       });
@@ -2345,7 +2479,9 @@ describe('App', () => {
       await showOverlay();
 
       // Paste and submit while still processing → pendingUserMessage with blob URL
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const file = new File(['data'], 'img.png', { type: 'image/png' });
       await act(async () => {
         fireEvent.paste(textarea, {
@@ -2449,7 +2585,9 @@ describe('App', () => {
       await showOverlay();
 
       // Paste an image — thumbnail appears immediately with null filePath
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const file = new File(['data'], 'img.png', { type: 'image/png' });
       await act(async () => {
         fireEvent.paste(textarea, {
@@ -2511,7 +2649,9 @@ describe('App', () => {
       await showOverlay();
 
       // Paste an image; thumbnail appears immediately (filePath null)
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const file = new File(['data'], 'img.png', { type: 'image/png' });
       await act(async () => {
         fireEvent.paste(textarea, {
@@ -2559,7 +2699,9 @@ describe('App', () => {
       await showOverlay();
 
       // Start a normal text conversation (no images)
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'hello' } });
       });
@@ -2605,7 +2747,9 @@ describe('App', () => {
       await showOverlay();
 
       // Paste an image
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const file = new File(['data'], 'img.png', { type: 'image/png' });
       await act(async () => {
         fireEvent.paste(textarea, {
@@ -2639,7 +2783,7 @@ describe('App', () => {
 
       // Should revert to ask-bar mode with the query restored
       const restoredTextarea = screen.getByPlaceholderText(
-        'Ask QuickAI anything...',
+        'Ask a question, or type / to see commands',
       );
       expect(restoredTextarea).toBeInTheDocument();
       expect((restoredTextarea as HTMLTextAreaElement).value).toBe(
@@ -2697,7 +2841,9 @@ describe('App', () => {
       });
 
       // Submit while both images are still processing
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'two images' } });
       });
@@ -2749,7 +2895,9 @@ describe('App', () => {
       await showOverlay();
 
       // Paste and submit while processing
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const file = new File(['data'], 'img.png', { type: 'image/png' });
       await act(async () => {
         fireEvent.paste(textarea, {
@@ -2810,7 +2958,9 @@ describe('App', () => {
 
       // User's query should be restored so their text isn't lost
       expect(
-        screen.getByPlaceholderText('Ask QuickAI anything...'),
+        screen.getByPlaceholderText(
+          'Ask a question, or type / to see commands',
+        ),
       ).toHaveValue('describe');
     });
   });
@@ -2874,7 +3024,9 @@ describe('App', () => {
 
       // Attach 3 images via paste to reach the limit.
       const pasteOneImage = async () => {
-        const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+        const textarea = screen.getByPlaceholderText(
+          'Ask a question, or type / to see commands',
+        );
         const file = new File(['data'], 'photo.png', { type: 'image/png' });
         await act(async () => {
           fireEvent.paste(textarea, {
@@ -2931,7 +3083,9 @@ describe('App', () => {
     await showOverlay();
 
     // Paste an image so attachedImages is non-empty
-    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    const textarea = screen.getByPlaceholderText(
+      'Ask a question, or type / to see commands',
+    );
     const file = new File(['data'], 'img.png', { type: 'image/png' });
     await act(async () => {
       fireEvent.paste(textarea, {
@@ -2963,7 +3117,9 @@ describe('App', () => {
     await act(async () => {});
     await showOverlay();
 
-    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    const textarea = screen.getByPlaceholderText(
+      'Ask a question, or type / to see commands',
+    );
     const file = new File(['data'], 'img.png', { type: 'image/png' });
     await act(async () => {
       fireEvent.paste(textarea, {
@@ -2996,7 +3152,9 @@ describe('App', () => {
 
     await showOverlay();
 
-    const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+    const textarea = screen.getByPlaceholderText(
+      'Ask a question, or type / to see commands',
+    );
 
     // Complete a conversation turn
     act(() => {
@@ -3025,7 +3183,7 @@ describe('App', () => {
 
     // Should be back to input bar mode with placeholder
     expect(
-      screen.getByPlaceholderText('Ask QuickAI anything...'),
+      screen.getByPlaceholderText('Ask a question, or type / to see commands'),
     ).toBeInTheDocument();
     // Old messages should be gone
     expect(screen.queryByText('First response')).toBeNull();
@@ -3045,7 +3203,9 @@ describe('App', () => {
 
       // Use "/screen " (with trailing space) so the suggestion popover is dismissed
       // and Enter goes to the submit handler directly.
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: '/screen ' } });
       });
@@ -3075,7 +3235,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, {
           target: { value: '/screen what is this error?' },
@@ -3106,7 +3268,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, {
           target: { value: 'hello /screen there' },
@@ -3142,7 +3306,9 @@ describe('App', () => {
 
       // Use "/screen " (with trailing space) so the suggestion popover is dismissed
       // and Enter goes directly to the submit handler.
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: '/screen ' } });
       });
@@ -3173,7 +3339,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: '/screen ' } });
       });
@@ -3202,7 +3370,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: '/screen ' } });
       });
@@ -3226,7 +3396,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       // First attempt fails; error banner appears.
       act(() => {
         fireEvent.change(textarea, { target: { value: '/screen ' } });
@@ -3261,7 +3433,9 @@ describe('App', () => {
 
       // Paste an image first. This exercises the filter/map on attachedImages inside
       // handleScreenSubmit, covering the lines for non-null filePath images.
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const file = new File(['img'], 'photo.png', { type: 'image/png' });
       await act(async () => {
         fireEvent.paste(textarea, {
@@ -3309,7 +3483,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay('some context');
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: '/screen explain' } });
       });
@@ -3342,7 +3518,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: '/screen check this' } });
       });
@@ -3379,7 +3557,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, {
           target: { value: '/screen what is this?' },
@@ -3412,7 +3592,9 @@ describe('App', () => {
       await showOverlay();
 
       // Paste an image; save_image_command hangs, so filePath stays null
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const file = new File(['img'], 'photo.png', { type: 'image/png' });
       await act(async () => {
         fireEvent.paste(textarea, {
@@ -3454,7 +3636,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: '/screen ' } });
       });
@@ -3491,7 +3675,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, {
           target: { value: '/think why is the sky blue?' },
@@ -3520,7 +3706,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: '/think' } });
       });
@@ -3541,7 +3729,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, {
           target: { value: 'hello /think world' },
@@ -3570,7 +3760,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay('some selected text');
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, {
           target: { value: '/think explain this code' },
@@ -3600,7 +3792,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: '/think ' } });
       });
@@ -3628,7 +3822,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, {
           target: { value: '/screen /think explain this' },
@@ -3661,7 +3857,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, {
           target: { value: '/think /screen explain this' },
@@ -3696,7 +3894,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, {
           target: { value: '/rewrite fix this text' },
@@ -3729,7 +3929,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, {
           target: { value: '/translate jpn hello world' },
@@ -3760,7 +3962,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, {
           target: { value: '/think /tldr some long text' },
@@ -3792,7 +3996,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: '/rewrite' } });
       });
@@ -3816,7 +4022,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: '/translate jpn' } });
       });
@@ -3838,7 +4046,9 @@ describe('App', () => {
       // Activate overlay with selected text as context
       await showOverlay('original selected text');
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       // Type a command with extra instruction so strippedMessage is non-empty
       // (bypasses the "no content" early guard) and selectedContext is also set.
       act(() => {
@@ -3879,7 +4089,9 @@ describe('App', () => {
       await showOverlay('my selected text');
 
       // Paste an image and wait for backend resolution so hasPendingImages is false
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const file = new File(['data'], 'img.png', { type: 'image/png' });
       await act(async () => {
         fireEvent.paste(textarea, {
@@ -3927,7 +4139,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, {
           target: { value: '/rewrite fix this text' },
@@ -3957,7 +4171,9 @@ describe('App', () => {
       await showOverlay();
 
       // Paste an image and wait for backend resolution
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const file = new File(['fake-img-data'], 'photo.png', {
         type: 'image/png',
       });
@@ -4032,7 +4248,9 @@ describe('App', () => {
       await showOverlay();
 
       // Paste an image — thumbnail appears immediately (filePath null)
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const file = new File(['data'], 'img.png', { type: 'image/png' });
       await act(async () => {
         fireEvent.paste(textarea, {
@@ -4104,7 +4322,9 @@ describe('App', () => {
       await showOverlay();
 
       expect(
-        screen.getByPlaceholderText('Ask QuickAI anything...'),
+        screen.getByPlaceholderText(
+          'Ask a question, or type / to see commands',
+        ),
       ).toBeInTheDocument();
     });
 
@@ -4135,7 +4355,9 @@ describe('App', () => {
 
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: 'hi' } });
 
       // Submit with Enter
@@ -4168,7 +4390,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: 'hi' } });
       act(() => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -4238,7 +4462,9 @@ describe('App', () => {
 
       expect(invoke).toHaveBeenCalledWith('exit_minibar_size');
       expect(
-        screen.getByPlaceholderText('Ask QuickAI anything...'),
+        screen.getByPlaceholderText(
+          'Ask a question, or type / to see commands',
+        ),
       ).toBeInTheDocument();
     });
 
@@ -4281,7 +4507,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: 'open notepad' } });
       await act(async () => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -4298,7 +4526,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: '/do tidy my desktop' } });
       await act(async () => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -4316,7 +4546,9 @@ describe('App', () => {
       await showOverlay();
 
       // Enter chat mode so the window controls (and Minimize) are available.
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: 'hi' } });
       act(() => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -4352,7 +4584,9 @@ describe('App', () => {
         await act(async () => {});
         await showOverlay();
 
-        const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+        const textarea = screen.getByPlaceholderText(
+          'Ask a question, or type / to see commands',
+        );
         fireEvent.change(textarea, { target: { value: 'hi' } });
         act(() => {
           fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -4382,7 +4616,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, {
         target: { value: 'what is on the screen' },
       });
@@ -4402,7 +4638,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: '/do' } });
       await act(async () => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -4422,7 +4660,9 @@ describe('App', () => {
       // A bare `/do` with only a selection is rejected by the empty-message
       // guard, so pair it with /think (which the guard allows) to exercise the
       // selection fallback.
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: '/think /do' } });
       await act(async () => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -4439,7 +4679,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: '/do open notepad' } });
       await act(async () => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -4462,7 +4704,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: '/do open notepad' } });
       await act(async () => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -4485,7 +4729,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: '/do open notepad' } });
       await act(async () => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -4519,7 +4765,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: '/do open notepad' } });
       await act(async () => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -4558,7 +4806,9 @@ describe('App', () => {
       await showOverlay();
 
       // Submit a message so we have a conversation
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'hello' } });
       });
@@ -4592,7 +4842,9 @@ describe('App', () => {
       await showOverlay();
 
       // Submit a message
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'test save' } });
       });
@@ -4677,7 +4929,9 @@ describe('App', () => {
 
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.change(textarea, { target: { value: 'copy test' } });
       });
@@ -4739,7 +4993,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: 'hello' } });
       act(() => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -4791,7 +5047,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: 'hello' } });
       act(() => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -4830,7 +5088,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: 'hello' } });
       act(() => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -4858,7 +5118,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: 'hi' } });
       act(() => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -4896,7 +5158,9 @@ describe('App', () => {
         pinned: false,
       });
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: 'hi' } });
       act(() => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -4923,7 +5187,9 @@ describe('App', () => {
       });
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: 'hi' } });
       act(() => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -4946,7 +5212,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: '/do open notepad' } });
       await act(async () => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -5028,7 +5296,9 @@ describe('App', () => {
     it('acts on keys typed into the input box while a confirmation is pending', async () => {
       await startAgentAwaitingConfirmation();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       act(() => {
         fireEvent.keyDown(textarea, { key: '1' });
       });
@@ -5110,7 +5380,9 @@ describe('App', () => {
       render(<App />);
       await act(async () => {});
       await showOverlay();
-      return screen.getByPlaceholderText('Ask QuickAI anything...');
+      return screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
     }
 
     it('lists every skill, marking enabled ones inert', async () => {
@@ -5332,7 +5604,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      let textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      let textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: '/add' } });
       await act(async () => {});
       expect(screen.getByText('No skills configured')).toBeInTheDocument();
@@ -5345,10 +5619,120 @@ describe('App', () => {
       });
       await showOverlay();
 
-      textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: '/add' } });
       await act(async () => {});
       expect(screen.getByText('translate')).toBeInTheDocument();
+    });
+
+    it('re-reads the skill list when the overlay is restored from the mini bar', async () => {
+      enableChannelCaptureWithResponses({
+        get_skills: [],
+        list_conversations: [],
+      });
+
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      const getSkillsCalls = () =>
+        invoke.mock.calls.filter((c) => c[0] === 'get_skills').length;
+      const before = getSkillsCalls();
+
+      // The overlay loses focus while the user is in the Settings window, so it
+      // shrinks to the mini bar. This path does NOT emit a show event — the
+      // frontend restores `overlayState` directly — which is why the skill list
+      // used to go stale (item 6).
+      await act(async () => {
+        emitTauriEvent('quickai://minibar', {});
+      });
+
+      // Click the mini bar to restore (pointer down + up, no movement).
+      const minibar = document.querySelector('.w-12.h-12') as HTMLElement;
+      expect(minibar).not.toBeNull();
+      await act(async () => {
+        fireEvent.pointerDown(minibar, { clientX: 10, clientY: 10 });
+        fireEvent.pointerUp(minibar, { clientX: 10, clientY: 10 });
+      });
+
+      // Restoring into the visible state re-reads the skill list.
+      expect(getSkillsCalls()).toBeGreaterThan(before);
+    });
+
+    it('re-reads the skill list when a show event arrives while already visible', async () => {
+      let list: unknown[] = [];
+      invoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'get_skills') return list;
+        if (cmd === 'list_conversations') return [];
+      });
+
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      const getSkillsCalls = () =>
+        invoke.mock.calls.filter((c) => c[0] === 'get_skills').length;
+      const before = getSkillsCalls();
+
+      // A second show event while the overlay is already visible: `overlayState`
+      // does not change (the set is a no-op), so only the `sessionId` bump can
+      // trigger the refresh. Without it, `/add` would silently stay stale.
+      list = [{ id: 's2', alias: 'translate', path: '/b.md', enabled: false }];
+      await showOverlay();
+
+      expect(getSkillsCalls()).toBeGreaterThan(before);
+    });
+
+    it('re-reads the skill list on window focus while the overlay is visible', async () => {
+      enableChannelCaptureWithResponses({
+        get_skills: [],
+        list_conversations: [],
+      });
+
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      const getSkillsCalls = () =>
+        invoke.mock.calls.filter((c) => c[0] === 'get_skills').length;
+      const before = getSkillsCalls();
+
+      // The pinned case: the user returns from the Settings window without the
+      // overlay ever leaving the visible state, so only focus signals it.
+      await act(async () => {
+        window.dispatchEvent(new Event('focus'));
+      });
+
+      expect(getSkillsCalls()).toBeGreaterThan(before);
+    });
+
+    it('does not re-read the skill list on focus while in the mini bar', async () => {
+      enableChannelCaptureWithResponses({
+        get_skills: [],
+        list_conversations: [],
+      });
+
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      await act(async () => {
+        emitTauriEvent('quickai://minibar', {});
+      });
+
+      const getSkillsCalls = () =>
+        invoke.mock.calls.filter((c) => c[0] === 'get_skills').length;
+      const before = getSkillsCalls();
+
+      // Focus while shrunk to the mini bar must not issue a pointless read; the
+      // list is refreshed when the overlay is restored instead.
+      await act(async () => {
+        window.dispatchEvent(new Event('focus'));
+      });
+
+      expect(getSkillsCalls()).toBe(before);
     });
 
     it('passes selected skills to /do and clears the selection', async () => {
@@ -5419,7 +5803,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       fireEvent.change(textarea, { target: { value: '/do open notepad' } });
       await act(async () => {
         fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
@@ -5447,7 +5833,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       textarea.blur();
       expect(document.activeElement).not.toBe(textarea);
 
@@ -5463,7 +5851,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       textarea.blur();
 
       act(() => {
@@ -5478,7 +5868,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const notCancelled = fireEvent.keyDown(textarea, {
         key: 'End',
         ctrlKey: true,
@@ -5495,7 +5887,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       textarea.blur();
 
       // The handler consumes the key (preventDefault) and can fire repeatedly.
@@ -5512,7 +5906,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       textarea.blur();
 
       expect(fireEvent.keyDown(window, { key: 'Home', metaKey: true })).toBe(
@@ -5525,7 +5921,9 @@ describe('App', () => {
       await act(async () => {});
       await showOverlay();
 
-      const textarea = screen.getByPlaceholderText('Ask QuickAI anything...');
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
       const notCancelled = fireEvent.keyDown(textarea, {
         key: 'Home',
         ctrlKey: true,

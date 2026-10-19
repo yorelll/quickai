@@ -671,6 +671,108 @@ describe('ConversationView', () => {
     expect(scrollEl.scrollTop).toBe(500);
   });
 
+  describe('content-growth re-pin', () => {
+    let capturedCallback: ResizeObserverCallback | null = null;
+
+    function spyOnResizeObserver() {
+      const OriginalMock = globalThis.ResizeObserver;
+      vi.spyOn(globalThis, 'ResizeObserver').mockImplementation(function (
+        callback: ResizeObserverCallback,
+      ) {
+        capturedCallback = callback;
+        return new OriginalMock(callback) as ResizeObserver;
+      });
+    }
+
+    it('re-pins to the bottom when content grows after a pin', () => {
+      spyOnResizeObserver();
+
+      const { container } = render(
+        <ConversationView
+          messages={[
+            { id: '1', role: 'user' as const, content: 'question' },
+            { id: '2', role: 'assistant' as const, content: 'long reply' },
+          ]}
+          isGenerating={false}
+          onClose={vi.fn()}
+          onMinimize={vi.fn()}
+          scrollToBottomSignal={1}
+        />,
+      );
+
+      const scrollEl = container.querySelector(
+        '.chat-messages-scroll',
+      ) as HTMLElement;
+      const contentEl = scrollEl.firstElementChild as HTMLElement;
+      expect(contentEl).not.toBeNull();
+
+      // The load pin has run; the view is momentarily short of the bottom
+      // because a code block / image is still laying out.
+      Object.defineProperty(scrollEl, 'scrollHeight', {
+        value: 1200,
+        configurable: true,
+      });
+      Object.defineProperty(scrollEl, 'scrollTop', {
+        value: 0,
+        configurable: true,
+        writable: true,
+      });
+
+      // Late content settles — the wrapper grows and the observer fires.
+      act(() => {
+        capturedCallback!(
+          [{ target: contentEl } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+
+      // Auto-scroll is on after the load pin, so the view snaps to the bottom.
+      expect(scrollEl.scrollTop).toBe(1200);
+    });
+
+    it('does not re-pin on content growth once the user scrolled up', () => {
+      spyOnResizeObserver();
+
+      const { container } = render(
+        <ConversationView
+          messages={[{ id: '1', role: 'user' as const, content: 'question' }]}
+          isGenerating={false}
+          onClose={vi.fn()}
+          onMinimize={vi.fn()}
+        />,
+      );
+
+      const scrollEl = container.querySelector(
+        '.chat-messages-scroll',
+      ) as HTMLElement;
+      const contentEl = scrollEl.firstElementChild as HTMLElement;
+      Object.defineProperty(scrollEl, 'scrollHeight', {
+        value: 1200,
+        configurable: true,
+      });
+      Object.defineProperty(scrollEl, 'scrollTop', {
+        value: 0,
+        configurable: true,
+        writable: true,
+      });
+
+      // The user scrolls up — auto-scroll mode turns off.
+      act(() => {
+        scrollEl.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+      });
+
+      act(() => {
+        capturedCallback!(
+          [{ target: contentEl } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+
+      // The reader's position is preserved.
+      expect(scrollEl.scrollTop).toBe(0);
+    });
+  });
+
   it('scrolls the transcript to the top when scrollToTopSignal changes', () => {
     const messages = [
       { id: '1', role: 'user' as const, content: 'first' },
