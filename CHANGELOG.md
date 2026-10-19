@@ -41,10 +41,12 @@ Windows-shell, Settings, chat, and skills fixes.
   holds, it lists it with `computer_list_dir` — a step you approve and can see.
   The trade-off: a task like "list every file on my desktop" may take one extra
   approval, because the agent must list a folder before it can learn the path.
-* **The installer is about 10 MB larger.** The syntax-highlighting dependency
-  bundles one lazy-loaded chunk per programming language; only the chunk for a
-  language actually being highlighted is fetched at runtime (roughly +60 kB
-  gzipped at first paint), but the installer grows by about 10 MB.
+* **The installer is about 1.7 MB larger.** The syntax-highlighting dependency
+  bundles one lazy-loaded chunk per programming language, so the uncompressed
+  frontend assets grow by about 10 MB — but Tauri embeds those compressed, so the
+  shipped installer grows by about 1.7 MB (7.4 MB installer, 9.6 MB portable
+  bundle). Only the chunk for a language actually being highlighted is fetched at
+  runtime, roughly +60 kB gzipped at first paint.
 * **Skill paths are now validated** — only `.txt`, `.md`, and `.markdown` are
   accepted, a directory is rejected, and surrounding quotes (including curly
   quotes) are stripped so a pasted `"D:\…\test.md"` works. Rejection happens
