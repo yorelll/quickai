@@ -157,6 +157,24 @@ export function SettingsWindow() {
   const { t } = useTranslation();
   const { config, reload, setConfig } = useConfigSync();
   const [activeTab, setActiveTab] = useState<SettingsTabId>('general');
+  /**
+   * The tabs *other than General* that have been opened at least once. General
+   * is the initial tab and is rendered unconditionally; every other tab is
+   * mounted on its first visit and kept mounted (hidden) thereafter — see
+   * `TabPanel`.
+   *
+   * Measured before this change: every switch re-mounted the tab from scratch
+   * and re-ran its mount effects, issuing 2 IPC calls per revisit — `get_skills`
+   * (a file read) and `get_settings` (SQLite) for AI, `get_default_data_dir`
+   * and `is_auto_start_enabled_command` for General, the last of which spawns a
+   * `schtasks` process. That repeated, redundant work is the lag the user
+   * reported when switching with nothing edited; `resyncToken` only changes on
+   * save and the focus reload only fires on window focus, so neither is on the
+   * switching path.
+   */
+  const [visited, setVisited] = useState<ReadonlySet<SettingsTabId>>(
+    () => new Set<SettingsTabId>(),
+  );
   const [savedVisible, setSavedVisible] = useState(false);
   const [marker, setMarker] = useState<CorruptMarker | null>(null);
   const [markerDismissed, setMarkerDismissed] = useState(false);
@@ -164,6 +182,12 @@ export function SettingsWindow() {
   const [resyncToken, setResyncToken] = useState(0);
 
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Activates a tab, mounting it for the first time if it has never been opened. */
+  const selectTab = useCallback((id: SettingsTabId) => {
+    setActiveTab(id);
+    setVisited((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+  }, []);
 
   useEffect(() => {
     void getCurrentWindow().setSize(
@@ -302,7 +326,7 @@ export function SettingsWindow() {
               aria-controls={`panel-${tab.id}`}
               tabIndex={active ? 0 : -1}
               className={`${styles.tab} ${active ? styles.tabActive : ''}`}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => selectTab(tab.id)}
               onKeyDown={(e) => {
                 if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
                   e.preventDefault();
@@ -311,7 +335,7 @@ export function SettingsWindow() {
                     e.key === 'ArrowRight'
                       ? TABS[(idx + 1) % TABS.length]
                       : TABS[(idx - 1 + TABS.length) % TABS.length];
-                  setActiveTab(next.id);
+                  selectTab(next.id);
                 }
               }}
             >
@@ -324,41 +348,72 @@ export function SettingsWindow() {
         })}
       </div>
 
-      <div className={styles.body} id={`panel-${activeTab}`} role="tabpanel">
-        {activeTab === 'general' ? (
+      <div className={styles.body}>
+        <TabPanel id="general" active={activeTab === 'general'}>
           <GeneralTab
             config={config}
             resyncToken={resyncToken}
             onSaved={handleSaved}
           />
+        </TabPanel>
+        {visited.has('ai') ? (
+          <TabPanel id="ai" active={activeTab === 'ai'}>
+            <AiTab
+              config={config}
+              resyncToken={resyncToken}
+              onSaved={handleSaved}
+            />
+          </TabPanel>
         ) : null}
-        {activeTab === 'ai' ? (
-          <AiTab
-            config={config}
-            resyncToken={resyncToken}
-            onSaved={handleSaved}
-          />
+        {visited.has('display') ? (
+          <TabPanel id="display" active={activeTab === 'display'}>
+            <DisplayTab
+              config={config}
+              resyncToken={resyncToken}
+              onSaved={handleSaved}
+            />
+          </TabPanel>
         ) : null}
-        {activeTab === 'display' ? (
-          <DisplayTab
-            config={config}
-            resyncToken={resyncToken}
-            onSaved={handleSaved}
-          />
+        {visited.has('agent') ? (
+          <TabPanel id="agent" active={activeTab === 'agent'}>
+            <AgentTab
+              config={config}
+              resyncToken={resyncToken}
+              onSaved={handleSaved}
+            />
+          </TabPanel>
         ) : null}
-        {activeTab === 'agent' ? (
-          <AgentTab
-            config={config}
-            resyncToken={resyncToken}
-            onSaved={handleSaved}
-          />
-        ) : null}
-        {activeTab === 'about' ? (
-          <AboutTab config={config} onSaved={handleSaved} onReload={reload} />
+        {visited.has('about') ? (
+          <TabPanel id="about" active={activeTab === 'about'}>
+            <AboutTab config={config} onSaved={handleSaved} onReload={reload} />
+          </TabPanel>
         ) : null}
       </div>
 
       <SavedPill visible={savedVisible} />
+    </div>
+  );
+}
+
+/**
+ * One tab's panel. The panel is mounted the first time its tab is opened and
+ * stays mounted afterwards, hidden with the `hidden` attribute — which also
+ * takes it out of the accessibility tree, so role queries see only the active
+ * tab. Keeping it mounted is what stops a tab switch from re-running the
+ * subtree's mount effects (the measured cause of the switching lag).
+ */
+function TabPanel({
+  id,
+  active,
+  children,
+}: {
+  id: SettingsTabId;
+  active: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div role="tabpanel" id={`panel-${id}`} hidden={!active}>
+      {children}
     </div>
   );
 }

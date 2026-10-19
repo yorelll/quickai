@@ -33,6 +33,7 @@ function installBackend(
     marker?: unknown;
     settings?: Record<string, string>;
     settingsError?: boolean;
+    testConnection?: unknown;
   } = {},
 ) {
   let state = structuredClone(RAW);
@@ -63,6 +64,8 @@ function installBackend(
           return [];
         case 'get_default_data_dir':
           return 'C:\\Users\\me\\AppData\\Roaming\\quickai';
+        case 'test_connection':
+          return options.testConnection;
         default:
           return undefined;
       }
@@ -75,6 +78,7 @@ async function renderWindow(
     marker?: unknown;
     settings?: Record<string, string>;
     settingsError?: boolean;
+    testConnection?: unknown;
   } = {},
 ) {
   installBackend(options);
@@ -97,6 +101,11 @@ async function flushDebounce() {
   await act(async () => {
     vi.advanceTimersByTime(300);
   });
+}
+
+/** How many times `cmd` has been invoked since the mock was reset. */
+function countCalls(cmd: string): number {
+  return mockInvoke.mock.calls.filter((call) => call[0] === cmd).length;
 }
 
 describe('SettingsWindow', () => {
@@ -286,6 +295,63 @@ describe('SettingsWindow', () => {
     expect(screen.getByRole('status').className).not.toContain('Visible');
   });
 
+  describe('tab switching (keep-alive)', () => {
+    it('does not re-run a tab mount effect when the tab is revisited', async () => {
+      await renderWindow();
+      await goToTab('AI');
+      expect(countCalls('get_skills')).toBe(1);
+      expect(countCalls('get_settings')).toBe(1);
+
+      // Fast switching between two tabs must not re-fetch anything.
+      await goToTab('Display');
+      await goToTab('AI');
+      await goToTab('Display');
+      await goToTab('AI');
+
+      expect(countCalls('get_skills')).toBe(1);
+      expect(countCalls('get_settings')).toBe(1);
+    });
+
+    it('does not re-query the OS when General is revisited', async () => {
+      await renderWindow();
+      await act(async () => {});
+      expect(countCalls('is_auto_start_enabled_command')).toBe(1);
+      expect(countCalls('get_default_data_dir')).toBe(1);
+
+      await goToTab('AI');
+      await goToTab('General');
+      await goToTab('AI');
+      await goToTab('General');
+
+      // `is_auto_start_enabled_command` spawns a `schtasks` process; re-running
+      // it on every switch was the measured cost of item 3.
+      expect(countCalls('is_auto_start_enabled_command')).toBe(1);
+      expect(countCalls('get_default_data_dir')).toBe(1);
+    });
+
+    it('mounts a tab only once it has been opened', async () => {
+      await renderWindow();
+      expect(screen.queryByText('Chat model')).toBeNull();
+
+      await goToTab('AI');
+      await goToTab('Display');
+
+      // AI stays mounted after leaving it; Agent was never opened.
+      expect(screen.getByText('Chat model')).toBeInTheDocument();
+      expect(screen.queryByText('Agent permissions')).toBeNull();
+    });
+
+    it('exposes only the active panel to role queries', async () => {
+      await renderWindow();
+      await goToTab('AI');
+      await goToTab('Display');
+
+      const panels = screen.getAllByRole('tabpanel');
+      expect(panels).toHaveLength(1);
+      expect(panels[0]).toHaveAttribute('id', 'panel-display');
+    });
+  });
+
   describe('General tab', () => {
     it('saves the summon hotkey', async () => {
       await renderWindow();
@@ -438,6 +504,63 @@ describe('SettingsWindow', () => {
       expect(
         screen.getByRole('button', { name: 'Add skill' }),
       ).toBeInTheDocument();
+    });
+
+    it('shows the connection status control, untested by default', async () => {
+      await renderWindow();
+      await goToTab('AI');
+
+      expect(
+        screen.getByRole('status', { name: 'Connection status' }),
+      ).toHaveTextContent('Not yet tested');
+      expect(
+        screen.getByRole('button', { name: 'Test connection' }),
+      ).toBeInTheDocument();
+    });
+
+    it('keeps a connection verdict across tab switches', async () => {
+      await renderWindow({ testConnection: { status: 'success' } });
+      await goToTab('AI');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
+      await act(async () => {});
+      expect(
+        screen.getByRole('status', { name: 'Connection status' }),
+      ).toHaveTextContent('Connected');
+
+      // The panel stays mounted, so its verdict survives leaving the tab.
+      await goToTab('Display');
+      await goToTab('AI');
+      expect(
+        screen.getByRole('status', { name: 'Connection status' }),
+      ).toHaveTextContent('Connected');
+    });
+
+    it('ignores an API-key result that lands after unmount', async () => {
+      let resolveSettings!: (value: Record<string, string>) => void;
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === 'get_config' || cmd === 'reload_config_from_disk') {
+          return Promise.resolve(RAW);
+        }
+        if (cmd === 'get_skills') return Promise.resolve([]);
+        if (cmd === 'get_settings') {
+          return new Promise<Record<string, string>>((res) => {
+            resolveSettings = res;
+          });
+        }
+        return Promise.resolve(undefined);
+      });
+
+      const { unmount } = render(<SettingsWindow />);
+      await act(async () => {});
+      await goToTab('AI');
+      unmount();
+
+      await act(async () => {
+        resolveSettings({ api_key_openai: 'sk-late' });
+      });
+
+      expect(screen.queryByLabelText('API Key (OpenAI)')).toBeNull();
     });
 
     it('tolerates a failing API-key lookup', async () => {
@@ -648,21 +771,31 @@ describe('SettingsWindow', () => {
       await renderWindow();
       fireEvent.click(tab('About'));
 
-      // The long reference content lives in dialogs, not on the page.
-      expect(screen.queryByText('Double-tap Ctrl')).toBeNull();
+      // The long reference content lives in dialogs, not on the page. (The
+      // General tab stays mounted but hidden, so scope to the active panel.)
+      expect(
+        within(screen.getByRole('tabpanel')).queryByText('Double-tap Ctrl'),
+      ).toBeNull();
 
       fireEvent.click(
         screen.getByRole('button', { name: 'Shortcuts and commands' }),
       );
-      expect(screen.getByText('Double-tap Ctrl')).toBeInTheDocument();
-      expect(screen.getByText('Ctrl+S')).toBeInTheDocument();
-      expect(screen.getByText('/screen')).toBeInTheDocument();
+      const shortcuts = screen.getByRole('dialog');
+      expect(
+        within(shortcuts).getByText('Double-tap Ctrl'),
+      ).toBeInTheDocument();
+      expect(within(shortcuts).getByText('Ctrl+S')).toBeInTheDocument();
+      expect(within(shortcuts).getByText('/screen')).toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-      expect(screen.queryByText('Double-tap Ctrl')).toBeNull();
+      fireEvent.click(within(shortcuts).getByRole('button', { name: 'Close' }));
+      expect(screen.queryByRole('dialog')).toBeNull();
 
       fireEvent.click(screen.getByRole('button', { name: 'Help' }));
-      expect(screen.getByText(en['about.help.trayTitle'])).toBeInTheDocument();
+      expect(
+        within(screen.getByRole('dialog')).getByText(
+          en['about.help.trayTitle'],
+        ),
+      ).toBeInTheDocument();
 
       fireEvent.keyDown(document, { key: 'Escape' });
       expect(screen.queryByText(en['about.help.trayTitle'])).toBeNull();

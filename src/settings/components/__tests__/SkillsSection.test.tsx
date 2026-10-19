@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import { SkillsSection } from '../SkillsSection';
 import { invoke } from '../../../testUtils/mocks/tauri';
+import { en } from '../../../i18n/en';
 import type { Skill } from '../../skills';
 
 const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>;
@@ -25,7 +26,14 @@ const TRANSLATE: Skill = {
  */
 function installBackend(
   list: Skill[],
-  options: { loadFails?: boolean; saveFails?: boolean } = {},
+  options: {
+    loadFails?: boolean;
+    saveFails?: boolean;
+    /** Rejection value for `set_skills`; overrides `saveFails` when given. */
+    saveError?: unknown;
+    /** `pick_file` result: a path, null (cancel), or 'reject' (throws). */
+    pick?: string | null | 'reject';
+  } = {},
 ) {
   mockInvoke.mockImplementation(
     async (cmd: string, args?: Record<string, unknown>) => {
@@ -34,8 +42,13 @@ function installBackend(
         return list;
       }
       if (cmd === 'set_skills') {
+        if (options.saveError !== undefined) throw options.saveError;
         if (options.saveFails) throw new Error('disk full');
         return args?.skills;
+      }
+      if (cmd === 'pick_file') {
+        if (options.pick === 'reject') throw new Error('no picker');
+        return options.pick ?? null;
       }
       return undefined;
     },
@@ -44,7 +57,12 @@ function installBackend(
 
 async function renderSection(
   list: Skill[] = [BUILTIN, TRANSLATE],
-  options: { loadFails?: boolean; saveFails?: boolean } = {},
+  options: {
+    loadFails?: boolean;
+    saveFails?: boolean;
+    saveError?: unknown;
+    pick?: string | null | 'reject';
+  } = {},
 ) {
   installBackend(list, options);
   const view = render(<SkillsSection />);
@@ -366,6 +384,92 @@ describe('SkillsSection', () => {
 
     expect(mockInvoke).toHaveBeenCalledWith('set_skills', {
       skills: [BUILTIN, TRANSLATE],
+    });
+  });
+
+  it('explains what enabling a skill does', async () => {
+    await renderSection();
+    expect(
+      screen.getByText(en['settings.skills.enableHint']),
+    ).toBeInTheDocument();
+  });
+
+  describe('path file picker', () => {
+    it('fills the path from the native picker', async () => {
+      await renderSection([BUILTIN], { pick: 'D:\\skills\\gamma.md' });
+      startAdd();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Browse…' }));
+      await act(async () => {});
+
+      expect(mockInvoke).toHaveBeenCalledWith('pick_file');
+      expect(screen.getByLabelText('Path')).toHaveValue('D:\\skills\\gamma.md');
+    });
+
+    it('leaves a typed path untouched when the picker is cancelled', async () => {
+      await renderSection([BUILTIN], { pick: null });
+      startAdd();
+      typePath('D:\\typed.md');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Browse…' }));
+      await act(async () => {});
+
+      expect(screen.getByLabelText('Path')).toHaveValue('D:\\typed.md');
+    });
+
+    it('ignores a picker that fails', async () => {
+      await renderSection([BUILTIN], { pick: 'reject' });
+      startAdd();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Browse…' }));
+      await act(async () => {});
+
+      expect(screen.getByLabelText('Path')).toHaveValue('');
+    });
+  });
+
+  describe('backend path validation', () => {
+    /** Saves a fresh draft against a backend that rejects with `error`. */
+    async function saveRejected(error: unknown) {
+      await renderSection([BUILTIN], { saveError: error });
+      startAdd();
+      typeAlias('gamma');
+      typePath('D:\\skills\\gamma.md');
+      saveDraft();
+      await act(async () => {});
+      return screen.getByRole('alert');
+    }
+
+    it.each([
+      ['empty_path', 'Enter a path for this skill.'],
+      [
+        'path_not_a_file',
+        'That path is a folder. Choose a file, not a folder.',
+      ],
+      ['stray_quote', 'The path still starts or ends with a quote character.'],
+      ['unsupported_format', 'Only .txt and .md skill files are allowed.'],
+    ])('renders the %s rejection', async (kind, copy) => {
+      expect(await saveRejected({ kind })).toHaveTextContent(copy);
+    });
+
+    it('names the offending extension when the backend reports one', async () => {
+      expect(
+        await saveRejected({ kind: 'unsupported_format', extension: 'pdf' }),
+      ).toHaveTextContent(
+        'Unsupported file type (.pdf). Only .txt and .md files are allowed.',
+      );
+    });
+
+    it('renders a built-in-deletion rejection', async () => {
+      expect(
+        await saveRejected({ kind: 'builtin_not_deletable' }),
+      ).toHaveTextContent('The built-in skill cannot be deleted.');
+    });
+
+    it('falls back to generic copy for a rejection it cannot classify', async () => {
+      expect(await saveRejected({ kind: 'meltdown' })).toHaveTextContent(
+        "Couldn't save skills. Please try again.",
+      );
     });
   });
 });

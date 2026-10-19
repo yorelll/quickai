@@ -3,8 +3,13 @@
  *
  * The backend owns storage and re-validates every save; this component owns
  * the editing operations (add / edit / delete / reorder) and mirrors the alias
- * rules so a bad edit is rejected before the round-trip. The built-in
- * assistant skill is listed but cannot be deleted.
+ * rules so a bad edit is rejected before the round-trip. Path rules (a folder,
+ * a non-text extension, a stray quote) are left to the backend, and its typed
+ * rejection is localised here rather than shown as a generic failure. The
+ * built-in assistant skill is listed but cannot be deleted.
+ *
+ * A short note under the heading explains what the enable toggle actually does
+ * (item 8) — that an enabled skill joins the system prompt on every turn.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -12,11 +17,14 @@ import { invoke } from '@tauri-apps/api/core';
 
 import { Section, Toggle } from './index';
 import {
+  describeSkillError,
   isBuiltinSkill,
   newSkillId,
+  parseSkillError,
   validateAlias,
   type AliasError,
   type Skill,
+  type SkillSaveError,
 } from '../skills';
 import { useTranslation, type TranslationKey } from '../../i18n';
 import styles from '../../styles/settings.module.css';
@@ -27,11 +35,14 @@ const ALIAS_ERROR_KEYS: Record<AliasError, TranslationKey> = {
   duplicate: 'settings.skills.errorAliasDuplicate',
 };
 
+/** The last save's rejection: a typed backend kind, an unrecognised one, or none. */
+type SaveFailure = SkillSaveError | 'unknown' | null;
+
 export function SkillsSection() {
   const { t } = useTranslation();
   const [skills, setSkills] = useState<Skill[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [saveFailed, setSaveFailed] = useState(false);
+  const [saveFailure, setSaveFailure] = useState<SaveFailure>(null);
   /** Entry being added or edited, or null when nothing is in edit mode. */
   const [draft, setDraft] = useState<Skill | null>(null);
   const [draftError, setDraftError] = useState<AliasError | null>(null);
@@ -56,16 +67,36 @@ export function SkillsSection() {
   const persist = useCallback(async (next: Skill[]): Promise<boolean> => {
     try {
       setSkills(await invoke<Skill[]>('set_skills', { skills: next }));
-      setSaveFailed(false);
+      setSaveFailure(null);
       return true;
-    } catch {
-      setSaveFailed(true);
+    } catch (e) {
+      // The backend re-validates paths the frontend does not, so a rejection
+      // here is normally a typed `SkillError`; localise it rather than showing
+      // a generic message.
+      setSaveFailure(parseSkillError(e) ?? 'unknown');
       return false;
     }
   }, []);
 
+  /** Opens the native text-file picker and fills the draft's path with the choice. */
+  const handleBrowsePath = useCallback(
+    async (setValue: (next: string) => void) => {
+      try {
+        const picked = await invoke<string | null>('pick_file');
+        if (picked) setValue(picked);
+      } catch {
+        // Picker unavailable: leave the field untouched.
+      }
+    },
+    [],
+  );
+
   if (skills === null) {
-    return <Section heading={t('settings.section.skills')} />;
+    return (
+      <Section heading={t('settings.section.skills')}>
+        <p className={styles.rowHelper}>{t('settings.skills.enableHint')}</p>
+      </Section>
+    );
   }
 
   const isAdding =
@@ -143,14 +174,27 @@ export function SkillsSection() {
           aria-label={t('settings.skills.alias')}
           spellCheck={false}
         />
-        <input
-          className={styles.input}
-          value={entry.path}
-          onChange={(e) => setDraft({ ...entry, path: e.target.value })}
-          placeholder={t('settings.skills.pathPlaceholder')}
-          aria-label={t('settings.skills.path')}
-          spellCheck={false}
-        />
+        <div className={styles.fieldWithButton}>
+          <input
+            className={styles.input}
+            value={entry.path}
+            onChange={(e) => setDraft({ ...entry, path: e.target.value })}
+            placeholder={t('settings.skills.pathPlaceholder')}
+            aria-label={t('settings.skills.path')}
+            spellCheck={false}
+          />
+          <button
+            type="button"
+            className={`${styles.button} ${styles.buttonGhost}`}
+            onClick={() =>
+              void handleBrowsePath((next) =>
+                setDraft({ ...entry, path: next }),
+              )
+            }
+          >
+            {t('settings.general.dataDirBrowse')}
+          </button>
+        </div>
         {draftError ? (
           <p className={styles.rowError} role="alert">
             {t(ALIAS_ERROR_KEYS[draftError])}
@@ -237,14 +281,17 @@ export function SkillsSection() {
 
   return (
     <Section heading={t('settings.section.skills')}>
+      <p className={styles.rowHelper}>{t('settings.skills.enableHint')}</p>
       {loadFailed ? (
         <p className={styles.rowError} role="alert">
           {t('settings.skills.loadError')}
         </p>
       ) : null}
-      {saveFailed ? (
+      {saveFailure ? (
         <p className={styles.rowError} role="alert">
-          {t('settings.skills.saveError')}
+          {saveFailure === 'unknown'
+            ? t('settings.skills.saveError')
+            : describeSkillError(saveFailure, t)}
         </p>
       ) : null}
 

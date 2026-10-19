@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
 import { Section, TextField, Dropdown } from '../components';
+import { ConnectionTest } from '../components/ConnectionTest';
 import { SkillsSection } from '../components/SkillsSection';
 import { SaveField } from '../components/SaveField';
 import { configHelp } from '../configHelpers';
@@ -128,6 +129,7 @@ export function AiTab({ config, resyncToken, onSaved }: AiTabProps) {
             />
           )}
         />
+        <ConnectionTest />
       </Section>
 
       <Section heading={t('settings.section.apiKey')}>
