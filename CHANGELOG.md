@@ -8,6 +8,31 @@ and the changelog follows the
 are written by hand as part of the manual release process (see
 [RELEASING.md](RELEASING.md)).
 
+## [0.0.5](https://github.com/yorelll/quickai/compare/v0.0.4...v0.0.5) (2026-10-19)
+
+
+### Features
+
+* **agent:** directory listing tool, direct launch, and a path-free prompt ([1a8fd1e](https://github.com/yorelll/quickai/commit/1a8fd1e45ffc3056b3f890a8d50075f48e7229e6))
+* **backend:** configurable hotkey, agent mode/permissions, data dir, rename ([27c3268](https://github.com/yorelll/quickai/commit/27c3268925f4692685d455b3a71a55ef20959cf7))
+* **backend:** theme, skills, hotkey semantics, folder picker, durable taskbar hiding ([a749623](https://github.com/yorelll/quickai/commit/a749623ab3867bf2f2c71c5b34451d024accc0f1))
+* **chat:** /add skill picker, scroll and layout fixes, keyboard control ([35da460](https://github.com/yorelll/quickai/commit/35da4605e21cb4aa738fdb7d29bb5c09c43c4156))
+* **chat:** rename, pin, agent keyboard control, layout fixes ([dda9b87](https://github.com/yorelll/quickai/commit/dda9b8721bdd74e7a6c6f3f576c8eec7ee9f82e3))
+* **settings:** connection test, keep-alive tabs, skills UI ([5389145](https://github.com/yorelll/quickai/commit/5389145481113dfd4b2f00aee1a75d46aa3873f4))
+* **settings:** General tab additions, About dialogs, Skills UI, light theme ([e6b6d42](https://github.com/yorelll/quickai/commit/e6b6d42c33054e66a41b9a0d52810c31682679e6))
+* **settings:** General tab, no default model, agent config UI, About help ([121b697](https://github.com/yorelll/quickai/commit/121b69716c0d9c492cb2b09cb7afff01efb87345))
+* **skills:** validate the path, normalise quotes, add a file picker ([2329aa3](https://github.com/yorelll/quickai/commit/2329aa3a6f4ad79c4e9be94f23668275335d11de))
+* **theme:** semantic tokens, a real light theme, and code highlighting ([a8e3b5b](https://github.com/yorelll/quickai/commit/a8e3b5b4d413e578f013fb293f370b9403541d89))
+
+
+### Bug Fixes
+
+* **chat:** size the window from the layout box, and re-pin on content growth ([bbffc01](https://github.com/yorelll/quickai/commit/bbffc01a43b05759847d645f77d69f1ab945dd4f))
+* compile on non-Windows targets ([2eeeef5](https://github.com/yorelll/quickai/commit/2eeeef5dc9e7fbce24627318570a99b9a9483fa3))
+* gate Windows-only items that are dead on other targets ([5008b3a](https://github.com/yorelll/quickai/commit/5008b3a372e5e50dbf0033a9f8f66bc2bffd701b))
+* **test:** make the seed-failure test exercise one branch on every platform ([5053aed](https://github.com/yorelll/quickai/commit/5053aed267b850529f001b76911f7cce4abb4910))
+* **windows:** durable taskbar hiding, and one double-tap to summon ([6c31b3f](https://github.com/yorelll/quickai/commit/6c31b3f2b3b1013d30412c4e732a7145f79bcb4c))
+
 ## 0.0.4 (2026-10-19)
 
 An agent directory-listing tool, a provider connection test, and a batch of
