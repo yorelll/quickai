@@ -74,8 +74,8 @@ keep that job green.
 
 ## Cutting a release (manual)
 
-Both `v0.0.1`, `v0.0.2`, and `v0.0.3` were cut this way. To release version
-`X.Y.Z`:
+Every release so far (`v0.0.1` through `v0.0.4`) was cut this way. To release
+version `X.Y.Z`:
 
 1. **Bump the version** in every place it is pinned, on the commit you intend to
    release:

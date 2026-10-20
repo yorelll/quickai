@@ -8,6 +8,75 @@ and the changelog follows the
 are written by hand as part of the manual release process (see
 [RELEASING.md](RELEASING.md)).
 
+## 0.0.5 (2026-10-20)
+
+A chat-layout rebuild and a hotkey that can no longer dismiss, plus a
+conventional tray interaction, dismissible Settings errors, and a batch of
+skills and copy fixes.
+
+### Features
+
+* **Dismissible error popups** — skill load failures, skill save failures, and
+  the General tab's start-on-boot failure now open a popup closed with **×** or
+  <kbd>Esc</kbd>. A dismissed error stays dismissed; an undismissed one opens
+  again when Settings is reopened. That is deliberate: an unacknowledged
+  failure must not be silently discarded.
+
+### Changed
+
+* **The tray icon now follows convention** — **left-click opens or raises** the
+  overlay directly (no menu first, and never a hide), while **right-click
+  shows the menu**, which contains only **Settings** and **Quit**. The labels
+  follow the interface language and update immediately when it changes, with
+  no restart.
+* **The summon key only opens, never closes** — one double-tap opens the
+  overlay from hidden, restores it from the mini bar, or raises it when it is
+  already on screen. Dismissal belongs to <kbd>Esc</kbd>, <kbd>Ctrl</kbd>+<kbd>W</kbd>,
+  or the close button.
+* **The chat layout is a viewport-filling flex column** — the header and input
+  bar are fixed and the transcript absorbs the difference in window height, so
+  a short window shrinks the transcript instead of pushing the input out of
+  view. The window is now sized from **content requirements** (transcript
+  content, chat chrome, input bar, banners) rather than from the container,
+  which fills the viewport in chat mode. The collapsed height is the real ask-bar
+  height (the previous value was 53 px short of it), and placement uses the
+  monitor's **work area** in **logical coordinates**, so a scaled display no
+  longer places the window under the taskbar or off-screen.
+* **The window fits its content** — after you drag the window taller, it
+  settles back to the height its content needs. This is intentional. With the
+  structural fix, a wrong native height costs transcript space rather than
+  clipping the input bar.
+* **A skill selected twice in one turn is sent once** — the picker still allows
+  the same skill to be selected twice, but the turn de-duplicates by first
+  occurrence, and the backend enforces the same rule when it assembles the
+  prompt, so both the chat and agent paths are covered.
+
+### Fixed
+
+* **One double-tap now summons the overlay** — 0.0.4 attempted this by deciding
+  on the native window state and removing the cooldown, but the problem
+  remained. This version changes the method: it removes the *dismiss* action
+  entirely instead of adjusting the predicate. Two races that made the window
+  "look unresponsive" are also fixed: a summon during the exit animation now
+  cancels that exit, and expanding a mini bar that <kbd>Win</kbd>+<kbd>D</kbd>
+  minimized now restores the window before showing it.
+* **The chat interface is no longer clipped** — the bottom input no longer
+  shows only half of itself while streaming, and switching conversations,
+  opening the history dropdown, and restoring from the mini bar all display
+  fully. 0.0.4 tried changing the measurement from `getBoundingClientRect()` to
+  `offsetHeight`; that did not resolve it. This version changes the structure so
+  the chat column fills the window and the input is always inside it.
+* **Copying a reply no longer produces a leading blank line** — both the copy
+  button and the copy shortcut trim leading blank lines before writing to the
+  clipboard.
+* **A skill error no longer sits in Settings forever** — the persistent inline
+  alert was not introduced in 0.0.4; it already existed in 0.0.3. What 0.0.4's
+  tab keep-alive changed is that the alert now **outlived tab switches**, so it
+  appeared impossible to clear. It is now the dismissible popup described above.
+* **The tray icon's old behaviour** (left-click opened a menu, right-click
+  opened the overlay directly) is replaced by the left-click/right-click
+  behaviour described under Changed.
+
 ## 0.0.4 (2026-10-19)
 
 An agent directory-listing tool, a provider connection test, and a batch of
@@ -65,9 +134,13 @@ Windows-shell, Settings, chat, and skills fixes.
   hotkey decided on an internal flag rather than the window's real state, so the
   first double-tap dismissed an overlay you had not summoned; and a cooldown
   silently swallowed the first tap of a follow-up double-tap.
+  *Correction (0.0.5): this did not resolve the problem — see 0.0.5, which changes
+  the method by removing the dismiss action entirely.*
 * **The chat input is no longer clipped while streaming** — the window was being
   sized from a measurement that included the entrance animation's scale
   transform.
+  *Correction (0.0.5): this did not resolve the problem — see 0.0.5, which changes
+  the layout so the chat column fills the window.*
 * **Switching conversations lands at the bottom**, so a long conversation no
   longer stops at a code block in the middle.
 * **`/add` now shows a newly added skill** — the list was stale because the
