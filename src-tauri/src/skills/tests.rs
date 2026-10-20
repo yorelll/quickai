@@ -576,6 +576,43 @@ fn append_by_alias_appends_named_skill() {
 }
 
 #[test]
+fn append_by_alias_appends_each_skill_once() {
+    let dir = tempdir();
+    let path = write_file(&dir, "t.md", "Translate.");
+    let skills = vec![skill("x", "translate", &path.display().to_string(), false)];
+
+    // The picker can add the same skill twice for one message; the prompt must
+    // carry its contents once, not twice.
+    let (composed, failures) = append_skills_by_alias(
+        "ASK",
+        &skills,
+        &["translate".to_string(), "translate".to_string()],
+    );
+    assert_eq!(composed, "ASK\n\nTranslate.");
+    assert!(failures.is_empty());
+}
+
+#[test]
+fn append_by_alias_keeps_first_position_of_a_repeated_alias() {
+    let dir = tempdir();
+    let translate = write_file(&dir, "t.md", "Translate.");
+    let summarize = write_file(&dir, "s.md", "Summarize.");
+    let skills = vec![
+        skill("x", "translate", &translate.display().to_string(), false),
+        skill("y", "summarize", &summarize.display().to_string(), false),
+    ];
+
+    let aliases = vec![
+        "translate".to_string(),
+        "summarize".to_string(),
+        "translate".to_string(),
+    ];
+    let (composed, failures) = append_skills_by_alias("ASK", &skills, &aliases);
+    assert_eq!(composed, "ASK\n\nTranslate.\n\nSummarize.");
+    assert!(failures.is_empty());
+}
+
+#[test]
 fn append_by_alias_skips_empty_file() {
     let dir = tempdir();
     let path = write_file(&dir, "t.md", "\n  \n");

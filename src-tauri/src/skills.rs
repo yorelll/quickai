@@ -393,6 +393,11 @@ pub fn append_enabled_skills(base: &str, skills: &[Skill]) -> (String, Vec<Skill
 /// Appends the contents of the skills named by `aliases` to `base`, returning
 /// the composed text plus any read failures. Unknown aliases and unreadable
 /// files are reported rather than failing the turn.
+///
+/// A repeated alias contributes its file once, at its first position: the
+/// frontend lets a skill be picked twice for one message, and the prompt must
+/// not repeat it. This is the authoritative boundary for that rule, since both
+/// the chat `ask` path and an agent run pass their aliases through here.
 pub fn append_skills_by_alias(
     base: &str,
     skills: &[Skill],
@@ -400,7 +405,12 @@ pub fn append_skills_by_alias(
 ) -> (String, Vec<SkillReadFailure>) {
     let mut out = base.to_string();
     let mut failures = Vec::new();
+    let mut seen: Vec<&str> = Vec::with_capacity(aliases.len());
     for alias in aliases {
+        if seen.contains(&alias.as_str()) {
+            continue;
+        }
+        seen.push(alias.as_str());
         match skills.iter().find(|s| &s.alias == alias) {
             Some(skill) => match read_skill(skill) {
                 Ok(Some(text)) => push_block(&mut out, &text),
