@@ -29,6 +29,11 @@ export const invoke = vi.fn<
  */
 let lastChannel: Channel | null = null;
 
+// ─── emit mock ──────────────────────────────────────────────────────────────
+
+/** Records events the frontend emits to Rust (e.g. the tray menu labels). */
+export const emit = vi.fn(async () => {});
+
 /**
  * Get the last captured channel (set by enableChannelCapture when invoke is called with onEvent).
  * Returns null if no channel has been captured.

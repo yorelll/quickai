@@ -13,6 +13,8 @@ import {
   type ReactNode,
 } from 'react';
 
+import { emit } from '@tauri-apps/api/event';
+
 import { en, type TranslationKey } from './en';
 import { zh } from './zh';
 import {
@@ -64,12 +66,33 @@ export function translate(
 
 // ─── Locale store ──────────────────────────────────────────────────────────
 
+/**
+ * Event the Rust tray listener uses to receive the menu labels. The tray is
+ * built in Rust, but the language in effect is resolved here — the same
+ * persisted choice / system detection the UI renders with — so the frontend
+ * pushes the labels down at startup and again whenever the language changes.
+ */
+const TRAY_MENU_LABELS_EVENT = 'tray-menu-labels';
+
+/** Sends the current locale's tray-menu labels to Rust; failures are ignored. */
+function publishTrayLabels(locale: Locale): void {
+  void emit(TRAY_MENU_LABELS_EVENT, {
+    settings: translate(locale, 'tray.settings'),
+    quit: translate(locale, 'tray.quit'),
+  }).catch(() => {
+    // Not running under Tauri (browser preview, unit tests): no tray to label.
+  });
+}
+
 const listeners = new Set<() => void>();
 let activeLocale: Locale | null = null;
 
 /** Current locale, resolving detection lazily on first access. */
 export function getLocale(): Locale {
-  activeLocale ??= detectLocale();
+  if (activeLocale === null) {
+    activeLocale = detectLocale();
+    publishTrayLabels(activeLocale);
+  }
   return activeLocale;
 }
 
@@ -83,6 +106,8 @@ export function setLocale(next: Locale): void {
 function applyLocale(next: Locale): void {
   document.documentElement.lang = next;
   activeLocale = next;
+  // Re-label the tray menu in place — no restart required.
+  publishTrayLabels(next);
   for (const listener of listeners) listener();
 }
 

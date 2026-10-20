@@ -412,7 +412,7 @@ export const en = {
     'Double-tap {key} anywhere to summon QuickAI. Type your question and press Enter, or attach text and images first. Add a slash command for special tasks. Press Ctrl+S to save the conversation to history, and Ctrl+W or Esc to hide the window — QuickAI keeps running in the background.',
   'about.help.trayTitle': 'Tray icon',
   'about.help.tray':
-    'QuickAI lives in the system tray. The tray icon always shows the QuickAI logo — it has no separate states while the app runs. Left-click it to open its menu (Open QuickAI, Quit); right-click it to show or hide the overlay.',
+    'QuickAI lives in the system tray. The tray icon always shows the QuickAI logo — it has no separate states while the app runs. Left-click it to open the overlay; right-click it for the menu (Settings, Quit). Press Ctrl+W or Esc, or use the close button, to hide the overlay.',
 
   // ─── Batch 3: settings theme, data dir, skills, About popups (T11) ──────
   'common.close': 'Close',
@@ -478,6 +478,15 @@ export const en = {
   'settings.connection.test': 'Test connection',
   'error.unsupportedCapability':
     'The provider rejected the request: this model or endpoint does not support the capability QuickAI needs.',
+
+  // ─── Batch 5: tray menu (T41) ───────────────────────────────────────────
+  'tray.settings': 'Settings',
+  'tray.quit': 'Quit',
+
+  // ─── Batch 5: dismissible settings error popups (T45) ───────────────────
+  'settings.skills.loadErrorTitle': "Skills couldn't be loaded",
+  'settings.skills.saveErrorTitle': "The skill wasn't saved",
+  'settings.general.startOnBootErrorTitle': "Start-on-boot wasn't updated",
 } as const;
 
 /** The complete set of translation keys understood by the app. */

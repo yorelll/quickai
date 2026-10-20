@@ -352,7 +352,7 @@ export const zh: Record<keyof typeof en, string> = {
     '在任意位置双击 {key} 唤起 QuickAI。输入问题后按回车，或先附加文本与图片。为特殊任务添加斜杠命令。按 Ctrl+S 将对话保存到历史，按 Ctrl+W 或 Esc 隐藏窗口 — QuickAI 会继续在后台运行。',
   'about.help.trayTitle': '托盘图标',
   'about.help.tray':
-    'QuickAI 常驻系统托盘。托盘图标始终显示 QuickAI 标志 — 运行期间没有其它状态。左键单击打开菜单（打开 QuickAI、退出）；右键单击显示或隐藏浮窗。',
+    'QuickAI 常驻系统托盘。托盘图标始终显示 QuickAI 标志 — 运行期间没有其它状态。左键单击打开浮窗；右键单击打开菜单（设置、退出）。按 Ctrl+W、Esc 或点击关闭按钮可隐藏浮窗。',
 
   // ─── Batch 3: settings theme, data dir, skills, About popups (T11) ──────
   'common.close': '关闭',
@@ -414,4 +414,13 @@ export const zh: Record<keyof typeof en, string> = {
   'settings.connection.test': '测试连接',
   'error.unsupportedCapability':
     '服务商拒绝了请求：该模型或端点不支持 QuickAI 所需的能力。',
+
+  // ─── Batch 5: tray menu (T41) ───────────────────────────────────────────
+  'tray.settings': '设置',
+  'tray.quit': '退出',
+
+  // ─── Batch 5: dismissible settings error popups (T45) ───────────────────
+  'settings.skills.loadErrorTitle': '无法加载技能',
+  'settings.skills.saveErrorTitle': '技能未保存',
+  'settings.general.startOnBootErrorTitle': '开机启动设置未更新',
 };

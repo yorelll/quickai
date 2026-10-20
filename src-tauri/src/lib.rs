@@ -46,7 +46,7 @@ use std::sync::Arc;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
+    Emitter, Listener, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
 };
 
 // ─── Window helpers ─────────────────────────────────────────────────────────
@@ -54,10 +54,16 @@ use tauri::{
 /// Expected logical width of the overlay window for spawn-position calculations.
 #[cfg(target_os = "windows")]
 const OVERLAY_LOGICAL_WIDTH: f64 = 650.0;
-/// Collapsed bar height used for Y-clamp at show time. The window starts collapsed;
-/// the ResizeObserver expands it after mount.
+/// Collapsed (ask-bar) window height: the ask bar's measured 64.8 px plus the
+/// 48 px container padding. Must match `COLLAPSED_WINDOW_HEIGHT` in
+/// `src/App.tsx` and `app.windows[0].height` in `tauri.conf.json`.
+///
+/// This used to be 60: 53 px shorter than the ask bar itself. Every summon and
+/// every minibar restore therefore started with the bar clipped, and if the
+/// frontend's first resize was missed or landed before the native resize, the
+/// window stayed at a height that could not show the bar at all.
 #[cfg(target_os = "windows")]
-const OVERLAY_LOGICAL_HEIGHT_COLLAPSED: f64 = 60.0;
+const OVERLAY_LOGICAL_HEIGHT_COLLAPSED: f64 = 113.0;
 
 /// Minibar dimensions — thin always-on-top strip shown when the user
 /// switches away from QuickAI while a task is in progress.
@@ -109,7 +115,9 @@ struct VisibilityPayload {
     window_x: Option<f64>,
     /// Logical Y of the window top-left at show time.
     window_y: Option<f64>,
-    /// Logical Y of the screen bottom edge (monitor origin + height).
+    /// Logical Y of the bottom edge of the monitor's work area. Logical, like
+    /// `window_y` — comparing a physical bottom against a logical window
+    /// position made the grow-up decision depend on the display scale.
     screen_bottom_y: Option<f64>,
 }
 
@@ -176,6 +184,21 @@ fn hide_from_taskbar(window: &tauri::WebviewWindow) {
     }
 }
 
+/// Converts a physical pixel value into logical (CSS) units for the frontend.
+///
+/// Monitor metrics arrive in physical pixels; every layout value the frontend
+/// compares them with is logical. A zero/negative factor (a monitor query that
+/// has not resolved yet) falls back to the physical value rather than
+/// producing NaN.
+#[cfg(any(target_os = "windows", test))]
+fn to_logical(physical: f64, scale_factor: f64) -> f64 {
+    if scale_factor > 0.0 {
+        physical / scale_factor
+    } else {
+        physical
+    }
+}
+
 /// Shows the overlay and requests the frontend to replay its entrance animation.
 ///
 /// On Windows, the overlay is shown as an always-on-top, skip-taskbar window.
@@ -217,44 +240,78 @@ fn show_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::ActivationCo
         };
 
         let monitor = target_monitor.unwrap_or_else(|| primary.unwrap());
+        let scale = monitor.scale_factor();
         let mon_pos = monitor.position();
-        let mon_size = monitor.size();
-        let screen_w = mon_size.width as f64;
-        let screen_h = mon_size.height as f64;
+        let work = monitor.work_area();
+
+        // `size()`, `position()` and `work_area()` are PHYSICAL pixels, while
+        // the overlay's own dimensions are logical. Do the placement math
+        // entirely in physical pixels (scale the window size up to match) and
+        // apply it with `PhysicalPosition`.
+        //
+        // The previous code mixed the two: it fed a physical screen rect and a
+        // logical window size into `calculate_window_position`, then handed the
+        // physical result to `LogicalPosition`. On any monitor whose scale is
+        // not 100 % that is a *placement* bug — the window lands at a
+        // scale-times-wrong position, which can put its input bar under the
+        // taskbar or leave part of it off the monitor. It is not a
+        // height-measurement bug.
         let mon_x = mon_pos.x as f64;
         let mon_y = mon_pos.y as f64;
 
-        // Convert global coordinates to monitor-local for positioning math.
+        // Do the placement against the *work area*, not the full monitor: the
+        // Y clamp lives inside `calculate_window_position`, so it can only keep
+        // the window clear of a bottom taskbar if it is given the usable
+        // rectangle. The offsets are zero unless the taskbar is on the
+        // top/left edge.
+        let work_x = (work.position.x - mon_pos.x) as f64;
+        let work_y = (work.position.y - mon_pos.y) as f64;
+        let work_w = work.size.width as f64;
+        let work_h = work.size.height as f64;
+
+        // Convert global coordinates to work-area-local for positioning math.
         let local_ctx = crate::context::ActivationContext {
             selected_text: selected_text.clone(),
             bounds: ctx.bounds.map(|r| crate::context::ScreenRect {
-                x: r.x - mon_x,
-                y: r.y - mon_y,
+                x: r.x - mon_x - work_x,
+                y: r.y - mon_y - work_y,
                 width: r.width,
                 height: r.height,
             }),
-            mouse_position: ctx.mouse_position.map(|(mx, my)| (mx - mon_x, my - mon_y)),
+            mouse_position: ctx
+                .mouse_position
+                .map(|(mx, my)| (mx - mon_x - work_x, my - mon_y - work_y)),
         };
 
         let p = crate::context::calculate_window_position(
             &local_ctx,
-            screen_w,
-            screen_h,
-            OVERLAY_LOGICAL_WIDTH,
-            OVERLAY_LOGICAL_HEIGHT_COLLAPSED,
+            work_w,
+            work_h,
+            OVERLAY_LOGICAL_WIDTH * scale,
+            OVERLAY_LOGICAL_HEIGHT_COLLAPSED * scale,
         );
 
-        // Convert back to global screen coordinates.
-        let global = crate::context::WindowPlacement {
-            x: p.x + mon_x,
-            y: p.y + mon_y,
+        // Convert back to global screen coordinates (still physical).
+        let physical = crate::context::WindowPlacement {
+            x: p.x + mon_x + work_x,
+            y: p.y + mon_y + work_y,
         };
 
-        let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(
-            global.x, global.y,
+        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
+            physical.x.round() as i32,
+            physical.y.round() as i32,
         )));
-        let screen_bottom = mon_y + screen_h;
-        Some((global, screen_bottom))
+
+        // The frontend compares these against logical layout units (it decides
+        // whether to grow upward from `window_y` and the displayed height), so
+        // emit logical coordinates. The *work area* bottom, not the monitor
+        // bottom, keeps the input bar clear of the taskbar.
+        let screen_bottom = to_logical(work.position.y as f64 + work.size.height as f64, scale);
+        let logical = crate::context::WindowPlacement {
+            x: to_logical(physical.x, scale),
+            y: to_logical(physical.y, scale),
+        };
+        Some((logical, screen_bottom))
     } else {
         None
     };
@@ -433,13 +490,18 @@ async fn open_settings_window(app_handle: tauri::AppHandle) -> Result<(), String
 
 /// Restores the full overlay from minibar mode.
 ///
-/// Shared by the tray toggle and the summon hotkey so the two paths cannot drift
-/// apart. Re-asserts the tool-window style because the resize/show path makes
-/// tao rewrite the extended style (item 4).
+/// Shared by every summon path (the hotkey and the tray left click) so they
+/// cannot drift apart. Re-asserts the tool-window style because the resize/show
+/// path makes tao rewrite the extended style (item 4).
+///
+/// **Always `show()` explicitly.** The minibar is normally on screen, but
+/// `MINIBAR_ACTIVE` can outlive the native window (a hide that raced the
+/// transition). `set_size`/`set_focus` on a hidden window change nothing the
+/// user can see, so without the `show()` that case was a silent no-op and the
+/// next double-tap was the one that opened the bar.
 #[cfg(target_os = "windows")]
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn restore_overlay_from_minibar(app_handle: &tauri::AppHandle) {
-    // Restore from minibar — the window is already visible, just small.
     windows_focus::exit_minibar();
     let handle = app_handle.clone();
     let _ = app_handle.run_on_main_thread(move || {
@@ -448,7 +510,19 @@ fn restore_overlay_from_minibar(app_handle: &tauri::AppHandle) {
                 OVERLAY_LOGICAL_WIDTH,
                 OVERLAY_LOGICAL_HEIGHT_COLLAPSED,
             )));
+            // A minimized window (e.g. Win+D while the minibar was showing)
+            // is still "visible" and `show()` does not restore it, so without
+            // this the expand would be invisible and the next summon would be
+            // the one that opens the bar — the same two-gesture class.
+            let _ = window.unminimize();
+            // "Open" must mean visible to the user, not merely a resize of a
+            // window that may have been hidden underneath the minibar flag.
+            let _ = window.show();
             let _ = window.set_focus();
+            // The window is now open, so the intent flag must say so. Leaving
+            // it false made the *next* summon take the `Show` path and reset a
+            // session that was already on screen.
+            OVERLAY_INTENDED_VISIBLE.store(true, Ordering::SeqCst);
             hide_from_taskbar(&window);
             let _ = windows_focus::stop_focus_listener();
             let h = handle.clone();
@@ -467,8 +541,9 @@ fn restore_overlay_from_minibar(app_handle: &tauri::AppHandle) {
 /// session.
 ///
 /// No `show` event is emitted, so the frontend does not replay its entrance
-/// animation — that would clear the open conversation. Used when the summon key
-/// is pressed while the overlay is on screen but the user is working elsewhere.
+/// animation — that would clear the open conversation. Used for both visible
+/// states of the summon-key state machine: the user is working elsewhere (raise
+/// it) or is already on it (a harmless re-focus).
 #[cfg(target_os = "windows")]
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn bring_overlay_forward(app_handle: &tauri::AppHandle) {
@@ -482,66 +557,95 @@ fn bring_overlay_forward(app_handle: &tauri::AppHandle) {
     }
 }
 
-/// What the summon hotkey should do, given the toggle's intent and the window's
-/// real state.
+/// What a summon should do (hotkey or tray left click). It deliberately has
+/// **no** hide arm.
+///
+/// # The state machine (item 3 — write it down, do not keep it in code only)
+///
+/// One completed double-tap does exactly one of three things:
+///
+/// | state (how the user got there)          | native visible | intent flag | foreground | action       | what the user sees                  |
+/// |-----------------------------------------|----------------|-------------|------------|--------------|-------------------------------------|
+/// | hidden (Esc / Ctrl+W / close button)    | no             | no          | *          | `Show`       | bar appears, fresh session          |
+/// | hiding (350 ms exit animation)          | yes            | no          | *          | `Show`       | hide is cancelled; bar stays        |
+/// | drifted (flag and window disagree)      | no             | yes         | *          | `Show`       | bar appears, fresh session          |
+/// | minibar (48×48, after clicking away)    | yes            | yes         | *          | `Expand`     | bar restored from the mini bar      |
+/// | visible, user is working elsewhere      | yes            | yes         | no         | `BringForward` | bar raised and focused, chat intact |
+/// | visible, user is on it                  | yes            | yes         | yes        | `BringForward` | nothing changes (already open)      |
+///
+/// The minibar row is handled in `open_or_raise_overlay` before this decision:
+/// it is a native *size* state, not a visibility state. `Expand` there means
+/// `restore_overlay_from_minibar`, which always calls `show()`.
+///
+/// The first three rows are `Show`, the fourth is the minibar `Expand`, and the
+/// last two are `BringForward`. Foreground is recorded for the diagnostic log
+/// but cannot change the action: both visible rows raise, because a summon must
+/// never dismiss. Dismissal is Esc, Ctrl+W, or the window's close button.
+///
+/// History: this replaced a three-way Show/BringForward/Hide toggle. At launch
+/// the overlay is auto-shown *and focused*, which mapped to `Hide`, so the
+/// first double-tap dismissed a bar the user had not summoned — the
+/// "two double-taps needed" report on 0.0.4. A summon key that sometimes
+/// dismisses is the bug; it is not a feature worth preserving.
 #[cfg(target_os = "windows")]
 #[derive(Debug, PartialEq, Eq)]
 enum HotkeyAction {
     /// Summon from hidden — or from a drifted "visible" where the native window
     /// is gone, which must not be able to swallow the summon.
     Show,
-    /// On screen, but the user is working elsewhere: bring it forward.
+    /// On screen: raise and focus it without replaying the entrance (which
+    /// would reset the open conversation).
     BringForward,
-    /// On screen and in front of the user: dismiss it.
-    Hide,
 }
 
-/// Pure decision for the summon hotkey (item 5).
+/// Pure decision for a summon (hotkey or tray left click), item 3.
 ///
-/// The bug this replaces: `toggle_overlay` keyed the hide purely on the
-/// `OVERLAY_INTENDED_VISIBLE` flag, and the overlay is auto-shown at startup
-/// (`notify_frontend_ready` → `show_overlay`), so the *first* double-tap hid an
-/// overlay the user had not summoned — "double-tap opens the bar" then needed a
-/// second double-tap. Deciding on the native state as well means a double-tap
-/// always opens the bar, while a double-tap on the overlay the user is actually
-/// looking at still dismisses it (the toggle is preserved, not replaced).
+/// Opens from anything the user cannot use; raises anything already on screen.
+/// It never returns a dismiss action — see [`HotkeyAction`] for the full state
+/// table and the reason.
 #[cfg(target_os = "windows")]
-fn hotkey_action(intended_visible: bool, natively_visible: bool, foreground: bool) -> HotkeyAction {
+fn hotkey_action(intended_visible: bool, natively_visible: bool) -> HotkeyAction {
     if !intended_visible || !natively_visible {
         HotkeyAction::Show
-    } else if foreground {
-        HotkeyAction::Hide
     } else {
         HotkeyAction::BringForward
     }
 }
 
-/// Summon-key entry point (item 5).
+/// Summon the overlay: open it from anything the user cannot use, or raise it
+/// when it is already on screen. **Never hides.**
 ///
-/// Unlike the tray toggle, this decides on the window's *native* state, so one
-/// double-tap always opens the bar from whatever state the user is actually in.
+/// Decides on the window's *native* state, not on the intent flag alone, so a
+/// drifted flag (visible while the native window is hidden) cannot swallow the
+/// summon. The minibar is expanded first because it is a distinct size state
+/// rather than a visibility state.
+///
+/// Shared by the summon hotkey and the tray icon's left click, so the two
+/// entry points cannot drift apart. Dismissal belongs to Esc, Ctrl+W and the
+/// close button — a tray click is a summon of the same surface, not a toggle.
 #[cfg(target_os = "windows")]
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn toggle_overlay_from_hotkey(
-    app_handle: &tauri::AppHandle,
-    ctx: crate::context::ActivationContext,
-) {
+fn open_or_raise_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::ActivationContext) {
     if windows_focus::is_minibar_active() {
+        eprintln!("quickai: [summon] minibar active -> expand");
         restore_overlay_from_minibar(app_handle);
         return;
     }
 
+    let intended_visible = OVERLAY_INTENDED_VISIBLE.load(Ordering::SeqCst);
     let natively_visible = app_handle
         .get_webview_window("main")
         .and_then(|window| window.is_visible().ok())
         .unwrap_or(false);
+    // Diagnostic only: both visible states raise, but knowing whether the user
+    // was already on the overlay tells "raised" from "raised invisibly".
+    let foreground = windows_focus::is_overlay_foreground();
+    let action = hotkey_action(intended_visible, natively_visible);
+    eprintln!(
+        "quickai: [summon] intended_visible={intended_visible} natively_visible={natively_visible} foreground={foreground} -> {action:?}"
+    );
 
-    match hotkey_action(
-        OVERLAY_INTENDED_VISIBLE.load(Ordering::SeqCst),
-        natively_visible,
-        windows_focus::is_overlay_foreground(),
-    ) {
-        HotkeyAction::Hide => request_overlay_hide(app_handle),
+    match action {
         HotkeyAction::BringForward => bring_overlay_forward(app_handle),
         HotkeyAction::Show => {
             // Clear a stale "visible" intent so `show_overlay`'s guard cannot
@@ -549,31 +653,6 @@ fn toggle_overlay_from_hotkey(
             OVERLAY_INTENDED_VISIBLE.store(false, Ordering::SeqCst);
             show_overlay(app_handle, ctx);
         }
-    }
-}
-
-/// Toggles the overlay between visible and hidden states.
-///
-/// Uses an atomic flag as the single source of truth for intended visibility,
-/// which avoids race conditions with the native panel state during animations.
-///
-/// On Windows, if the overlay is in minibar mode, double-tap Ctrl restores
-/// the full overlay instead of hiding it.
-///
-/// This is the *tray* toggle, so it keeps the plain flag semantics: the user is
-/// interacting with the tray, not the overlay, and expects a hide. The summon
-/// hotkey uses `toggle_overlay_from_hotkey` instead.
-fn toggle_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::ActivationContext) {
-    #[cfg(target_os = "windows")]
-    if windows_focus::is_minibar_active() {
-        restore_overlay_from_minibar(app_handle);
-        return;
-    }
-
-    if OVERLAY_INTENDED_VISIBLE.load(Ordering::SeqCst) {
-        request_overlay_hide(app_handle);
-    } else {
-        show_overlay(app_handle, ctx);
     }
 }
 
@@ -607,11 +686,36 @@ fn set_window_frame(app_handle: tauri::AppHandle, x: f64, y: f64, width: f64, he
     });
 }
 
-/// Synchronizes the Rust-side visibility tracking when the frontend
-/// completes its exit animation and hides the native window.
+/// Applies one step of the frontend's exit sequence to the visibility intent
+/// and reports whether the native window should now be hidden.
+///
+/// - `None` / `Some(false)` — the exit *started*: clear the intent so a summon
+///   during the animation takes the `Show` path (and cancels the exit).
+/// - `Some(true)` — the exit *finished*: hide only if no show has been
+///   requested since. `show_overlay` sets `OVERLAY_INTENDED_VISIBLE`
+///   synchronously, so this sees a summon the moment Rust issues it — even
+///   when its `show` event has not reached the webview. That is the check a
+///   frontend timer cannot make, and the reason the hide is committed here.
+fn apply_hide_commit(commit: Option<bool>) -> bool {
+    if commit != Some(true) {
+        OVERLAY_INTENDED_VISIBLE.store(false, Ordering::SeqCst);
+        return false;
+    }
+    !OVERLAY_INTENDED_VISIBLE.load(Ordering::SeqCst)
+}
+
+/// The frontend's exit-animation steps (see [`apply_hide_commit`]).
+///
+/// `commit` is `Option<bool>` so existing argument-less callers keep working:
+/// they keep the "start of exit" behaviour.
 #[tauri::command]
-fn notify_overlay_hidden() {
-    OVERLAY_INTENDED_VISIBLE.store(false, Ordering::SeqCst);
+fn notify_overlay_hidden(app_handle: tauri::AppHandle, commit: Option<bool>) {
+    if !apply_hide_commit(commit) {
+        return;
+    }
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.hide();
+    }
 }
 
 /// Returns true when `url` is a safe http(s) URL to hand to the OS opener.
@@ -899,6 +1003,24 @@ fn spawn_periodic_image_cleanup(app_handle: tauri::AppHandle) {
 
 // ─── Application entry point ─────────────────────────────────────────────────
 
+/// Event the frontend uses to push the tray menu's localised labels down.
+///
+/// The tray is built in Rust, but the language actually in effect is resolved
+/// in the frontend's i18n store — the same persisted choice / system detection
+/// that drives every other translated string, and the setting the UI mirrors
+/// into the config. Rust cannot read that store, so the frontend owns the
+/// text: it emits the two labels at startup and again every time the language
+/// changes, and the listener below re-labels the menu in place — no restart
+/// required.
+const TRAY_MENU_LABELS_EVENT: &str = "tray-menu-labels";
+
+/// Payload of [`TRAY_MENU_LABELS_EVENT`].
+#[derive(serde::Deserialize)]
+struct TrayMenuLabels {
+    settings: String,
+    quit: String,
+}
+
 /// Initialises and runs the Tauri application.
 ///
 /// Setup order:
@@ -917,9 +1039,30 @@ pub fn run() {
     builder
         .setup(|app| {
             // ── System tray icon + menu ───────────────────────────────────
-            let show_item = MenuItem::with_id(app, "show", "Open QuickAI", true, None::<&str>)?;
+            // Left-click opens or raises the overlay directly (it never hides);
+            // the menu is shown on right-click only (`show_menu_on_left_click(false)`).
+            // The menu has no "Open" entry — opening is the left click.
+            //
+            // The labels start in English as a fallback. The frontend pushes
+            // the labels for the active language immediately after its bundle
+            // loads (and on every language change), via
+            // `TRAY_MENU_LABELS_EVENT`, so what the user sees follows the
+            // language pack without a restart.
+            let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            let tray_menu = Menu::with_items(app, &[&settings_item, &quit_item])?;
+
+            // Clones share the underlying native item, so `set_text` on them
+            // re-labels the menu already attached to the tray.
+            let settings_label_item = settings_item.clone();
+            let quit_label_item = quit_item.clone();
+            app.listen(TRAY_MENU_LABELS_EVENT, move |event| {
+                let Ok(labels) = serde_json::from_str::<TrayMenuLabels>(event.payload()) else {
+                    return;
+                };
+                let _ = settings_label_item.set_text(labels.settings);
+                let _ = quit_label_item.set_text(labels.quit);
+            });
 
             let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png"))
                 .expect("Failed to load tray icon");
@@ -929,10 +1072,15 @@ pub fn run() {
                 .icon_as_template(false)
                 .tooltip("QuickAI")
                 .menu(&tray_menu)
-                .show_menu_on_left_click(true)
+                .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        show_overlay(app, crate::context::ActivationContext::empty());
+                    "settings" => {
+                        // Reuse the command the in-app Settings button calls,
+                        // so the window is created/focused exactly the same way.
+                        let handle = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let _ = open_settings_window(handle).await;
+                        });
                     }
                     "quit" => {
                         app.state::<crate::commands::GenerationState>().cancel();
@@ -942,12 +1090,20 @@ pub fn run() {
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
-                        button: MouseButton::Right,
+                        button: MouseButton::Left,
                         button_state: MouseButtonState::Up,
                         ..
                     } = event
                     {
-                        toggle_overlay(
+                        // A tray click is a summon, never a dismiss: open the
+                        // overlay if it is hidden, raise it if it is on screen.
+                        #[cfg(target_os = "windows")]
+                        open_or_raise_overlay(
+                            tray.app_handle(),
+                            crate::context::ActivationContext::empty(),
+                        );
+                        #[cfg(not(target_os = "windows"))]
+                        show_overlay(
                             tray.app_handle(),
                             crate::context::ActivationContext::empty(),
                         );
@@ -988,8 +1144,8 @@ pub fn run() {
                     let handle2 = app_handle.clone();
                     std::thread::spawn(move || {
                         let ctx = crate::context::capture_activation_context(is_visible);
-                        let _ = handle
-                            .run_on_main_thread(move || toggle_overlay_from_hotkey(&handle2, ctx));
+                        let _ =
+                            handle.run_on_main_thread(move || open_or_raise_overlay(&handle2, ctx));
                     });
                 });
                 app.manage(activator);
@@ -1178,11 +1334,30 @@ mod tests {
         assert_eq!(20_000.0_f64.clamp(1.0, 10_000.0), 10_000.0);
     }
 
+    /// The native commit gate, exercised directly. The command wrapper only
+    /// adds the `AppHandle` (not constructible in a unit test), so the test
+    /// drives the same decision function the command uses and asserts both the
+    /// hide/no-hide outcome and the intent-flag transition for each step.
     #[test]
-    fn notify_overlay_hidden_sets_flag_to_false() {
+    fn notify_overlay_hidden_gates_the_native_hide() {
+        // Start of an exit: clear the intent, never hide. Both the
+        // argument-less form (existing callers) and an explicit `false` take
+        // this path.
         OVERLAY_INTENDED_VISIBLE.store(true, Ordering::SeqCst);
-        OVERLAY_INTENDED_VISIBLE.store(false, Ordering::SeqCst);
+        assert!(!apply_hide_commit(None));
         assert!(!OVERLAY_INTENDED_VISIBLE.load(Ordering::SeqCst));
+        OVERLAY_INTENDED_VISIBLE.store(true, Ordering::SeqCst);
+        assert!(!apply_hide_commit(Some(false)));
+        assert!(!OVERLAY_INTENDED_VISIBLE.load(Ordering::SeqCst));
+
+        // Commit with no summon since the exit began: hide.
+        assert!(apply_hide_commit(Some(true)));
+
+        // Commit after a summon: `show_overlay` already set the intent, so the
+        // hide is refused and the summon keeps ownership of the flag.
+        OVERLAY_INTENDED_VISIBLE.store(true, Ordering::SeqCst);
+        assert!(!apply_hide_commit(Some(true)));
+        assert!(OVERLAY_INTENDED_VISIBLE.load(Ordering::SeqCst));
     }
 
     #[test]
@@ -1244,38 +1419,58 @@ mod tests {
     #[test]
     fn overlay_logical_dimensions() {
         assert_eq!(OVERLAY_LOGICAL_WIDTH, 650.0);
-        assert_eq!(OVERLAY_LOGICAL_HEIGHT_COLLAPSED, 60.0);
+        // The ask bar measures 64.8 px in the running app; 113 is the bar plus
+        // the 48 px container padding. A smaller value leaves the bar clipped
+        // on every summon (see `COLLAPSED_WINDOW_HEIGHT` in `src/App.tsx`).
+        assert_eq!(OVERLAY_LOGICAL_HEIGHT_COLLAPSED, 113.0);
     }
 
-    /// Item 5: the summon hotkey must open the bar from the user's actual
-    /// starting state, while still dismissing an overlay the user is looking at.
-    #[cfg(target_os = "windows")]
     #[test]
-    fn hotkey_action_always_opens_from_a_state_the_user_cannot_see() {
-        // Hidden, and the overlay is not in front: summon it.
-        assert_eq!(hotkey_action(false, false, false), HotkeyAction::Show);
-        // Hidden but the window still reports visible (mid-hide animation):
-        // still a summon, so a double-tap can cancel an in-flight hide.
-        assert_eq!(hotkey_action(false, true, true), HotkeyAction::Show);
-        // Drift: the flag says visible but the native window is gone. This is
-        // the case that used to swallow the summon entirely.
-        assert_eq!(hotkey_action(true, false, false), HotkeyAction::Show);
-        assert_eq!(hotkey_action(true, false, true), HotkeyAction::Show);
+    fn to_logical_divides_by_the_scale_factor() {
+        assert!((to_logical(1440.0, 1.5) - 960.0).abs() < f64::EPSILON);
+        assert!((to_logical(1080.0, 1.25) - 864.0).abs() < 1e-9);
+        assert_eq!(to_logical(720.0, 1.0), 720.0);
     }
 
-    /// The startup auto-show leaves the overlay on screen while the user is in
-    /// another app; a double-tap must bring it forward, not hide it.
-    #[cfg(target_os = "windows")]
     #[test]
-    fn hotkey_action_brings_a_background_overlay_forward() {
-        assert_eq!(hotkey_action(true, true, false), HotkeyAction::BringForward);
+    fn to_logical_falls_back_when_the_scale_factor_is_unusable() {
+        assert_eq!(to_logical(720.0, 0.0), 720.0);
+        assert_eq!(to_logical(720.0, -1.0), 720.0);
     }
 
-    /// The toggle is preserved: an overlay the user is actually looking at is
-    /// still dismissed by a double-tap.
+    /// Item 3's state machine, one assertion per state the user can be in.
+    /// Every row is a *completed double-tap*; foreground is deliberately not
+    /// an input any more, because it must not change the action.
     #[cfg(target_os = "windows")]
     #[test]
-    fn hotkey_action_dismisses_an_overlay_in_front() {
-        assert_eq!(hotkey_action(true, true, true), HotkeyAction::Hide);
+    fn hotkey_action_state_machine() {
+        // Hidden (Esc / Ctrl+W / close button): open a fresh session.
+        assert_eq!(hotkey_action(false, false), HotkeyAction::Show);
+        // Hiding (still natively visible during the 350 ms exit animation):
+        // the summon cancels the hide rather than being swallowed by it.
+        assert_eq!(hotkey_action(false, true), HotkeyAction::Show);
+        // Drifted (the intent flag outlived the native window): open.
+        assert_eq!(hotkey_action(true, false), HotkeyAction::Show);
+        // On screen, whether the user is on it or working elsewhere: raise.
+        // The auto-shown launch overlay lands here, and it must not close.
+        assert_eq!(hotkey_action(true, true), HotkeyAction::BringForward);
+    }
+
+    /// The defining invariant: no state dismisses. The minibar state is checked
+    /// before `hotkey_action` (it is a size, not a visibility, state) and its
+    /// path now calls `show()`; every action this function can return opens or
+    /// raises the bar.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn hotkey_action_never_dismisses() {
+        for intended in [false, true] {
+            for native in [false, true] {
+                let action = hotkey_action(intended, native);
+                assert!(
+                    matches!(action, HotkeyAction::Show | HotkeyAction::BringForward),
+                    "({intended}, {native}) produced {action:?}; the summon key must never hide"
+                );
+            }
+        }
     }
 }
