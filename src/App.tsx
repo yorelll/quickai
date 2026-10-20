@@ -38,6 +38,7 @@ import {
   buildPrompt,
 } from './config/commands';
 import { detectComputerUseIntent } from './utils/intentDetection';
+import { trimLeadingBlankLines } from './utils/trimLeadingBlankLines';
 import './App.css';
 
 const OVERLAY_VISIBILITY_EVENT = 'quickai://visibility';
@@ -63,12 +64,133 @@ const CONTAINER_VERTICAL_PADDING = 48;
  * Must match `max-h-[600px]` on `.chat-area` in `src/view/ConversationView.tsx`.
  */
 const CHAT_CONTENT_MAX_HEIGHT = 600;
-/** Window height when the reply box is at its cap and the input bar is minimal. */
+/**
+ * Height of the bottom input bar: one row (`py-2.5` 20 + the 44.8 px content
+ * row) measured in the running app. Used only for the spawn-time grow-up
+ * decision, where no layout exists yet.
+ */
+const CHAT_INPUT_BAR_HEIGHT = 65;
+/**
+ * Window height once the reply box is at its cap: reply box + input bar +
+ * padding. Omitting the input bar here made a full-height chat window look
+ * "already at the bottom" to the grow-up heuristic, so the window was placed
+ * without room for the input.
+ */
 const MAX_CHAT_WINDOW_HEIGHT =
-  CHAT_CONTENT_MAX_HEIGHT + CONTAINER_VERTICAL_PADDING;
+  CHAT_CONTENT_MAX_HEIGHT + CHAT_INPUT_BAR_HEIGHT + CONTAINER_VERTICAL_PADDING;
 
-/** Must match `OVERLAY_LOGICAL_HEIGHT_COLLAPSED` in `src-tauri/src/lib.rs`. */
-const COLLAPSED_WINDOW_HEIGHT = 60;
+/**
+ * Collapsed (ask-bar) window height: the ask bar's measured 64.8 px plus the
+ * 48 px container padding. It must be the real bar height — at the old 60 the
+ * window was 53 px shorter than the bar on every summon, so the first
+ * measurement could see a clipped bar and any missed first sync left it
+ * clipped.
+ * Must match `OVERLAY_LOGICAL_HEIGHT_COLLAPSED` in `src-tauri/src/lib.rs` and
+ * `app.windows[0].height` in `src-tauri/tauri.conf.json`.
+ *
+ * This is the ask-bar minimum, not a usable *chat* minimum: the chat column
+ * needs about 146 px (48 padding + 33 header + 65 input) before the header and
+ * the input stop overlapping. Between those, a wrong native height costs
+ * transcript height; below ~146 no layout can show both and they overlap.
+ */
+export const COLLAPSED_WINDOW_HEIGHT = 113;
+/**
+ * Height the chat column needs at its natural size, measured from content
+ * rather than from the morphing container.
+ *
+ * In chat mode the column fills the viewport (`h-full`), so
+ * `container.offsetHeight` is the *window* height: sizing from it would ask
+ * for `window + 48`, a fixed point that can never grow. Every value used here
+ * is content-sized and therefore independent of the current window height:
+ *
+ * - the transcript content wrapper (`[data-chat-content]`),
+ * - the chat chrome (header + divider) = chat area − scroller,
+ * - the scroller's vertical padding (`py-4`),
+ * - everything after the chat area (input bar, banners, agent panel).
+ *
+ * The transcript part is capped at `CHAT_CONTENT_MAX_HEIGHT`, matching
+ * `max-h-[600px]` on `.chat-area`. Returns null outside chat mode, where the
+ * ask-bar container is still content-sized and can be measured directly.
+ */
+export function measureChatContentHeight(node: HTMLElement): number | null {
+  const chat = node.querySelector<HTMLElement>('[data-chat-area]');
+  const content = node.querySelector<HTMLElement>('[data-chat-content]');
+  const scroller = content?.parentElement as HTMLElement | null;
+  if (!chat || !content || !scroller) return null;
+
+  const style = getComputedStyle(scroller);
+  const padding =
+    (parseFloat(style.paddingTop) || 0) +
+    (parseFloat(style.paddingBottom) || 0);
+  const chrome = chat.offsetHeight - scroller.offsetHeight;
+  const transcript = Math.min(
+    chrome + content.offsetHeight + padding,
+    CHAT_CONTENT_MAX_HEIGHT,
+  );
+  // Sum the content-sized siblings below the chat area (input bar, banners,
+  // agent panel) individually. `container − chat area` would include any free
+  // space when the window is momentarily taller than the content, which would
+  // make the requirement grow with the window and never shrink.
+  let below = 0;
+  for (const child of Array.from(node.children)) {
+    if (child === chat) continue;
+    below += (child as HTMLElement).offsetHeight;
+  }
+  // The history dropdown is absolutely positioned outside the flow, and the
+  // min-height set by the dropdown effect is exactly the room it needs. Take
+  // the larger of the two, or opening history on a short conversation would
+  // request the content height back and clip both the dropdown and the input.
+  const dropdownNeed = parseFloat(node.style.minHeight) || 0;
+  return Math.max(below + transcript, dropdownNeed);
+}
+
+/**
+ * Emits one `[quickai:size]` line per sizing decision and per native resize
+ * when diagnostics are enabled (`localStorage['quickai:debug-size'] === '1'`,
+ * or any dev build). The fields separate the two failure routes:
+ * `bodyScrollTop > 0` means the header was pushed off by focus scrolling;
+ * `bodyScrollTop == 0` with a short `innerH` means the native window height
+ * itself is short.
+ */
+/* v8 ignore start -- diagnostics only run inside a real WebView */
+function logSizing(
+  tag: string,
+  container: HTMLElement | null,
+  requested: number,
+): void {
+  let enabled: boolean;
+  try {
+    enabled =
+      import.meta.env.DEV ||
+      window.localStorage.getItem('quickai:debug-size') === '1';
+  } catch {
+    // Storage can be unavailable (private mode, blocked site data).
+    return;
+  }
+  if (!enabled) return;
+
+  const sync =
+    `[quickai:size] ${tag} ` +
+    `container=${container?.offsetHeight ?? 'n/a'} ` +
+    `innerH=${window.innerHeight} requested=${requested} ` +
+    `dpr=${window.devicePixelRatio} bodyScrollTop=${document.body.scrollTop}`;
+  const win = getCurrentWindow() as unknown as {
+    innerSize?: () => Promise<{ width: number; height: number }>;
+    scaleFactor?: () => Promise<number>;
+  };
+  void Promise.all([
+    typeof win.innerSize === 'function' ? win.innerSize() : null,
+    typeof win.scaleFactor === 'function' ? win.scaleFactor() : null,
+  ])
+    .then(([size, scale]) => {
+      const inner = size ? `${size.width}x${size.height}` : 'n/a';
+      console.debug(`${sync} innerSize=${inner} scale=${scale ?? 'n/a'}`);
+    })
+    .catch(() => {
+      console.debug(`${sync} innerSize=n/a scale=n/a`);
+    });
+}
+/* v8 ignore stop */
 
 /**
  * Parses a message to detect all valid slash commands present as whole words.
@@ -121,6 +243,17 @@ export function extractSkillAdds(
     }
   }
   return { skills, stripped: remaining.join(' ') };
+}
+
+/**
+ * Returns `aliases` with duplicates removed, keeping each alias's first
+ * occurrence and its position. The same skill can be picked twice for one
+ * message (the picker does not grey out a selected skill), and it must still
+ * reach the prompt only once — see also `skills::append_skills_by_alias`,
+ * which enforces the same rule on the backend.
+ */
+export function dedupeAliases(aliases: readonly string[]): string[] {
+  return [...new Set(aliases)];
 }
 
 /**
@@ -186,6 +319,15 @@ function App() {
   const [overlayState, setOverlayState] = useState<OverlayState>('hidden');
   const overlayStateRef = useRef<OverlayState>(overlayState);
   overlayStateRef.current = overlayState;
+  /**
+   * Monotonic counter bumped synchronously by every delivered show event.
+   *
+   * The exit-commit timer captures it when scheduled and refuses to hide if it
+   * has changed, so a show that lands inside the 350 ms exit animation cancels
+   * the hide even before React has re-rendered `overlayState` (the ref above
+   * lags behind a throttled render, so it alone cannot close that race).
+   */
+  const showEpochRef = useRef(0);
   /** Non-null when the backend signals onboarding is needed; holds the current stage. */
   const [onboardingStage, setOnboardingStage] =
     useState<OnboardingStage | null>(null);
@@ -409,6 +551,24 @@ function App() {
   isGeneratingRef.current = isGenerating;
 
   /**
+   * Mirror of `isChatMode` for the sizing rule: chat mode fills the viewport
+   * and must be sized from its content, ask-bar mode is content-sized already.
+   */
+  const isChatModeRef = useRef(false);
+  isChatModeRef.current = isChatMode;
+
+  /**
+   * The height most recently requested from the native window, and whether the
+   * one-shot scale correction has already been spent on it. A new target
+   * re-arms the correction; the native resize listener uses this to notice
+   * that the CSS height it got differs from the CSS height it asked for.
+   */
+  const lastRequestRef = useRef<{ height: number; corrected: boolean }>({
+    height: 0,
+    corrected: false,
+  });
+
+  /**
    * High-water mark for window height during streaming. While the LLM is
    * generating, the window only grows (never shrinks) to prevent jitter
    * from Streamdown's block-element reflows. Reset when generation ends
@@ -417,15 +577,25 @@ function App() {
   const maxHeightRef = useRef(0);
 
   /**
-   * Sizes the native window to the morphing container's current content
-   * height. Shared by the ResizeObserver and the focus/visibility resync so
-   * there is a single source of truth for the sizing rule.
+   * Sizes the native window to the height its content needs. Shared by the
+   * ResizeObserver, the focus/visibility resync and the native resize listener
+   * so there is a single source of truth for the sizing rule.
+   *
+   * In chat mode the measurement is taken from the *content* (transcript
+   * content, chat chrome, input bar), not from the morphing container: the
+   * container fills the viewport there, so measuring it would return the
+   * current window height and `window + 48` could never grow — a fixed point
+   * that leaves the bottom input clipped forever. In ask-bar mode the
+   * container is content-sized and is measured directly.
+   *
+   * `offsetHeight` (not `getBoundingClientRect`) is used for every box
+   * measure: the bounding rect includes the entrance spring's scale
+   * transform, and a transform change never fires the ResizeObserver.
    *
    * The size is applied directly rather than deferred into
    * requestAnimationFrame: the WebView throttles rAF while the window is not
    * the key window, which during streaming left the window short of the
-   * growing container and clipped the bottom input bar until the user
-   * stretched the window.
+   * growing content and clipped the bottom input bar.
    */
   const syncWindowSize = useCallback(() => {
     /* v8 ignore start -- requires a real browser layout and native window */
@@ -436,19 +606,14 @@ function App() {
     // would shrink the window mid-exit.
     if (!node || overlayStateRef.current !== 'visible') return;
 
-    // Measure the container's *layout* height (`offsetHeight`), not
-    // `getBoundingClientRect()`. The bounding rect includes the entrance
-    // animation's `scale` transform, so a measurement taken while the spring is
-    // still ramping (scale 0.96 → 4% short) under-reports the height. Because a
-    // transform change does not fire the ResizeObserver, that shortfall would
-    // never be corrected on its own — the window stays short and the bottom
-    // input is clipped, which is exactly the streaming symptom the user reports.
-    // `offsetHeight` is the transform-independent border-box height, so the
-    // measurement no longer depends on animation/frame timing (the source of the
-    // per-machine variance).
+    // Chat mode: content requirement (window-independent). Ask-bar mode: the
+    // container is content-sized, so its own layout box is the requirement.
+    const contentHeight =
+      (isChatModeRef.current && measureChatContentHeight(node)) ||
+      node.offsetHeight;
     // Total vertical room: 8px (pt-2) + 24px (pb-6) + 16px (motion py-2) = 48px.
     // This ensures the tightened drop shadows aren't clipped by the native window edge.
-    let targetHeight = node.offsetHeight + CONTAINER_VERTICAL_PADDING;
+    let targetHeight = contentHeight + CONTAINER_VERTICAL_PADDING;
 
     // During streaming, only allow the window to grow (never shrink) to
     // prevent jitter from Streamdown block reflows.
@@ -459,6 +624,15 @@ function App() {
         targetHeight = maxHeightRef.current;
       }
     }
+
+    logSizing('sync', node, targetHeight);
+
+    // Asking for the height the window already has would re-enter through the
+    // native resize listener; it is also the one case where doing nothing is
+    // correct.
+    if (Math.abs(targetHeight - window.innerHeight) <= 1) return;
+
+    lastRequestRef.current = { height: targetHeight, corrected: false };
 
     if (growsUpwardRef.current) {
       // Grow upward: pin the window bottom and expand the top edge.
@@ -478,6 +652,135 @@ function App() {
     }
     /* v8 ignore stop */
   }, []);
+
+  /**
+   * Compares the CSS height the window was asked for with the CSS height it
+   * actually got, and applies **one** bounded correction.
+   *
+   * Two distinct failure shapes are handled, both armed only after a native
+   * resize event (so an in-flight request is never misread as a failure) and
+   * both limited to one attempt per requested height:
+   *
+   * 1. The window was left at collapsed/minibar size after the content had
+   *    already asked for a chat window — B's delayed `exit_minibar_size` case.
+   *    Re-applying the request once recovers it.
+   * 2. The native window accepted exactly the logical height requested (its
+   *    physical inner size matches `requested × scaleFactor`) but the webview
+   *    renders fewer CSS pixels — a logical→physical mismatch, e.g. a stale
+   *    per-monitor scale. A multiplicative error does not converge under an
+   *    additive retry, so the retry asks for `h² / actual`.
+   *
+   * This function does not react to a manual drag — that matches neither
+   * shape. The window is nonetheless fit-to-content by design: a drag changes
+   * the container's border box (it fills the viewport), which fires the
+   * container's ResizeObserver and re-imposes the content height. That is
+   * deliberate: with the viewport-filling layout a wrong native height costs
+   * transcript space, never the input bar, so a manual stretch is no longer
+   * needed as an escape hatch.
+   *
+   * Residual: shape 2 compares against the *current* scale factor. If the
+   * native side used a previous monitor's scale, the physical size will not
+   * match `requested × scaleFactor`, no correction is attempted, and only the
+   * diagnostic line records the mismatch.
+   */
+  const verifyNativeSize = useCallback(() => {
+    /* v8 ignore start -- needs a native window resize */
+    const request = lastRequestRef.current;
+    if (!request.height || request.corrected) return;
+    if (overlayStateRef.current !== 'visible') return;
+
+    const actual = window.innerHeight;
+    if (actual <= 0 || Math.abs(actual - request.height) <= 1) return;
+
+    request.corrected = true;
+
+    const apply = (height: number) => {
+      logSizing('correct', morphingContainerNodeRef.current, height);
+      if (growsUpwardRef.current) {
+        const { x, bottomY } = windowPosRef.current;
+        void invoke('set_window_frame', {
+          x,
+          y: Math.max(0, bottomY - height),
+          width: OVERLAY_WIDTH,
+          height,
+        });
+      } else {
+        void getCurrentWindow().setSize(new LogicalSize(OVERLAY_WIDTH, height));
+      }
+    };
+
+    // Shape 1: the content already asked for a chat window but the native
+    // window is still at collapsed/minibar size. A user drag cannot produce
+    // this (the content size is re-applied on the next frame anyway).
+    if (
+      actual <= COLLAPSED_WINDOW_HEIGHT &&
+      request.height > COLLAPSED_WINDOW_HEIGHT
+    ) {
+      apply(request.height);
+      return;
+    }
+
+    // Shape 2: a logical→physical conversion mismatch. Only correct when the
+    // native side demonstrably accepted the request at its own scale factor.
+    const win = getCurrentWindow() as unknown as {
+      innerSize?: () => Promise<{ width: number; height: number }>;
+      scaleFactor?: () => Promise<number>;
+    };
+    if (
+      typeof win.innerSize !== 'function' ||
+      typeof win.scaleFactor !== 'function'
+    )
+      return;
+    void Promise.all([win.innerSize(), win.scaleFactor()])
+      .then(([size, scale]) => {
+        const expected = Math.round(request.height * scale);
+        if (Math.abs(size.height - expected) > 1) return;
+        apply(Math.round(request.height * (request.height / actual)));
+      })
+      .catch(() => {
+        // A failed probe leaves the size as-is; the diagnostic log records it.
+      });
+    /* v8 ignore stop */
+  }, []);
+
+  /**
+   * Re-evaluates the size whenever the native window reports a resize, and
+   * resets the correction when the display scale changes.
+   *
+   * This is what covers the gap the ResizeObserver cannot: a native resize
+   * that lands *after* the last layout change (a delayed minibar restore, a
+   * DPI conversion that yields a different CSS height) produces no container
+   * mutation, so nothing else would ever revisit the size. `verifyNativeSize`
+   * is bounded, so this cannot become a resize loop.
+   */
+  useEffect(() => {
+    /* v8 ignore start -- native window events */
+    let unlistenResize: (() => void) | undefined;
+    let unlistenScale: (() => void) | undefined;
+    void listen('tauri://resize', () => verifyNativeSize())
+      .then((fn) => {
+        unlistenResize = fn;
+      })
+      .catch(() => {
+        // Event bridge unavailable (test env without the mock): the
+        // ResizeObserver and focus resync still cover the common path.
+      });
+    void listen('tauri://scale-change', () => {
+      lastRequestRef.current.corrected = false;
+      syncWindowSize();
+    })
+      .then((fn) => {
+        unlistenScale = fn;
+      })
+      .catch(() => {
+        // Same fallback as above.
+      });
+    return () => {
+      unlistenResize?.();
+      unlistenScale?.();
+    };
+    /* v8 ignore stop */
+  }, [syncWindowSize, verifyNativeSize]);
 
   /**
    * Re-applies the window size when the window regains focus or becomes
@@ -539,6 +842,36 @@ function App() {
   );
 
   /**
+   * Keeps the window sized while chat mode is on screen.
+   *
+   * In chat mode the container fills the viewport, so its own border box stops
+   * changing when content arrives: the ResizeObserver in `setContainerRef`
+   * cannot see a message being sent, a reply streaming in, or a conversation
+   * being loaded. The transcript content wrapper is the element whose height
+   * actually tracks the content, so it drives the sync.
+   *
+   * The immediate `syncWindowSize()` is what sizes a message sent from a
+   * freshly summoned ask bar: entering chat mode changes no observed box at the
+   * container, so without it nothing would ever fire for that transition.
+   */
+  useEffect(() => {
+    /* v8 ignore start -- needs a real browser layout and native window */
+    if (!isChatMode) {
+      syncWindowSize();
+      return;
+    }
+    const content = morphingContainerNodeRef.current?.querySelector(
+      '[data-chat-content]',
+    );
+    if (!content) return;
+    const observer = new ResizeObserver(() => syncWindowSize());
+    observer.observe(content);
+    syncWindowSize();
+    return () => observer.disconnect();
+    /* v8 ignore stop */
+  }, [isChatMode, syncWindowSize]);
+
+  /**
    * Reset the high-water mark when streaming finishes so the window can
    * shrink back to its natural content height on the next resize event.
    */
@@ -559,6 +892,10 @@ function App() {
       windowY: number | null,
       screenBottomY: number | null,
     ) => {
+      // Synchronous, before any setState: a hide commit scheduled before this
+      // show must be able to observe that a show has already been delivered,
+      // even if the webview is throttled and React has not re-rendered yet.
+      showEpochRef.current += 1;
       const shouldGrowUp =
         windowY !== null &&
         screenBottomY !== null &&
@@ -1291,16 +1628,14 @@ function App() {
       skillAliases,
     );
     if (typedSkills.length > 0) {
-      setSelectedSkills((prev) =>
-        Array.from(new Set([...prev, ...typedSkills])),
-      );
+      setSelectedSkills((prev) => dedupeAliases([...prev, ...typedSkills]));
       if (!stripped) {
         // Only `/add <alias>` was typed: record the skill and wait for a prompt.
         setQuery('');
         return;
       }
     }
-    const turnSkills = Array.from(new Set([...selectedSkills, ...typedSkills]));
+    const turnSkills = dedupeAliases([...selectedSkills, ...typedSkills]);
 
     // Parse all valid commands from anywhere in the message.
     const trimmedQuery = stripped;
@@ -1690,7 +2025,9 @@ function App() {
       .reverse()
       .find((m) => m.role === 'assistant');
     if (lastAssistant?.content) {
-      void navigator.clipboard.writeText(lastAssistant.content);
+      void navigator.clipboard.writeText(
+        trimLeadingBlankLines(lastAssistant.content),
+      );
     }
   }, [messages]);
 
@@ -1806,10 +2143,18 @@ function App() {
   useEffect(() => {
     if (overlayState === 'visible') {
       void refreshSkills();
-      const raf = requestAnimationFrame(() => inputRef.current?.focus());
+      const raf = requestAnimationFrame(() => {
+        // Re-assert the size on the first frame after the overlay becomes
+        // visible. A minibar restore resizes the native window separately from
+        // the layout, and its resize can land after the ResizeObserver's only
+        // edge has already fired; the native resize listener covers a late
+        // landing, this covers the normal one.
+        syncWindowSize();
+        inputRef.current?.focus();
+      });
       return () => cancelAnimationFrame(raf);
     }
-  }, [overlayState, sessionId, refreshSkills]);
+  }, [overlayState, sessionId, refreshSkills, syncWindowSize]);
 
   /**
    * Commits the native window hide after a fixed deadline from the start of
@@ -1818,9 +2163,23 @@ function App() {
   useEffect(() => {
     if (overlayState !== 'hiding') return;
 
+    const scheduledAtEpoch = showEpochRef.current;
     const timer = setTimeout(() => {
-      void getCurrentWindow().hide();
-      void invoke('notify_overlay_hidden');
+      // A show can arrive between scheduling and firing. Committing the hide
+      // then would leave the native window hidden while the DOM renders the
+      // bar, until the next summon — an intermittent "takes two double-taps".
+      // The show handler bumps the epoch synchronously, so this cancels a
+      // stale exit regardless of React render timing; the state check also
+      // covers any other transition away from `hiding`. Even if a show event
+      // has not reached the webview yet, the backend's `commit` re-checks its
+      // intended-visible flag and refuses to hide over a summon.
+      if (
+        showEpochRef.current !== scheduledAtEpoch ||
+        overlayStateRef.current !== 'hiding'
+      ) {
+        return;
+      }
+      void invoke('notify_overlay_hidden', { commit: true });
       setOverlayState('hidden');
     }, HIDE_COMMIT_DELAY_MS);
 
@@ -1901,7 +2260,7 @@ function App() {
       onDragOver={handleRootDragOver}
       onDragLeave={handleRootDragLeave}
       onDrop={handleRootDrop}
-      className={`flex flex-col items-center ${growsUpward ? 'justify-end' : 'justify-start'} h-screen w-screen px-3 pt-2 pb-6 bg-transparent overflow-visible`}
+      className={`flex flex-col items-center ${growsUpward ? 'justify-end' : 'justify-start'} h-screen w-screen px-3 pt-2 pb-6 bg-transparent overflow-clip`}
     >
       <AnimatePresence mode="wait">
         {shouldRenderOverlay ? (
@@ -1916,26 +2275,38 @@ function App() {
             // word. `syncWindowSize` is transform-independent and a no-op unless
             // the overlay is visible, so this is safe to run on any completion.
             onAnimationComplete={syncWindowSize}
-            className="w-full max-w-2xl px-4 py-2 overflow-visible"
+            // In chat mode the whole chain down to the container fills the
+            // viewport. That is what makes a short native window shrink the
+            // transcript instead of pushing the input bar out of the window:
+            // the input is a shrink-0 flex child of a 100%-height column, so it
+            // is always inside the window no matter what height the native side
+            // actually produced.
+            className={`w-full max-w-2xl px-4 py-2 overflow-visible ${
+              isChatMode ? 'flex-1 min-h-0' : ''
+            }`}
           >
             {/* Relative wrapper — serves as the positioning context for the
                 chat-mode history dropdown so it can sit outside the morphing
                 container's overflow-hidden boundary without being clipped. */}
-            <div className="relative">
+            <div className={`relative ${isChatMode ? 'h-full min-h-0' : ''}`}>
               {/* Morphing Container — flex column ensures the input bar
                   always sticks to the bottom without spring animation lag.
                   A CSS `transition: min-height` drives smooth window growth
                   when the chat-mode history dropdown is open; the existing
                   ResizeObserver fires per-frame and calls setSize() so the
                   native window tracks the animation. The dropdown is a sibling
-                  (not a child) so overflow-hidden never clips it. */}
+                  (not a child) so overflow-hidden never clips it.
+                  In chat mode it also fills the viewport (`h-full`), which is
+                  why the sizing rule measures content rather than this box. */}
               <div
                 ref={setContainerRef}
                 style={{
                   transition:
                     'height 0.25s cubic-bezier(0.16, 1, 0.3, 1), min-height 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
                 }}
-                className={`morphing-container relative flex flex-col bg-surface-base overflow-hidden`}
+                className={`morphing-container relative flex flex-col bg-surface-base overflow-hidden ${
+                  isChatMode ? 'h-full min-h-0' : ''
+                }`}
               >
                 {/* Chat Messages Area — morphs in when in chat mode */}
                 <AnimatePresence>

@@ -168,7 +168,12 @@ body {
   color: var(--color-text-primary);
   margin: 0;
   padding: 0;
+  /* `clip`, not `hidden`: `hidden` still makes the element a scroll container,
+   * so focusing an off-screen element can programmatically scroll the body and
+   * push the pinned header out of view. `clip` forbids scrolling entirely; the
+   * first declaration is the fallback for engines without it. */
   overflow: hidden;
+  overflow: clip;
   user-select: none;
 }
 

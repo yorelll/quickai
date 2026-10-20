@@ -1,7 +1,11 @@
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { onAction } from '@tauri-apps/plugin-notification';
-import App, { extractSkillAdds } from '../App';
+import App, {
+  COLLAPSED_WINDOW_HEIGHT,
+  extractSkillAdds,
+  measureChatContentHeight,
+} from '../App';
 import {
   invoke,
   emitTauriEvent,
@@ -260,7 +264,34 @@ describe('App', () => {
       vi.advanceTimersByTime(400);
     });
 
-    expect(__mockWindow.hide).toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledWith('notify_overlay_hidden', {
+      commit: true,
+    });
+    vi.useRealTimers();
+  });
+
+  it('cancels the pending hide when a show lands during the exit animation', async () => {
+    vi.useFakeTimers();
+    render(<App />);
+    await act(async () => {});
+
+    await showOverlay();
+    act(() => {
+      fireEvent.keyDown(window, { key: 'Escape' });
+    });
+
+    // Deliver the show and run the already-scheduled commit timer in the same
+    // tick. The timer must see the synchronously bumped show epoch even though
+    // React has not re-rendered the state yet — that ordering is exactly the
+    // race where the native hide used to land after the backend's show().
+    act(() => {
+      emitTauriEvent('quickai://visibility', { state: 'show' });
+      vi.advanceTimersByTime(400);
+    });
+
+    expect(invoke).not.toHaveBeenCalledWith('notify_overlay_hidden', {
+      commit: true,
+    });
     vi.useRealTimers();
   });
 
@@ -507,7 +538,7 @@ describe('App', () => {
     await act(async () => {});
 
     // Show overlay near screen bottom: window_y=750, screen_bottom=900.
-    // 750 + MAX_CHAT_WINDOW_HEIGHT(648) = 1398 > 900 → grows upward.
+    // 750 + MAX_CHAT_WINDOW_HEIGHT(713) = 1463 > 900 → grows upward.
     await act(async () => {
       emitTauriEvent('quickai://visibility', {
         state: 'show',
@@ -527,7 +558,7 @@ describe('App', () => {
     await act(async () => {});
 
     // Show overlay near top: window_y=100, screen_bottom=900.
-    // 100 + 648 = 748 < 900 → grows downward.
+    // 100 + 713 = 813 < 900 → grows downward.
     await act(async () => {
       emitTauriEvent('quickai://visibility', {
         state: 'show',
@@ -566,7 +597,7 @@ describe('App', () => {
       });
       if (capturedCallback) {
         capturedCallback(
-          [{ target: element } as ResizeObserverEntry],
+          [{ target: element } as unknown as ResizeObserverEntry],
           {} as ResizeObserver,
         );
       }
@@ -578,7 +609,9 @@ describe('App', () => {
       render(<App />);
       await act(async () => {});
 
-      // window_y=804, screen_bottom=900. bottomY = 804+60 = 864.
+      // window_y=804, screen_bottom=900. bottomY = 804 + COLLAPSED_WINDOW_HEIGHT
+      // = 917. The 60 below is the container's measured content height, not the
+      // collapsed window height.
       await act(async () => {
         emitTauriEvent('quickai://visibility', {
           state: 'show',
@@ -599,10 +632,11 @@ describe('App', () => {
         triggerResize(container!, 60);
       });
 
-      // bottomY(864) - targetHeight(108) = 756
+      // bottomY = 804 + the collapsed ask-bar height; the window grows upward
+      // from that pinned bottom by exactly the requested height.
       expect(invoke).toHaveBeenCalledWith('set_window_frame', {
         x: 100,
-        y: 756,
+        y: 804 + COLLAPSED_WINDOW_HEIGHT - 108,
         width: 650,
         height: 108,
       });
@@ -650,15 +684,15 @@ describe('App', () => {
 
       act(() => {
         capturedCallback!(
-          [{ target: container! } as ResizeObserverEntry],
+          [{ target: container! } as unknown as ResizeObserverEntry],
           {} as ResizeObserver,
         );
       });
 
-      // bottomY = 804 + 60 = 864; 864 - 248 = 616.
+      // bottomY = 804 + collapsed height; 248 is the container's 200 + 48.
       expect(invoke).toHaveBeenCalledWith('set_window_frame', {
         x: 100,
-        y: 616,
+        y: 804 + COLLAPSED_WINDOW_HEIGHT - 248,
         width: 650,
         height: 248,
       });
@@ -749,13 +783,372 @@ describe('App', () => {
       act(() => {
         triggerResize(container2!, 60);
       });
-      // bottomY = 804+60 = 864. 864-108 = 756.
+      // bottomY = 804 + the collapsed ask-bar height; the window grows upward
+      // from that pinned bottom by exactly the requested height.
       expect(invoke).toHaveBeenCalledWith('set_window_frame', {
         x: 100,
-        y: 756,
+        y: 804 + COLLAPSED_WINDOW_HEIGHT - 108,
         width: 650,
         height: 108,
       });
+    });
+  });
+
+  // ─── Chat-mode viewport filling and the sizing requirement ─────────────────
+
+  describe('chat-mode sizing requirement', () => {
+    /** Captures every ResizeObserver callback keyed by the element it observes. */
+    function captureResizeObservers() {
+      const callbacks = new Map<Element, ResizeObserverCallback>();
+      const Original = globalThis.ResizeObserver;
+      vi.spyOn(globalThis, 'ResizeObserver').mockImplementation(function (
+        callback: ResizeObserverCallback,
+      ) {
+        const observer = new Original(callback) as ResizeObserver;
+        const observe = observer.observe.bind(observer);
+        observer.observe = (element: Element) => {
+          callbacks.set(element, callback);
+          observe(element);
+        };
+        return observer;
+      });
+      return callbacks;
+    }
+
+    function defineBox(element: Element | null, height: number) {
+      if (!element) return;
+      Object.defineProperty(element, 'offsetHeight', {
+        value: height,
+        configurable: true,
+      });
+    }
+
+    async function enterChatMode() {
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
+      await act(async () => {
+        fireEvent.change(textarea, { target: { value: 'hi' } });
+      });
+      await act(async () => {
+        fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
+      });
+      await act(async () => {
+        await new Promise((r) => requestAnimationFrame(r));
+      });
+    }
+
+    async function showDownward() {
+      await act(async () => {
+        emitTauriEvent('quickai://visibility', {
+          state: 'show',
+          selected_text: null,
+          window_x: 100,
+          window_y: 100,
+          screen_bottom_y: 2000,
+        });
+      });
+    }
+
+    const originalInnerHeight = window.innerHeight;
+    afterEach(() => {
+      Object.defineProperty(window, 'innerHeight', {
+        value: originalInnerHeight,
+        configurable: true,
+      });
+    });
+
+    it('measures the chat requirement from content, not from the window-filling box', async () => {
+      const callbacks = captureResizeObservers();
+      render(<App />);
+      await act(async () => {});
+      await showDownward();
+      await enterChatMode();
+
+      const container = document.querySelector(
+        '.morphing-container',
+      ) as HTMLElement;
+      const chat = document.querySelector('[data-chat-area]')!;
+      const content = document.querySelector('[data-chat-content]')!;
+      const scroller = content.parentElement as HTMLElement;
+
+      // The window is 648 px and the column fills it, so the container is
+      // 600 px — the old `container.offsetHeight + 48` would ask for 648 and
+      // never grow. Content: chrome 34 + transcript 1200 + padding 32, capped
+      // at 600; below the chat area: 65 px input bar → requirement 665.
+      scroller.style.paddingTop = '16px';
+      scroller.style.paddingBottom = '16px';
+      defineBox(container, 600);
+      defineBox(chat, 535);
+      defineBox(scroller, 501);
+      defineBox(content, 1200);
+      // The input bar is the only content-sized sibling below the chat area.
+      defineBox(container.lastElementChild, 65);
+
+      expect(measureChatContentHeight(container)).toBe(665);
+
+      __mockWindow.setSize.mockClear();
+      act(() => {
+        callbacks.get(container)!(
+          [{ target: container } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+
+      expect(__mockWindow.setSize).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 650, height: 713 }),
+      );
+      // The fixed point: the container's own height would have requested 648.
+      expect(__mockWindow.setSize).not.toHaveBeenCalledWith(
+        expect.objectContaining({ height: 648 }),
+      );
+    });
+
+    it('gets chat modality from the content requirement and fills the viewport in chat mode', async () => {
+      render(<App />);
+      await act(async () => {});
+      await showDownward();
+
+      const askBarContainer = document.querySelector('.morphing-container')!;
+      expect(askBarContainer.className).not.toContain('h-full');
+
+      await enterChatMode();
+
+      const container = document.querySelector('.morphing-container')!;
+      const relative = container.parentElement!;
+      const motion = relative.parentElement!;
+      // The whole chain fills the viewport so the input bar is a shrink-0
+      // child of a full-height column: a short native window then costs
+      // transcript height, never input-bar visibility.
+      expect(container.className).toContain('h-full');
+      expect(container.className).toContain('min-h-0');
+      expect(relative.className).toContain('h-full');
+      expect(motion.className).toContain('flex-1');
+      expect(
+        document.querySelector('[data-chat-content]')!.parentElement!.className,
+      ).toContain('overflow-y-auto');
+    });
+
+    it('sizes a message sent from a freshly summoned ask bar with no external event', async () => {
+      // The container fills the viewport, so entering chat mode changes no box
+      // the container observer watches. Geometry is supplied on the prototype
+      // because the chat elements are created in the same commit that runs the
+      // sync — there is no later event to trigger a second measurement.
+      vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(
+        function (this: HTMLElement) {
+          if (this.hasAttribute('data-chat-content')) return 1200;
+          if (this.firstElementChild?.hasAttribute('data-chat-content'))
+            return 566;
+          if (this.hasAttribute('data-chat-area')) return 600;
+          return 65;
+        },
+      );
+      Object.defineProperty(window, 'innerHeight', {
+        value: 113,
+        configurable: true,
+      });
+
+      render(<App />);
+      await act(async () => {});
+      await showDownward();
+      __mockWindow.setSize.mockClear();
+
+      // Type + Enter only — no show event, no resize event, no RO trigger.
+      await enterChatMode();
+
+      expect(document.querySelector('[data-chat-area]')).not.toBeNull();
+      expect(__mockWindow.setSize).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 650, height: 713 }),
+      );
+    });
+
+    it('keeps the room the history dropdown asked for on a short conversation', async () => {
+      const callbacks = captureResizeObservers();
+      render(<App />);
+      await act(async () => {});
+      await showDownward();
+      await enterChatMode();
+
+      const container = document.querySelector(
+        '.morphing-container',
+      ) as HTMLElement;
+      const chat = document.querySelector('[data-chat-area]')!;
+      const content = document.querySelector('[data-chat-content]')!;
+      const scroller = content.parentElement as HTMLElement;
+
+      // Content requirement: 65 input + (34 chrome + 166 content) = 265, i.e.
+      // exactly the 313 px window, so the early return would drop the request.
+      defineBox(container, 265);
+      defineBox(chat, 200);
+      defineBox(scroller, 166);
+      defineBox(content, 166);
+      defineBox(container.lastElementChild, 65);
+      // Opening history writes the dropdown's need as an inline min-height.
+      container.style.minHeight = '353px';
+
+      Object.defineProperty(window, 'innerHeight', {
+        value: 313,
+        configurable: true,
+      });
+      __mockWindow.setSize.mockClear();
+      act(() => {
+        callbacks.get(content)!(
+          [{ target: content } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+
+      // 353 (the dropdown's need) + 48 padding, not the 313 content height.
+      expect(__mockWindow.setSize).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 650, height: 401 }),
+      );
+    });
+
+    it('returns null outside chat mode', () => {
+      const node = document.createElement('div');
+      document.body.appendChild(node);
+      expect(measureChatContentHeight(node)).toBeNull();
+      node.remove();
+    });
+
+    it('re-applies the request once when a native resize leaves the window collapsed', async () => {
+      const callbacks = captureResizeObservers();
+      render(<App />);
+      await act(async () => {});
+      await showDownward();
+      await enterChatMode();
+
+      const container = document.querySelector('.morphing-container')!;
+      const chat = document.querySelector('[data-chat-area]')!;
+      const content = document.querySelector('[data-chat-content]')!;
+      const scroller = content.parentElement as HTMLElement;
+      scroller.style.paddingTop = '16px';
+      scroller.style.paddingBottom = '16px';
+      defineBox(container, 600);
+      defineBox(chat, 535);
+      defineBox(scroller, 501);
+      defineBox(content, 1200);
+      // The input bar is the only content-sized sibling below the chat area.
+      defineBox(container.lastElementChild, 65);
+
+      __mockWindow.setSize.mockClear();
+      act(() => {
+        callbacks.get(container)!(
+          [{ target: container } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+      expect(__mockWindow.setSize).toHaveBeenCalledTimes(1);
+
+      // A late minibar restore resizes the native window back to 60 px after
+      // the request went out. The resize listener must re-apply the request
+      // exactly once — no loop.
+      Object.defineProperty(window, 'innerHeight', {
+        value: 60,
+        configurable: true,
+      });
+      __mockWindow.setSize.mockClear();
+      await act(async () => {
+        emitTauriEvent('tauri://resize', { width: 650, height: 60 });
+      });
+      expect(__mockWindow.setSize).toHaveBeenCalledTimes(1);
+      expect(__mockWindow.setSize).toHaveBeenCalledWith(
+        expect.objectContaining({ height: 713 }),
+      );
+
+      // The corrected flag is spent: another resize event does nothing.
+      await act(async () => {
+        emitTauriEvent('tauri://resize', { width: 650, height: 60 });
+      });
+      expect(__mockWindow.setSize).toHaveBeenCalledTimes(1);
+    });
+
+    it('corrects a multiplicative height mismatch once, by the ratio', async () => {
+      const callbacks = captureResizeObservers();
+      const innerSize = vi.fn(async () => ({ width: 650, height: 713 }));
+      const scaleFactor = vi.fn(async () => 1);
+      Object.assign(__mockWindow, { innerSize, scaleFactor });
+
+      try {
+        render(<App />);
+        await act(async () => {});
+        await showDownward();
+        await enterChatMode();
+
+        const container = document.querySelector('.morphing-container')!;
+        const chat = document.querySelector('[data-chat-area]')!;
+        const content = document.querySelector('[data-chat-content]')!;
+        const scroller = content.parentElement as HTMLElement;
+        scroller.style.paddingTop = '16px';
+        scroller.style.paddingBottom = '16px';
+        defineBox(container, 600);
+        defineBox(chat, 535);
+        defineBox(scroller, 501);
+        defineBox(content, 1200);
+        // The input bar is the only content-sized sibling below the chat area.
+        defineBox(container.lastElementChild, 65);
+
+        act(() => {
+          callbacks.get(container)!(
+            [{ target: container } as unknown as ResizeObserverEntry],
+            {} as ResizeObserver,
+          );
+        });
+
+        // The native side accepted 713 at scale 1 (its physical inner size is
+        // exactly 713) but the webview renders 570 CSS px — a conversion
+        // mismatch. The retry is 713² / 570 = 892, applied once.
+        Object.defineProperty(window, 'innerHeight', {
+          value: 570,
+          configurable: true,
+        });
+        __mockWindow.setSize.mockClear();
+        await act(async () => {
+          emitTauriEvent('tauri://resize', { width: 650, height: 713 });
+        });
+        await act(async () => {});
+
+        expect(__mockWindow.setSize).toHaveBeenCalledTimes(1);
+        expect(__mockWindow.setSize).toHaveBeenCalledWith(
+          expect.objectContaining({ height: 892 }),
+        );
+      } finally {
+        delete (__mockWindow as Record<string, unknown>).innerSize;
+        delete (__mockWindow as Record<string, unknown>).scaleFactor;
+      }
+    });
+
+    it('re-syncs to the content requirement after a display-scale change', async () => {
+      render(<App />);
+      await act(async () => {});
+      await showDownward();
+      await enterChatMode();
+
+      const container = document.querySelector('.morphing-container')!;
+      const chat = document.querySelector('[data-chat-area]')!;
+      const content = document.querySelector('[data-chat-content]')!;
+      const scroller = content.parentElement as HTMLElement;
+      scroller.style.paddingTop = '16px';
+      scroller.style.paddingBottom = '16px';
+      defineBox(container, 600);
+      defineBox(chat, 535);
+      defineBox(scroller, 501);
+      defineBox(content, 1200);
+      // The input bar is the only content-sized sibling below the chat area.
+      defineBox(container.lastElementChild, 65);
+
+      Object.defineProperty(window, 'innerHeight', {
+        value: 300,
+        configurable: true,
+      });
+      __mockWindow.setSize.mockClear();
+      await act(async () => {
+        emitTauriEvent('tauri://scale-change', {});
+      });
+
+      expect(__mockWindow.setSize).toHaveBeenCalledWith(
+        expect.objectContaining({ height: 713 }),
+      );
     });
   });
 
@@ -4957,6 +5350,42 @@ describe('App', () => {
       expect(writeText).toHaveBeenCalledWith('My response');
     });
 
+    it('drops a leading blank line when copying the last response', async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, { clipboard: { writeText } });
+
+      render(<App />);
+      await act(async () => {});
+
+      await showOverlay();
+
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
+      act(() => {
+        fireEvent.change(textarea, { target: { value: 'copy test' } });
+      });
+      act(() => {
+        fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      });
+      await act(async () => {});
+
+      const channel = getLastChannel();
+      await act(async () => {
+        channel?.simulateMessage({ type: 'Token', data: '\n\nMy response' });
+      });
+      await act(async () => {
+        channel?.simulateMessage({ type: 'Done' });
+      });
+
+      act(() => {
+        fireEvent.keyDown(window, { key: 'C', ctrlKey: true, shiftKey: true });
+      });
+      await act(async () => {});
+
+      expect(writeText).toHaveBeenCalledWith('My response');
+    });
+
     it('does not copy when no assistant response exists', async () => {
       const writeText = vi.fn().mockResolvedValue(undefined);
       Object.assign(navigator, { clipboard: { writeText } });
@@ -5537,6 +5966,73 @@ describe('App', () => {
 
       const list = screen.getByRole('list', { name: 'Selected skills' });
       expect(list.querySelectorAll('[role="listitem"]')).toHaveLength(1);
+
+      // Picking it twice must still send a single copy to the backend.
+      fireEvent.change(textarea, { target: { value: 'hello' } });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      await act(async () => {});
+
+      expect(invoke).toHaveBeenCalledWith(
+        'ask',
+        expect.objectContaining({ query: 'hello', skills: ['translate'] }),
+      );
+    });
+
+    it('sends two different selected skills in pick order', async () => {
+      const textarea = await showWithSkills([
+        ...SKILLS,
+        { id: 's3', alias: 'summarize', path: '/c.md', enabled: false },
+      ]);
+
+      fireEvent.change(textarea, { target: { value: '/add' } });
+      await act(async () => {});
+      // The picker opens on `translate` (the first addable skill).
+      fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'ArrowDown' });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+      await act(async () => {});
+
+      fireEvent.change(textarea, { target: { value: 'hello' } });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      await act(async () => {});
+
+      expect(invoke).toHaveBeenCalledWith(
+        'ask',
+        expect.objectContaining({
+          query: 'hello',
+          skills: ['translate', 'summarize'],
+        }),
+      );
+    });
+
+    it('de-duplicates repeated /add aliases, keeping the first occurrence', async () => {
+      const textarea = await showWithSkills([
+        ...SKILLS,
+        { id: 's3', alias: 'summarize', path: '/c.md', enabled: false },
+      ]);
+
+      // `summarize` is named twice, around `translate`: the surviving copy is
+      // the first `summarize`, so the order is summarize, translate.
+      fireEvent.change(textarea, {
+        target: {
+          value: '/add summarize /add translate /add summarize hello',
+        },
+      });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      await act(async () => {});
+
+      expect(invoke).toHaveBeenCalledWith(
+        'ask',
+        expect.objectContaining({
+          query: 'hello',
+          skills: ['summarize', 'translate'],
+        }),
+      );
     });
 
     it('sends a prompt typed after a direct /add <alias>', async () => {
@@ -5753,6 +6249,22 @@ describe('App', () => {
       expect(
         screen.queryByRole('list', { name: 'Selected skills' }),
       ).toBeNull();
+    });
+
+    it('de-duplicates a repeated alias on the /do path', async () => {
+      const textarea = await showWithSkills();
+
+      fireEvent.change(textarea, {
+        target: { value: '/do /add translate /add translate tidy' },
+      });
+      await act(async () => {});
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      await act(async () => {});
+
+      expect(invoke).toHaveBeenCalledWith('start_agent_mode', {
+        task: 'tidy',
+        skills: ['translate'],
+      });
     });
 
     it('passes selected skills to an auto-detected agent run', async () => {

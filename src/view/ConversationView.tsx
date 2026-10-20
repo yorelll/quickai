@@ -258,6 +258,7 @@ export function ConversationView({
   return (
     <motion.div
       key="chat-area"
+      data-chat-area
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -285,8 +286,14 @@ export function ConversationView({
         {/* Content wrapper. Its height is the transcript's content height —
             what the ResizeObserver above watches so late content (code blocks,
             images) settling after a pin does not leave the view parked short of
-            the bottom. */}
-        <div ref={scrollContentRef} className="flex flex-col gap-3">
+            the bottom. `App` also reads it (via this attribute) as the
+            window-sizing requirement, because the scroller's own box is flexed
+            and therefore window-dependent. */}
+        <div
+          ref={scrollContentRef}
+          data-chat-content
+          className="flex flex-col gap-3"
+        >
           {messages.map((msg, i) => {
             const isLastAssistant =
               isGenerating &&
