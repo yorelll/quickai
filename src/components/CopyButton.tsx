@@ -1,9 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from '../i18n';
+import { trimLeadingBlankLines } from '../utils/trimLeadingBlankLines';
 
 interface CopyButtonProps {
-  /** Raw text content to write to the clipboard. */
+  /** Text to copy. Leading blank lines are dropped before writing. */
   content: string;
   /** Which side of the action bar the button sits on — matches bubble tail side. */
   align: 'left' | 'right';
@@ -13,6 +14,10 @@ interface CopyButtonProps {
  * One-click copy button rendered below a chat message.
  * Always visible; shows a checkmark for 1.5s on successful copy, then reverts.
  * Clipboard failures are swallowed silently.
+ *
+ * Leading blank lines are dropped before writing: providers sometimes start a
+ * reply with the newline that separated its reasoning from its answer, which
+ * markdown rendering hides but a paste would show as an empty first line.
  */
 export function CopyButton({ content, align }: CopyButtonProps) {
   const { t } = useTranslation();
@@ -21,7 +26,7 @@ export function CopyButton({ content, align }: CopyButtonProps) {
 
   const handleCopy = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(content);
+      await navigator.clipboard.writeText(trimLeadingBlankLines(content));
       if (timerRef.current) clearTimeout(timerRef.current);
       setCopied(true);
       timerRef.current = setTimeout(() => setCopied(false), 1500);

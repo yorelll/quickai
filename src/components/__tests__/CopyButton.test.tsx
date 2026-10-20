@@ -16,6 +16,24 @@ describe('CopyButton', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('Hello world');
   });
 
+  it('drops a leading blank line from the copied text', async () => {
+    render(<CopyButton content={'\n\nHello world'} align="left" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Copy message' }));
+    });
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('Hello world');
+  });
+
+  it('preserves internal blank lines and trailing whitespace', async () => {
+    render(<CopyButton content={'\nfirst\n\nsecond\n'} align="left" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Copy message' }));
+    });
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      'first\n\nsecond\n',
+    );
+  });
+
   it('shows checkmark after successful copy (aria-label changes to "Copied")', async () => {
     render(<CopyButton content="test content" align="right" />);
     await act(async () => {
