@@ -5,8 +5,16 @@ import { invoke } from '../../testUtils/mocks/tauri';
 import { __mockWindow } from '../../testUtils/mocks/tauri-window';
 import { LANGUAGE_STORAGE_KEY, setLocale } from '../../i18n';
 import { en } from '../../i18n/en';
+import type { Skill } from '../skills';
 
 const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>;
+
+const SKILL: Skill = {
+  id: 's1',
+  alias: 'translate',
+  path: 'D:\\skills\\translate.md',
+  enabled: false,
+};
 
 const RAW = {
   general: { hotkey: 'ctrl', language: 'auto', data_dir: '', theme: 'dark' },
@@ -34,6 +42,8 @@ function installBackend(
     settings?: Record<string, string>;
     settingsError?: boolean;
     testConnection?: unknown;
+    skills?: Skill[];
+    skillSaveError?: unknown;
   } = {},
 ) {
   let state = structuredClone(RAW);
@@ -61,7 +71,11 @@ function installBackend(
         case 'get_corrupt_marker':
           return options.marker ?? null;
         case 'get_skills':
-          return [];
+          return options.skills ?? [];
+        case 'set_skills':
+          if (options.skillSaveError !== undefined)
+            throw options.skillSaveError;
+          return args?.skills;
         case 'get_default_data_dir':
           return 'C:\\Users\\me\\AppData\\Roaming\\quickai';
         case 'test_connection':
@@ -79,6 +93,8 @@ async function renderWindow(
     settings?: Record<string, string>;
     settingsError?: boolean;
     testConnection?: unknown;
+    skills?: Skill[];
+    skillSaveError?: unknown;
   } = {},
 ) {
   installBackend(options);
@@ -504,6 +520,39 @@ describe('SettingsWindow', () => {
       expect(
         screen.getByRole('button', { name: 'Add skill' }),
       ).toBeInTheDocument();
+    });
+
+    it('shows a skill error as a popup that does not return after a tab switch', async () => {
+      await renderWindow({
+        skills: [SKILL],
+        skillSaveError: { kind: 'path_not_a_file' },
+      });
+      await goToTab('AI');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Add skill' }));
+      fireEvent.change(screen.getByLabelText('Alias'), {
+        target: { value: 'gamma' },
+      });
+      fireEvent.change(screen.getByLabelText('Path'), {
+        target: { value: 'D:\\skills' },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      });
+
+      const dialog = screen.getByRole('alertdialog');
+      expect(dialog).toHaveTextContent(
+        'That path is a folder. Choose a file, not a folder.',
+      );
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+
+      // The AI panel stays mounted while hidden; revisiting it must not bring
+      // the dismissed error back.
+      await goToTab('Display');
+      await goToTab('AI');
+      expect(screen.queryByRole('alertdialog')).toBeNull();
     });
 
     it('shows the connection status control, untested by default', async () => {

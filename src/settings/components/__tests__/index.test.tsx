@@ -10,6 +10,7 @@ import {
   SavedPill,
   ConfirmDialog,
   InfoDialog,
+  ErrorDialog,
 } from '../index';
 
 describe('Section', () => {
@@ -473,6 +474,46 @@ describe('InfoDialog', () => {
     expect(screen.getByRole('dialog')).toHaveAttribute('aria-modal', 'true');
     expect(screen.getByText('Help')).toBeInTheDocument();
     expect(screen.getByText('body')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(document, { key: 'a' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('ErrorDialog', () => {
+  it('renders nothing while closed', () => {
+    render(
+      <ErrorDialog
+        open={false}
+        title="Not saved"
+        message="That path is a folder."
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('renders the title and message, and closes on the × and Escape', () => {
+    const onClose = vi.fn();
+    render(
+      <ErrorDialog
+        open
+        title="Not saved"
+        message="That path is a folder."
+        onClose={onClose}
+      />,
+    );
+
+    const dialog = screen.getByRole('alertdialog');
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(dialog).toHaveAccessibleName('Not saved');
+    expect(dialog).toHaveAccessibleDescription('That path is a folder.');
 
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(onClose).toHaveBeenCalledTimes(1);

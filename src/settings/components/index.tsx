@@ -443,3 +443,100 @@ export function InfoDialog({
     </div>
   );
 }
+
+// ─── Error dialog ───────────────────────────────────────────────────────
+
+/**
+ * A dismissible error popup: a title and one specific message, closed with the
+ * × control or Escape.
+ *
+ * Settings errors are shown here rather than as inline alerts. An inline alert
+ * has no dismissal, and the settings UI now outlives both a tab switch (tabs
+ * stay mounted when hidden) and closing the window (the close button hides the
+ * window instead of destroying it), so an inline alert would sit there until
+ * the app restarts. The popup stays gone once dismissed and opens again only
+ * when a later action fails.
+ */
+export function ErrorDialog({
+  open,
+  title,
+  message,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  message: string;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const titleId = useId();
+  const messageId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <div
+      className={styles.dialogBackdrop}
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      aria-describedby={messageId}
+    >
+      <div className={styles.dialog}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: 12,
+          }}
+        >
+          <h2 id={titleId} className={styles.dialogTitle} style={{ margin: 0 }}>
+            {title}
+          </h2>
+          <button
+            type="button"
+            className={styles.closeBtn}
+            style={{ flexShrink: 0, margin: '-6px -10px 0 0' }}
+            onClick={onClose}
+            aria-label={t('common.close')}
+            autoFocus
+          >
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 10 10"
+              fill="none"
+              aria-hidden
+            >
+              <path
+                d="M1 1L9 9M9 1L1 9"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        </div>
+        <p
+          id={messageId}
+          className={styles.dialogMessage}
+          style={{ margin: '12px 0 0' }}
+        >
+          {message}
+        </p>
+      </div>
+    </div>
+  );
+}

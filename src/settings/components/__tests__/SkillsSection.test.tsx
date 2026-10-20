@@ -125,9 +125,16 @@ describe('SkillsSection', () => {
 
   it('reports a failed load and falls back to an empty list', async () => {
     await renderSection([], { loadFails: true });
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      "Couldn't load skills.",
-    );
+    const dialog = screen.getByRole('alertdialog');
+    expect(dialog).toHaveAccessibleName("Skills couldn't be loaded");
+    expect(dialog).toHaveTextContent("Couldn't load skills.");
+    expect(screen.getByText('No skills yet.')).toBeInTheDocument();
+  });
+
+  it('dismisses the load-failure popup', async () => {
+    await renderSection([], { loadFails: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(screen.getByText('No skills yet.')).toBeInTheDocument();
   });
 
@@ -200,7 +207,7 @@ describe('SkillsSection', () => {
     );
     await act(async () => {});
 
-    expect(screen.getByRole('alert')).toHaveTextContent(
+    expect(screen.getByRole('alertdialog')).toHaveTextContent(
       "Couldn't save skills. Please try again.",
     );
     expect(rows()).toHaveLength(2);
@@ -341,7 +348,7 @@ describe('SkillsSection', () => {
     saveDraft();
     await act(async () => {});
 
-    expect(screen.getByRole('alert')).toHaveTextContent(
+    expect(screen.getByRole('alertdialog')).toHaveTextContent(
       "Couldn't save skills. Please try again.",
     );
     expect(screen.getByLabelText('Alias')).toBeInTheDocument();
@@ -437,7 +444,7 @@ describe('SkillsSection', () => {
       typePath('D:\\skills\\gamma.md');
       saveDraft();
       await act(async () => {});
-      return screen.getByRole('alert');
+      return screen.getByRole('alertdialog');
     }
 
     it.each([
@@ -470,6 +477,57 @@ describe('SkillsSection', () => {
       expect(await saveRejected({ kind: 'meltdown' })).toHaveTextContent(
         "Couldn't save skills. Please try again.",
       );
+    });
+
+    it('dismisses the popup with the × control and it does not return', async () => {
+      const dialog = await saveRejected({ kind: 'path_not_a_file' });
+      expect(dialog).toHaveAccessibleName("The skill wasn't saved");
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+
+      // Nothing re-opens it on its own.
+      await act(async () => {});
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+
+    it('dismisses the popup with Escape', async () => {
+      await saveRejected({ kind: 'empty_path' });
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+
+    it('shows a later, different rejection again', async () => {
+      await saveRejected({ kind: 'path_not_a_file' });
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'set_skills') throw { kind: 'stray_quote' };
+        return undefined;
+      });
+      saveDraft();
+      await act(async () => {});
+
+      expect(screen.getByRole('alertdialog')).toHaveTextContent(
+        'The path still starts or ends with a quote character.',
+      );
+    });
+
+    it('clears the popup after a later successful save', async () => {
+      await saveRejected({ kind: 'path_not_a_file' });
+      fireEvent.keyDown(document, { key: 'Escape' });
+
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === 'set_skills') return [BUILTIN];
+        return undefined;
+      });
+      saveDraft();
+      await act(async () => {});
+
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+      expect(screen.queryByLabelText('Alias')).toBeNull();
     });
   });
 });

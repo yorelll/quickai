@@ -367,18 +367,21 @@ describe('GeneralTab', () => {
 
       expect(mockInvoke).toHaveBeenCalledWith('enable_auto_start_command');
       expect(startOnBootToggle()).toHaveAttribute('aria-checked', 'false');
-      expect(screen.getByRole('alert')).toHaveTextContent(
+      const dialog = screen.getByRole('alertdialog');
+      expect(dialog).toHaveAccessibleName("Start-on-boot wasn't updated");
+      expect(dialog).toHaveTextContent(
         "Couldn't update the start-on-boot setting.",
       );
     });
 
-    it('clears the error after a later successful toggle', async () => {
+    it('dismisses the error popup and succeeds on a later toggle', async () => {
       renderTab(RAW, false, { toggleFails: true });
       await act(async () => {});
       await act(async () => {
         fireEvent.click(startOnBootToggle());
       });
-      expect(screen.getByRole('alert')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      expect(screen.queryByRole('alertdialog')).toBeNull();
 
       mockInvoke.mockImplementation(async (cmd: string) => {
         if (cmd === 'is_auto_start_enabled_command') return false;
@@ -388,7 +391,7 @@ describe('GeneralTab', () => {
         fireEvent.click(startOnBootToggle());
       });
 
-      expect(screen.queryByRole('alert')).toBeNull();
+      expect(screen.queryByRole('alertdialog')).toBeNull();
       expect(startOnBootToggle()).toHaveAttribute('aria-checked', 'true');
     });
 

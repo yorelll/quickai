@@ -12,6 +12,7 @@ import {
   Dropdown,
   TextField,
   Toggle,
+  ErrorDialog,
 } from '../components';
 import { SaveField } from '../components/SaveField';
 import { configHelp } from '../configHelpers';
@@ -256,11 +257,14 @@ export function GeneralTab({ config, resyncToken, onSaved }: GeneralTabProps) {
             ariaLabel={t('settings.general.startOnBoot')}
           />
         </SettingRow>
-        {autoStartError && (
-          <p className={styles.rowError} role="alert">
-            {t('settings.general.startOnBootError')}
-          </p>
-        )}
+        {autoStartError ? (
+          <ErrorDialog
+            open
+            title={t('settings.general.startOnBootErrorTitle')}
+            message={t('settings.general.startOnBootError')}
+            onClose={() => setAutoStartError(false)}
+          />
+        ) : null}
       </Section>
     </>
   );

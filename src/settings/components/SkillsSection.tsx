@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
-import { Section, Toggle } from './index';
+import { Section, Toggle, ErrorDialog } from './index';
 import {
   describeSkillError,
   isBuiltinSkill,
@@ -35,14 +35,19 @@ const ALIAS_ERROR_KEYS: Record<AliasError, TranslationKey> = {
   duplicate: 'settings.skills.errorAliasDuplicate',
 };
 
-/** The last save's rejection: a typed backend kind, an unrecognised one, or none. */
-type SaveFailure = SkillSaveError | 'unknown' | null;
+/**
+ * The one error popup currently open: a failed initial load, or the last
+ * `set_skills` rejection, typed or not. A single slot means one close control
+ * dismisses whatever is showing and two failures never stack as two modals.
+ */
+type SkillFailure =
+  | { kind: 'load' }
+  | { kind: 'save'; error: SkillSaveError | 'unknown' };
 
 export function SkillsSection() {
   const { t } = useTranslation();
   const [skills, setSkills] = useState<Skill[] | null>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
-  const [saveFailure, setSaveFailure] = useState<SaveFailure>(null);
+  const [failure, setFailure] = useState<SkillFailure | null>(null);
   /** Entry being added or edited, or null when nothing is in edit mode. */
   const [draft, setDraft] = useState<Skill | null>(null);
   const [draftError, setDraftError] = useState<AliasError | null>(null);
@@ -57,7 +62,7 @@ export function SkillsSection() {
       .catch(() => {
         if (cancelled) return;
         setSkills([]);
-        setLoadFailed(true);
+        setFailure({ kind: 'load' });
       });
     return () => {
       cancelled = true;
@@ -67,13 +72,13 @@ export function SkillsSection() {
   const persist = useCallback(async (next: Skill[]): Promise<boolean> => {
     try {
       setSkills(await invoke<Skill[]>('set_skills', { skills: next }));
-      setSaveFailure(null);
+      setFailure(null);
       return true;
     } catch (e) {
       // The backend re-validates paths the frontend does not, so a rejection
       // here is normally a typed `SkillError`; localise it rather than showing
       // a generic message.
-      setSaveFailure(parseSkillError(e) ?? 'unknown');
+      setFailure({ kind: 'save', error: parseSkillError(e) ?? 'unknown' });
       return false;
     }
   }, []);
@@ -282,18 +287,6 @@ export function SkillsSection() {
   return (
     <Section heading={t('settings.section.skills')}>
       <p className={styles.rowHelper}>{t('settings.skills.enableHint')}</p>
-      {loadFailed ? (
-        <p className={styles.rowError} role="alert">
-          {t('settings.skills.loadError')}
-        </p>
-      ) : null}
-      {saveFailure ? (
-        <p className={styles.rowError} role="alert">
-          {saveFailure === 'unknown'
-            ? t('settings.skills.saveError')
-            : describeSkillError(saveFailure, t)}
-        </p>
-      ) : null}
 
       {skills.length === 0 && !isAdding ? (
         <p className={styles.rowHelper}>{t('settings.skills.empty')}</p>
@@ -332,6 +325,25 @@ export function SkillsSection() {
       >
         {t('settings.skills.add')}
       </button>
+
+      {failure !== null ? (
+        <ErrorDialog
+          open
+          title={t(
+            failure.kind === 'load'
+              ? 'settings.skills.loadErrorTitle'
+              : 'settings.skills.saveErrorTitle',
+          )}
+          message={
+            failure.kind === 'load'
+              ? t('settings.skills.loadError')
+              : failure.error === 'unknown'
+                ? t('settings.skills.saveError')
+                : describeSkillError(failure.error, t)
+          }
+          onClose={() => setFailure(null)}
+        />
+      ) : null}
     </Section>
   );
 }
