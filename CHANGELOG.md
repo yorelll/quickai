@@ -8,6 +8,71 @@ and the changelog follows the
 are written by hand as part of the manual release process (see
 [RELEASING.md](RELEASING.md)).
 
+## 0.0.6 (2026-10-22)
+
+Fixes for the history/scroll symptoms and the summon-key state drift — both
+**regressions introduced by 0.0.5** — plus a deliberate change to entrance
+animation. These fixes are verified in code; each "Fixed" item still needs the
+runtime check named in its entry, because both failures depend on native layout
+and event timing that tests cannot reproduce.
+
+### Changed
+
+* **A wholesale transcript replacement renders at rest** — switching
+  conversations or loading history now displays the transcript without replaying
+  the per-bubble entrance, and only appended messages animate. The 11.5 px
+  "settle" was each bubble's own `y: 12` transform; replaying it produced the
+  jump. The cost is that the first user bubble after a summon no longer
+  animates — the overlay's own summon spring still plays.
+* **The window fits its content height** (inherited from 0.0.5) — dragging the
+  window taller settles back to the height its content needs. This is
+  intentional.
+
+### Fixed
+
+* **The history panel's empty lower half, the short scroll landing, and the
+  switch bounce/flash are one regression from 0.0.5.** 0.0.5 added
+  `verifyNativeSize` in the same commit as the scroll re-pin (`35a903b`). It read
+  `window.innerHeight` **before** awaiting the native size and scale factor, then
+  applied a multiplicative correction using a value that could be stale; because
+  every resize re-armed verification, each bad correction generated the next.
+  Measured before the fix: `innerHeight` cycling between roughly 1784 and 285
+  indefinitely, a 428 px scroll shortfall, and 283 px of empty window under the
+  input. Verification now runs only after layout has settled (driven by a
+  viewport `ResizeObserver`), and a correction is skipped when the observation is
+  stale or superseded. **Runtime check:** open history from a blank conversation
+  and switch between saved conversations; the panel must fill its area, the
+  transcript must land with no further scroll room, and the switch must not
+  bounce or flash.
+* **The summon key still needing two double-taps was state drift around the
+  mini bar.** 0.0.5 removed the dismiss action — the right direction, but not
+  sufficient. "Clicking elsewhere" does not hide the overlay; it shrinks it to
+  the 48×48 mini bar, so the next summon takes the *Expand* path rather than
+  *Show*. Four defects are fixed: a late shrink undoing an expand (the shrink
+  command now carries a surface epoch, and the backend refuses a superseded
+  one); a lost mini-bar event silently resetting the open conversation (a summon
+  no longer replays the entrance when the bar is already on screen); a lost show
+  leaving the mini bar on screen with a full-size window (now reconciled); and a
+  stale mini-bar flag on a hidden window, readily reachable by pressing
+  <kbd>Esc</kbd> while the mini bar is showing (cleared before the summon
+  decides, with Show resizing and unminimising unconditionally). The summon key
+  still never dismisses; that remains deliberate. **Runtime check:** double-tap
+  once right after launch and once after clicking elsewhere to dismiss, and
+  confirm one gesture is enough each time.
+
+### Known limitations
+
+* A millisecond race can still render the mini bar inside a full-size window; a
+  second summon recovers. No data loss and no wrong native size.
+* A refused shrink command is not retried automatically; the next summon clears
+  the stale flag and recovers.
+* The frontend's "UI is visible" mirror lags one React commit (~16 ms); a summon
+  inside that window may replay the entrance unnecessarily.
+* A native resize that produces no CSS viewport change can be neither observed
+  nor corrected; the cost is the old empty-window symptom, not clipping.
+* Below roughly 146 px the chat header and input overlap; normal use cannot
+  reach that height.
+
 ## 0.0.5 (2026-10-20)
 
 A chat-layout rebuild and a hotkey that can no longer dismiss, plus a
@@ -60,12 +125,21 @@ skills and copy fixes.
   "look unresponsive" are also fixed: a summon during the exit animation now
   cancels that exit, and expanding a mini bar that <kbd>Win</kbd>+<kbd>D</kbd>
   minimized now restores the window before showing it.
+  *Correction (0.0.6): this did not resolve the problem either. Removing the
+  dismiss action was necessary but not sufficient; the remaining cause was state
+  drift around the mini bar, which is what "clicking elsewhere" actually
+  produces. See 0.0.6.*
 * **The chat interface is no longer clipped** — the bottom input no longer
   shows only half of itself while streaming, and switching conversations,
   opening the history dropdown, and restoring from the mini bar all display
   fully. 0.0.4 tried changing the measurement from `getBoundingClientRect()` to
   `offsetHeight`; that did not resolve it. This version changes the structure so
   the chat column fills the window and the input is always inside it.
+  *Correction (0.0.6): the layout fix held, but the native-size verification
+  added in the same commit read the viewport height before awaiting the native
+  size, corrected from a stale value, and oscillated. That regression produced
+  the history panel's empty lower half, a 428 px scroll shortfall, and the
+  conversation-switch bounce. See 0.0.6.*
 * **Copying a reply no longer produces a leading blank line** — both the copy
   button and the copy shortcut trim leading blank lines before writing to the
   clipboard.
