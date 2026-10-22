@@ -68,6 +68,41 @@ interface ConversationViewProps {
 }
 
 /**
+ * True when the current message list shares no id with the previous render's
+ * list — a conversation switch (or any other wholesale replacement), as opposed
+ * to messages being appended to the transcript already on screen.
+ *
+ * A replaced transcript is *displayed*, not *arrived at*: replaying the bubble
+ * entrance for every message made switching conversations look like the whole
+ * list was falling into place. Returns false for the first render
+ * (`previousIds === null`) and for an empty previous list, where there is no
+ * previous transcript to compare against.
+ */
+export function isTranscriptReplaced(
+  previousIds: ReadonlySet<string> | null,
+  currentIds: readonly string[],
+): boolean {
+  if (previousIds === null || previousIds.size === 0) return false;
+  return !currentIds.some((id) => previousIds.has(id));
+}
+
+/**
+ * Whether a message bubble should play its entrance animation.
+ *
+ * Only messages appended after the transcript has already rendered animate:
+ * the initial contents of the view and a replaced transcript are rendered at
+ * rest, so opening or switching a conversation does not replay the spring.
+ */
+export function shouldAnimateEntrance(
+  previousIds: ReadonlySet<string> | null,
+  replaced: boolean,
+  messageId: string,
+): boolean {
+  if (previousIds === null || replaced) return false;
+  return !previousIds.has(messageId);
+}
+
+/**
  * Renders the expanded chat history area of the QuickAI application.
  *
  * Caps its own height at the reply-box budget (`max-h-[600px]`, matching
@@ -123,6 +158,13 @@ export function ConversationView({
   const prevMessagesLengthRef = useRef(0);
 
   /**
+   * Ids of the messages in the previous render. `null` until the first commit,
+   * so the view's initial contents render at rest instead of replaying the
+   * bubble entrance (see `shouldAnimateEntrance`).
+   */
+  const renderedMessageIdsRef = useRef<Set<string> | null>(null);
+
+  /**
    * Wheel listener — the only mechanism that can disable auto-scroll.
    * Wheel events are exclusively user-initiated (never fired by programmatic
    * scrollTop changes or layout reflows), making them a reliable signal for
@@ -166,6 +208,15 @@ export function ConversationView({
     }
     prevMessagesLengthRef.current = messages.length;
   }, [messages.length, messages]);
+
+  /**
+   * Record the ids that have been on screen, for the next render's entrance
+   * decision. Written after commit so a second render (StrictMode, an unrelated
+   * state update) still compares against what was actually displayed.
+   */
+  useEffect(() => {
+    renderedMessageIdsRef.current = new Set(messages.map((m) => m.id));
+  }, [messages]);
 
   /**
    * Auto-scroll the chat container to the bottom when new content arrives,
@@ -232,13 +283,22 @@ export function ConversationView({
   /**
    * Keep the transcript pinned to the bottom while auto-scroll is active.
    *
-   * The load-time pin and the `[messages]` pin each run once, but content can
-   * keep growing afterwards: a code block or image that lays out after the pin
-   * changes `scrollHeight` and leaves the view parked short of the bottom — the
-   * "switching back to a long conversation lands on a middle code block"
-   * symptom. Observing the content wrapper re-pins on every such change, so a
-   * conversation opened from history shows its bottom immediately. The user's
-   * manual scroll-up still wins, because the callback respects auto-scroll mode.
+   * The load-time pin and the `[messages]` pin each run once, but the scrollable
+   * height can keep changing afterwards, and the two directions need different
+   * observations:
+   *
+   * - **Content grows** (a code block or image lays out after the pin): the
+   *   content wrapper's height changes and the view is parked short of the
+   *   bottom — the "switching back to a long conversation lands on a middle
+   *   code block" symptom. The wrapper is observed for this.
+   * - **The viewport shrinks** (the native window is resized after the pin):
+   *   `scrollHeight` is unchanged but `clientHeight` falls, so the same
+   *   `scrollTop` is no longer the maximum and the view is left a line or two
+   *   short. The content wrapper does not resize in that case, so the scroller
+   *   itself is observed too.
+   *
+   * The user's manual scroll-up still wins, because the callback respects
+   * auto-scroll mode.
    */
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -252,8 +312,15 @@ export function ConversationView({
       container.scrollTop = container.scrollHeight;
     });
     observer.observe(content);
+    observer.observe(container);
     return () => observer.disconnect();
   }, []);
+
+  const previousMessageIds = renderedMessageIdsRef.current;
+  const replacedTranscript = isTranscriptReplaced(
+    previousMessageIds,
+    messages.map((m) => m.id),
+  );
 
   return (
     <motion.div
@@ -317,7 +384,11 @@ export function ConversationView({
                 role={msg.role}
                 content={msg.content}
                 quotedText={msg.quotedText}
-                index={i}
+                entrance={shouldAnimateEntrance(
+                  previousMessageIds,
+                  replacedTranscript,
+                  msg.id,
+                )}
                 isStreaming={isLastAssistant}
                 imagePaths={msg.imagePaths}
                 onImagePreview={onImagePreview}

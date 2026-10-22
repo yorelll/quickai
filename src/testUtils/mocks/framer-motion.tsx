@@ -50,10 +50,19 @@ export const motion = {
     children,
     className,
     ref,
+    initial,
     ...props
   }: React.HTMLAttributes<HTMLDivElement> &
     Record<string, unknown> & { ref?: React.Ref<HTMLDivElement> }) => (
-    <div ref={ref} className={className} {...stripMotionProps(props)}>
+    <div
+      ref={ref}
+      className={className}
+      // Exposed so a test can assert whether an entrance animation was
+      // requested (`'hidden'`) or suppressed (`false`). The animation itself
+      // is still not run.
+      data-initial={initial === undefined ? undefined : String(initial)}
+      {...stripMotionProps(props)}
+    >
       {children}
     </div>
   ),

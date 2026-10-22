@@ -5,20 +5,18 @@ import { ChatBubble } from '../ChatBubble';
 describe('ChatBubble', () => {
   describe('User messages', () => {
     it('renders user message content as plain text', () => {
-      render(<ChatBubble role="user" content="Hello there" index={0} />);
+      render(<ChatBubble role="user" content="Hello there" />);
       expect(screen.getByText('Hello there')).toBeInTheDocument();
     });
 
     it('applies user styling (chat-bubble-user class)', () => {
-      const { container } = render(
-        <ChatBubble role="user" content="Hi" index={0} />,
-      );
+      const { container } = render(<ChatBubble role="user" content="Hi" />);
       expect(container.querySelector('.chat-bubble-user')).not.toBeNull();
     });
 
     it('does not render markdown for user messages (** shows as text, no <strong>)', () => {
       const { container } = render(
-        <ChatBubble role="user" content="**bold**" index={0} />,
+        <ChatBubble role="user" content="**bold**" />,
       );
       // User content is rendered as plain text inside a <span>, not parsed as markdown
       expect(container.querySelector('strong')).toBeNull();
@@ -26,16 +24,14 @@ describe('ChatBubble', () => {
     });
 
     it('shows copy button for user messages', () => {
-      render(<ChatBubble role="user" content="copy me" index={0} />);
+      render(<ChatBubble role="user" content="copy me" />);
       expect(
         screen.getByRole('button', { name: 'Copy message' }),
       ).toBeInTheDocument();
     });
 
     it('right-aligns user messages (justify-end class)', () => {
-      const { container } = render(
-        <ChatBubble role="user" content="Hi" index={0} />,
-      );
+      const { container } = render(<ChatBubble role="user" content="Hi" />);
       // The outer motion.div wrapper carries justify-end for user messages
       const outerDiv = container.firstElementChild;
       expect(outerDiv?.classList.contains('justify-end')).toBe(true);
@@ -45,7 +41,7 @@ describe('ChatBubble', () => {
   describe('Assistant messages', () => {
     it('renders assistant content via MarkdownRenderer (** becomes bold)', () => {
       const { container } = render(
-        <ChatBubble role="assistant" content="**bold**" index={0} />,
+        <ChatBubble role="assistant" content="**bold**" />,
       );
       // Streamdown renders bold as span with data-streamdown="strong"
       const bold = container.querySelector('[data-streamdown="strong"]');
@@ -55,21 +51,21 @@ describe('ChatBubble', () => {
 
     it('renders as plain text without a bubble wrapper (no chat-bubble-ai class)', () => {
       const { container } = render(
-        <ChatBubble role="assistant" content="Hello" index={0} />,
+        <ChatBubble role="assistant" content="Hello" />,
       );
       expect(container.querySelector('.chat-bubble-ai')).toBeNull();
     });
 
     it('is not width-constrained (no max-w-[80%] on wrapper)', () => {
       const { container } = render(
-        <ChatBubble role="assistant" content="Hello" index={0} />,
+        <ChatBubble role="assistant" content="Hello" />,
       );
       // AI messages span full width — no max-width cap like user bubbles
       expect(container.querySelector('.group')).toBeNull();
     });
 
     it('shows copy button for assistant messages', () => {
-      render(<ChatBubble role="assistant" content="response" index={0} />);
+      render(<ChatBubble role="assistant" content="response" />);
       expect(
         screen.getByRole('button', { name: 'Copy message' }),
       ).toBeInTheDocument();
@@ -77,7 +73,7 @@ describe('ChatBubble', () => {
 
     it('left-aligns assistant messages (justify-start class)', () => {
       const { container } = render(
-        <ChatBubble role="assistant" content="Hi" index={0} />,
+        <ChatBubble role="assistant" content="Hi" />,
       );
       const outerDiv = container.firstElementChild;
       expect(outerDiv?.classList.contains('justify-start')).toBe(true);
@@ -90,7 +86,6 @@ describe('ChatBubble', () => {
         <ChatBubble
           role="user"
           content="explain this"
-          index={0}
           quotedText="some code"
         />,
       );
@@ -100,20 +95,13 @@ describe('ChatBubble', () => {
     });
 
     it('does not render quote block when quotedText is not provided', () => {
-      const { container } = render(
-        <ChatBubble role="user" content="hello" index={0} />,
-      );
+      const { container } = render(<ChatBubble role="user" content="hello" />);
       expect(container.querySelector('.border-l-2')).toBeNull();
     });
 
     it('does not render quote block for assistant messages even if quotedText is passed', () => {
       const { container } = render(
-        <ChatBubble
-          role="assistant"
-          content="response"
-          index={0}
-          quotedText="ignored"
-        />,
+        <ChatBubble role="assistant" content="response" quotedText="ignored" />,
       );
       expect(container.querySelector('.border-l-2')).toBeNull();
     });
@@ -123,7 +111,6 @@ describe('ChatBubble', () => {
         <ChatBubble
           role="user"
           content="explain"
-          index={0}
           quotedText="line one\nline two"
         />,
       );
@@ -138,7 +125,6 @@ describe('ChatBubble', () => {
         <ChatBubble
           role="user"
           content="look at this"
-          index={0}
           imagePaths={['/tmp/img1.jpg', '/tmp/img2.jpg']}
           onImagePreview={vi.fn()}
         />,
@@ -151,12 +137,7 @@ describe('ChatBubble', () => {
 
     it('does not render ImageThumbnails when imagePaths is not provided', () => {
       render(
-        <ChatBubble
-          role="user"
-          content="no images"
-          index={0}
-          onImagePreview={vi.fn()}
-        />,
+        <ChatBubble role="user" content="no images" onImagePreview={vi.fn()} />,
       );
       expect(
         screen.queryByRole('list', { name: /attached images/i }),
@@ -168,7 +149,6 @@ describe('ChatBubble', () => {
         <ChatBubble
           role="user"
           content="empty images"
-          index={0}
           imagePaths={[]}
           onImagePreview={vi.fn()}
         />,
@@ -183,7 +163,6 @@ describe('ChatBubble', () => {
         <ChatBubble
           role="user"
           content="no preview handler"
-          index={0}
           imagePaths={['/tmp/img1.jpg']}
         />,
       );
@@ -197,7 +176,6 @@ describe('ChatBubble', () => {
         <ChatBubble
           role="user"
           content=""
-          index={0}
           imagePaths={['/tmp/img1.jpg']}
           onImagePreview={vi.fn()}
         />,
@@ -215,11 +193,7 @@ describe('ChatBubble', () => {
   describe('User message text formatting', () => {
     it('preserves newlines in user message content via whitespace-pre-wrap', () => {
       const { container } = render(
-        <ChatBubble
-          role="user"
-          content={'line one\nline two\nline three'}
-          index={0}
-        />,
+        <ChatBubble role="user" content={'line one\nline two\nline three'} />,
       );
       const contentSpan = container.querySelector('.text-bubble-user-text');
       expect(contentSpan).not.toBeNull();
@@ -228,11 +202,7 @@ describe('ChatBubble', () => {
 
     it('preserves indentation in user message content via whitespace-pre-wrap', () => {
       const { container } = render(
-        <ChatBubble
-          role="user"
-          content={'  indented\n    more indented'}
-          index={0}
-        />,
+        <ChatBubble role="user" content={'  indented\n    more indented'} />,
       );
       const contentSpan = container.querySelector('.text-bubble-user-text');
       expect(contentSpan?.classList.contains('whitespace-pre-wrap')).toBe(true);
@@ -242,7 +212,7 @@ describe('ChatBubble', () => {
   describe('Slash command styling', () => {
     it('styles a leading /screen command', () => {
       const { container } = render(
-        <ChatBubble role="user" content="/screen explain this" index={0} />,
+        <ChatBubble role="user" content="/screen explain this" />,
       );
       const styled = container.querySelector(
         '.font-semibold.text-bubble-user-accent',
@@ -253,11 +223,7 @@ describe('ChatBubble', () => {
 
     it('styles a leading /think command', () => {
       const { container } = render(
-        <ChatBubble
-          role="user"
-          content="/think why is the sky blue?"
-          index={0}
-        />,
+        <ChatBubble role="user" content="/think why is the sky blue?" />,
       );
       const styled = container.querySelector(
         '.font-semibold.text-bubble-user-accent',
@@ -268,11 +234,7 @@ describe('ChatBubble', () => {
 
     it('styles multiple commands anywhere in the text', () => {
       const { container } = render(
-        <ChatBubble
-          role="user"
-          content="/screen /think explain this"
-          index={0}
-        />,
+        <ChatBubble role="user" content="/screen /think explain this" />,
       );
       const styled = container.querySelectorAll(
         '.font-semibold.text-bubble-user-accent',
@@ -284,7 +246,7 @@ describe('ChatBubble', () => {
 
     it('styles a command in the middle of text', () => {
       const { container } = render(
-        <ChatBubble role="user" content="please /think about this" index={0} />,
+        <ChatBubble role="user" content="please /think about this" />,
       );
       const styled = container.querySelector(
         '.font-semibold.text-bubble-user-accent',
@@ -295,7 +257,7 @@ describe('ChatBubble', () => {
 
     it('does not style partial matches like /screensaver', () => {
       const { container } = render(
-        <ChatBubble role="user" content="/screensaver is nice" index={0} />,
+        <ChatBubble role="user" content="/screensaver is nice" />,
       );
       const styled = container.querySelector(
         '.font-semibold.text-bubble-user-accent',
@@ -304,15 +266,13 @@ describe('ChatBubble', () => {
     });
 
     it('renders plain text when no commands are present', () => {
-      render(
-        <ChatBubble role="user" content="just a normal message" index={0} />,
-      );
+      render(<ChatBubble role="user" content="just a normal message" />);
       expect(screen.getByText('just a normal message')).toBeInTheDocument();
     });
 
     it('handles a command at the end of text', () => {
       const { container } = render(
-        <ChatBubble role="user" content="do /think" index={0} />,
+        <ChatBubble role="user" content="do /think" />,
       );
       const styled = container.querySelector(
         '.font-semibold.text-bubble-user-accent',
@@ -324,9 +284,7 @@ describe('ChatBubble', () => {
 
   describe('Layout', () => {
     it('has max-width constraint (max-w-[80%])', () => {
-      const { container } = render(
-        <ChatBubble role="user" content="test" index={0} />,
-      );
+      const { container } = render(<ChatBubble role="user" content="test" />);
       expect(container.querySelector('.max-w-\\[80\\%\\]')).not.toBeNull();
     });
   });
@@ -337,7 +295,6 @@ describe('ChatBubble', () => {
         <ChatBubble
           role="assistant"
           content="The answer is 42."
-          index={0}
           thinkingContent="Let me reason about this..."
         />,
       );
@@ -345,7 +302,7 @@ describe('ChatBubble', () => {
     });
 
     it('does not render ThinkingBlock for AI message without thinkingContent', () => {
-      render(<ChatBubble role="assistant" content="Hello" index={0} />);
+      render(<ChatBubble role="assistant" content="Hello" />);
       expect(screen.queryByTestId('thinking-block')).toBeNull();
     });
 
@@ -354,7 +311,6 @@ describe('ChatBubble', () => {
         <ChatBubble
           role="user"
           content="Hello"
-          index={0}
           thinkingContent="Should not appear"
         />,
       );
@@ -366,7 +322,6 @@ describe('ChatBubble', () => {
         <ChatBubble
           role="assistant"
           content=""
-          index={0}
           thinkingContent="Reasoning in progress..."
           isThinking={true}
         />,
@@ -382,7 +337,6 @@ describe('ChatBubble', () => {
         <ChatBubble
           role="assistant"
           content=""
-          index={0}
           error={{ code: 'network', message: 'Connection refused' }}
         />,
       );
@@ -395,7 +349,6 @@ describe('ChatBubble', () => {
         <ChatBubble
           role="assistant"
           content="ignored"
-          index={0}
           error={{ code: 'network', message: 'boom' }}
         />,
       );
@@ -404,7 +357,7 @@ describe('ChatBubble', () => {
 
     it('renders MarkdownRenderer when error is absent', () => {
       const { container } = render(
-        <ChatBubble role="assistant" content="**bold**" index={0} />,
+        <ChatBubble role="assistant" content="**bold**" />,
       );
       expect(
         container.querySelector('[data-streamdown="strong"]'),
@@ -416,7 +369,6 @@ describe('ChatBubble', () => {
         <ChatBubble
           role="assistant"
           content="**bold**"
-          index={0}
           notice={{ code: 'skill_unreadable', message: 'translate: not found' }}
         />,
       );

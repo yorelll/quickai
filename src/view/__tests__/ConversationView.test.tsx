@@ -1,6 +1,34 @@
 import { render, screen, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
-import { ConversationView } from '../ConversationView';
+import {
+  ConversationView,
+  isTranscriptReplaced,
+  shouldAnimateEntrance,
+} from '../ConversationView';
+import type { Message } from '../../types/chat';
+
+describe('entrance animation decision', () => {
+  it('does not treat the first render (or an empty previous list) as a replacement', () => {
+    expect(isTranscriptReplaced(null, ['a'])).toBe(false);
+    expect(isTranscriptReplaced(new Set<string>(), ['a'])).toBe(false);
+  });
+
+  it('detects a wholesale replacement by id overlap', () => {
+    expect(isTranscriptReplaced(new Set(['a', 'b']), ['b', 'c'])).toBe(false);
+    expect(isTranscriptReplaced(new Set(['a', 'b']), ['c', 'd'])).toBe(true);
+  });
+
+  it('animates only messages appended after the transcript has rendered', () => {
+    // Nothing animates on the first render: the view is being displayed.
+    expect(shouldAnimateEntrance(null, false, 'a')).toBe(false);
+    // A replaced transcript is displayed, not arrived at.
+    expect(shouldAnimateEntrance(new Set(['a']), true, 'b')).toBe(false);
+    // Already on screen.
+    expect(shouldAnimateEntrance(new Set(['a']), false, 'a')).toBe(false);
+    // Appended to the conversation already on screen.
+    expect(shouldAnimateEntrance(new Set(['a']), false, 'b')).toBe(true);
+  });
+});
 
 describe('ConversationView', () => {
   it('renders ChatBubble for each message', () => {
@@ -18,6 +46,43 @@ describe('ConversationView', () => {
     );
     expect(screen.getByText('Hello there')).toBeInTheDocument();
     expect(screen.getByText('Hi!')).toBeInTheDocument();
+  });
+
+  it('renders a displayed transcript at rest and animates only appended messages', () => {
+    const first: Message[] = [
+      { id: '1', role: 'user', content: 'first' },
+      { id: '2', role: 'assistant', content: 'reply' },
+    ];
+    const view = (messages: Message[]) => (
+      <ConversationView
+        messages={messages}
+        isGenerating={false}
+        onClose={vi.fn()}
+        onMinimize={vi.fn()}
+      />
+    );
+    const bubbleInitials = (root: HTMLElement) =>
+      Array.from(root.querySelectorAll('[data-chat-content] > div')).map((el) =>
+        el.getAttribute('data-initial'),
+      );
+
+    const { container, rerender } = render(view(first));
+
+    // The transcript view is being displayed, not arrived at: no spring.
+    expect(bubbleInitials(container)).toEqual(['false', 'false']);
+
+    // A message appended to the conversation already on screen animates in.
+    rerender(view([...first, { id: '3', role: 'user', content: 'again' }]));
+    expect(bubbleInitials(container)).toEqual(['false', 'false', 'hidden']);
+
+    // A wholesale replacement (conversation switch) does not replay it.
+    rerender(
+      view([
+        { id: 'x', role: 'user', content: 'other' },
+        { id: 'y', role: 'assistant', content: 'answer' },
+      ]),
+    );
+    expect(bubbleInitials(container)).toEqual(['false', 'false']);
   });
 
   it('renders streaming assistant message when isGenerating', () => {
@@ -673,14 +738,22 @@ describe('ConversationView', () => {
 
   describe('content-growth re-pin', () => {
     let capturedCallback: ResizeObserverCallback | null = null;
+    /** The observer instance, so a test can assert what was actually observed. */
+    let capturedObserver: { elements: Element[] } | null = null;
 
     function spyOnResizeObserver() {
       const OriginalMock = globalThis.ResizeObserver;
+      capturedCallback = null;
+      capturedObserver = null;
       vi.spyOn(globalThis, 'ResizeObserver').mockImplementation(function (
         callback: ResizeObserverCallback,
       ) {
         capturedCallback = callback;
-        return new OriginalMock(callback) as ResizeObserver;
+        const observer = new OriginalMock(callback) as ResizeObserver & {
+          elements: Element[];
+        };
+        capturedObserver = observer;
+        return observer;
       });
     }
 
@@ -770,6 +843,54 @@ describe('ConversationView', () => {
 
       // The reader's position is preserved.
       expect(scrollEl.scrollTop).toBe(0);
+    });
+
+    it('re-pins when the viewport shrinks after the pin', () => {
+      spyOnResizeObserver();
+
+      const { container } = render(
+        <ConversationView
+          messages={[{ id: '1', role: 'user' as const, content: 'question' }]}
+          isGenerating={false}
+          onClose={vi.fn()}
+          onMinimize={vi.fn()}
+          scrollToBottomSignal={1}
+        />,
+      );
+
+      const scrollEl = container.querySelector(
+        '.chat-messages-scroll',
+      ) as HTMLElement;
+      const contentEl = scrollEl.firstElementChild as HTMLElement;
+
+      // The scroller itself must be observed, otherwise a viewport shrink
+      // produces no callback at all: the content wrapper does not resize in
+      // this case, so observing it alone cannot see the change.
+      expect(capturedObserver!.elements).toContain(contentEl);
+      expect(capturedObserver!.elements).toContain(scrollEl);
+
+      Object.defineProperty(scrollEl, 'scrollHeight', {
+        value: 1200,
+        configurable: true,
+      });
+      // The pin ran against a taller viewport; the window then shrank, so the
+      // same scrollTop is no longer the maximum.
+      Object.defineProperty(scrollEl, 'scrollTop', {
+        value: 634,
+        configurable: true,
+        writable: true,
+      });
+
+      act(() => {
+        // Dispatch only for an observed target, as a real observer would.
+        expect(capturedObserver!.elements).toContain(scrollEl);
+        capturedCallback!(
+          [{ target: scrollEl } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+
+      expect(scrollEl.scrollTop).toBe(1200);
     });
   });
 

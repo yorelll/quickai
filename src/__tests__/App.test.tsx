@@ -5,6 +5,7 @@ import App, {
   COLLAPSED_WINDOW_HEIGHT,
   extractSkillAdds,
   measureChatContentHeight,
+  minibarStateFrom,
 } from '../App';
 import {
   invoke,
@@ -815,6 +816,26 @@ describe('App', () => {
       return callbacks;
     }
 
+    /**
+     * Fires the document-element observer — the post-layout viewport trigger
+     * `verifyNativeSize` runs from. (The `tauri://resize` event is deliberately
+     * not the trigger: it can arrive before the layout viewport updates.)
+     */
+    function fireViewportResize(
+      callbacks: Map<Element, ResizeObserverCallback>,
+    ) {
+      const callback = callbacks.get(document.documentElement);
+      expect(callback).toBeDefined();
+      callback!(
+        [
+          {
+            target: document.documentElement,
+          } as unknown as ResizeObserverEntry,
+        ],
+        {} as ResizeObserver,
+      );
+    }
+
     function defineBox(element: Element | null, height: number) {
       if (!element) return;
       Object.defineProperty(element, 'offsetHeight', {
@@ -1048,8 +1069,8 @@ describe('App', () => {
         configurable: true,
       });
       __mockWindow.setSize.mockClear();
-      await act(async () => {
-        emitTauriEvent('tauri://resize', { width: 650, height: 60 });
+      act(() => {
+        fireViewportResize(callbacks);
       });
       expect(__mockWindow.setSize).toHaveBeenCalledTimes(1);
       expect(__mockWindow.setSize).toHaveBeenCalledWith(
@@ -1057,8 +1078,8 @@ describe('App', () => {
       );
 
       // The corrected flag is spent: another resize event does nothing.
-      await act(async () => {
-        emitTauriEvent('tauri://resize', { width: 650, height: 60 });
+      act(() => {
+        fireViewportResize(callbacks);
       });
       expect(__mockWindow.setSize).toHaveBeenCalledTimes(1);
     });
@@ -1103,8 +1124,8 @@ describe('App', () => {
           configurable: true,
         });
         __mockWindow.setSize.mockClear();
-        await act(async () => {
-          emitTauriEvent('tauri://resize', { width: 650, height: 713 });
+        act(() => {
+          fireViewportResize(callbacks);
         });
         await act(async () => {});
 
@@ -1112,6 +1133,122 @@ describe('App', () => {
         expect(__mockWindow.setSize).toHaveBeenCalledWith(
           expect.objectContaining({ height: 892 }),
         );
+      } finally {
+        delete (__mockWindow as Record<string, unknown>).innerSize;
+        delete (__mockWindow as Record<string, unknown>).scaleFactor;
+      }
+    });
+
+    it('ignores a resize event that outran the layout viewport', async () => {
+      const callbacks = captureResizeObservers();
+      // The webview catches up while the native probe is in flight: by the
+      // time `innerSize()` resolves, the CSS height is the one that was asked
+      // for. The synchronous read that armed this observation saw the *old*
+      // height, so the observation is stale and must not be corrected.
+      const innerSize = vi.fn(async () => {
+        Object.defineProperty(window, 'innerHeight', {
+          value: 713,
+          configurable: true,
+        });
+        return { width: 650, height: 713 };
+      });
+      const scaleFactor = vi.fn(async () => 1);
+      Object.assign(__mockWindow, { innerSize, scaleFactor });
+
+      try {
+        render(<App />);
+        await act(async () => {});
+        await showDownward();
+        await enterChatMode();
+
+        const container = document.querySelector('.morphing-container')!;
+        const chat = document.querySelector('[data-chat-area]')!;
+        const content = document.querySelector('[data-chat-content]')!;
+        const scroller = content.parentElement as HTMLElement;
+        scroller.style.paddingTop = '16px';
+        scroller.style.paddingBottom = '16px';
+        defineBox(container, 600);
+        defineBox(chat, 535);
+        defineBox(scroller, 501);
+        defineBox(content, 1200);
+        // The input bar is the only content-sized sibling below the chat area.
+        defineBox(container.lastElementChild, 65);
+
+        act(() => {
+          callbacks.get(container)!(
+            [{ target: container } as unknown as ResizeObserverEntry],
+            {} as ResizeObserver,
+          );
+        });
+
+        // The event arrives while the layout viewport still reports the
+        // pre-resize height.
+        Object.defineProperty(window, 'innerHeight', {
+          value: 570,
+          configurable: true,
+        });
+        __mockWindow.setSize.mockClear();
+        act(() => {
+          fireViewportResize(callbacks);
+        });
+        await act(async () => {});
+
+        // The ratio (713² / 570 = 892) would be applied to a window that is
+        // already 713. No correction is issued.
+        expect(__mockWindow.setSize).not.toHaveBeenCalled();
+      } finally {
+        delete (__mockWindow as Record<string, unknown>).innerSize;
+        delete (__mockWindow as Record<string, unknown>).scaleFactor;
+      }
+    });
+
+    it('does not correct a viewport observation the request has not answered yet', async () => {
+      const callbacks = captureResizeObservers();
+      const innerSize = vi.fn(async () => ({ width: 650, height: 713 }));
+      const scaleFactor = vi.fn(async () => 1);
+      Object.assign(__mockWindow, { innerSize, scaleFactor });
+
+      try {
+        render(<App />);
+        await act(async () => {});
+        await showDownward();
+        await enterChatMode();
+
+        const container = document.querySelector('.morphing-container')!;
+        const chat = document.querySelector('[data-chat-area]')!;
+        const content = document.querySelector('[data-chat-content]')!;
+        const scroller = content.parentElement as HTMLElement;
+        scroller.style.paddingTop = '16px';
+        scroller.style.paddingBottom = '16px';
+        defineBox(container, 600);
+        defineBox(chat, 535);
+        defineBox(scroller, 501);
+        defineBox(content, 1200);
+        defineBox(container.lastElementChild, 65);
+
+        // The request is computed from this layout.
+        Object.defineProperty(window, 'innerHeight', {
+          value: 300,
+          configurable: true,
+        });
+        act(() => {
+          callbacks.get(container)!(
+            [{ target: container } as unknown as ResizeObserverEntry],
+            {} as ResizeObserver,
+          );
+        });
+
+        // The viewport observer then delivers that same layout. The native
+        // window is already at 713, but the CSS viewport has not answered the
+        // request yet — `actual` is the request's starting height, not its
+        // result, so the ratio must not be applied.
+        __mockWindow.setSize.mockClear();
+        act(() => {
+          fireViewportResize(callbacks);
+        });
+        await act(async () => {});
+
+        expect(__mockWindow.setSize).not.toHaveBeenCalled();
       } finally {
         delete (__mockWindow as Record<string, unknown>).innerSize;
         delete (__mockWindow as Record<string, unknown>).scaleFactor;
@@ -4799,6 +4936,8 @@ describe('App', () => {
 
       fireEvent.click(screen.getByRole('button', { name: 'Minimize' }));
 
+      await act(async () => {});
+
       const minibar = screen.getByTitle(/click to restore/i);
       fireEvent.pointerDown(minibar, { clientX: 5, clientY: 5 });
       fireEvent.pointerUp(minibar, { clientX: 5, clientY: 5 });
@@ -4839,6 +4978,423 @@ describe('App', () => {
           .mocked(invoke)
           .mock.calls.filter((c) => c[0] === 'enter_minibar_size'),
       ).toHaveLength(1);
+    });
+
+    it('passes the click-away surface token to the backend shrink', async () => {
+      render(<App />);
+      await act(async () => {});
+      await act(async () => {
+        emitTauriEvent('quickai://visibility', {
+          state: 'show',
+          selected_text: null,
+          window_x: null,
+          window_y: null,
+          screen_bottom_y: null,
+          transition_epoch: 4,
+        });
+      });
+
+      await act(async () => {
+        emitTauriEvent('quickai://minibar', 4);
+      });
+
+      expect(invoke).toHaveBeenCalledWith('enter_minibar_size', { epoch: 4 });
+      expect(screen.getByTitle(/click to restore/i)).toBeInTheDocument();
+    });
+
+    it('ignores a click-away that predates the latest show', async () => {
+      render(<App />);
+      await act(async () => {});
+      await act(async () => {
+        emitTauriEvent('quickai://visibility', {
+          state: 'show',
+          selected_text: null,
+          window_x: null,
+          window_y: null,
+          screen_bottom_y: null,
+          transition_epoch: 4,
+        });
+      });
+      // A newer show (e.g. the expand that answered the double-tap) supersedes
+      // the click-away whose event is still in flight.
+      await act(async () => {
+        emitTauriEvent('quickai://visibility', {
+          state: 'show',
+          selected_text: null,
+          window_x: null,
+          window_y: null,
+          screen_bottom_y: null,
+          transition_epoch: 5,
+        });
+      });
+
+      await act(async () => {
+        emitTauriEvent('quickai://minibar', 4);
+      });
+
+      expect(invoke).not.toHaveBeenCalledWith('enter_minibar_size', {
+        epoch: 4,
+      });
+      expect(screen.queryByTitle(/click to restore/i)).not.toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText(
+          'Ask a question, or type / to see commands',
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it('mirrors whether the visible UI is on screen into the backend', async () => {
+      const uiStateCalls = () =>
+        invoke.mock.calls.filter((c) => c[0] === 'set_overlay_ui_visible');
+      const lastUiState = () => {
+        const calls = uiStateCalls();
+        return calls[calls.length - 1];
+      };
+
+      render(<App />);
+      await act(async () => {});
+      expect(uiStateCalls()).toEqual([
+        ['set_overlay_ui_visible', { visible: false }],
+      ]);
+
+      await showOverlay();
+      expect(lastUiState()).toEqual([
+        'set_overlay_ui_visible',
+        { visible: true },
+      ]);
+
+      await act(async () => {
+        emitTauriEvent('quickai://minibar', null);
+      });
+      expect(lastUiState()).toEqual([
+        'set_overlay_ui_visible',
+        { visible: false },
+      ]);
+
+      // Hiding reports "not visible" too: a summon from there may replay.
+      const beforeHide = uiStateCalls().length;
+      await act(async () => {
+        emitTauriEvent('quickai://visibility', { state: 'hide-request' });
+      });
+      expect(uiStateCalls()).toHaveLength(beforeHide + 1);
+      expect(lastUiState()).toEqual([
+        'set_overlay_ui_visible',
+        { visible: false },
+      ]);
+    });
+
+    it('stays visible when the backend refuses a delayed click-away', async () => {
+      // The click-away was merely delayed (webview throttling), not lost: by
+      // the time it is processed a summon has already expanded the bar, so the
+      // backend refuses the shrink. Entering the mini bar anyway would render
+      // the 48 px logo inside the full-size window the summon just opened —
+      // the "first double-tap did nothing" symptom.
+      const base = invoke.getMockImplementation();
+      invoke.mockImplementation(
+        async (cmd: string, args?: Record<string, unknown>) => {
+          if (cmd === 'enter_minibar_size') return false;
+          return base?.(cmd, args);
+        },
+      );
+
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      await act(async () => {
+        emitTauriEvent('quickai://minibar', 0);
+      });
+
+      expect(invoke).toHaveBeenCalledWith('enter_minibar_size', { epoch: 0 });
+      expect(screen.queryByTitle(/click to restore/i)).not.toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText(
+          'Ask a question, or type / to see commands',
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it('stays visible when the shrink request fails', async () => {
+      const base = invoke.getMockImplementation();
+      invoke.mockImplementation(
+        async (cmd: string, args?: Record<string, unknown>) => {
+          if (cmd === 'enter_minibar_size') throw new Error('ipc unavailable');
+          return base?.(cmd, args);
+        },
+      );
+
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      await act(async () => {
+        emitTauriEvent('quickai://minibar', null);
+      });
+
+      expect(screen.queryByTitle(/click to restore/i)).not.toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText(
+          'Ask a question, or type / to see commands',
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it('stays visible when a show lands while the shrink is in flight', async () => {
+      const base = invoke.getMockImplementation();
+      invoke.mockImplementation(
+        async (cmd: string, args?: Record<string, unknown>) => {
+          if (cmd === 'enter_minibar_size') {
+            // The summon's show reaches the webview before the response does.
+            emitTauriEvent('quickai://visibility', {
+              state: 'show',
+              selected_text: null,
+              window_x: null,
+              window_y: null,
+              screen_bottom_y: null,
+            });
+            return true;
+          }
+          return base?.(cmd, args);
+        },
+      );
+
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      await act(async () => {
+        emitTauriEvent('quickai://minibar', null);
+      });
+
+      expect(screen.queryByTitle(/click to restore/i)).not.toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText(
+          'Ask a question, or type / to see commands',
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it('keeps the conversation when expanding from a genuine minibar', async () => {
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      // Build a conversation so there is something a reset would destroy.
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
+      fireEvent.change(textarea, { target: { value: 'hi' } });
+      act(() => {
+        fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      });
+      await act(async () => {});
+      act(() => {
+        getLastChannel()?.simulateMessage({ type: 'Token', data: 'Hello' });
+        getLastChannel()?.simulateMessage({ type: 'Done' });
+      });
+      await act(async () => {});
+      expect(screen.getByText('Hello')).toBeInTheDocument();
+
+      // Click away: the same conversation, now collapsed to the mini bar.
+      await act(async () => {
+        emitTauriEvent('quickai://minibar', 3);
+      });
+      expect(screen.getByTitle(/click to restore/i)).toBeInTheDocument();
+      expect(screen.queryByText('Hello')).not.toBeInTheDocument();
+
+      // Double-tap: the backend expands and emits SHOW. That show must reveal
+      // the collapsed session, not start a new one.
+      await act(async () => {
+        emitTauriEvent('quickai://visibility', {
+          state: 'show',
+          selected_text: null,
+          window_x: null,
+          window_y: null,
+          screen_bottom_y: null,
+          transition_epoch: 4,
+        });
+      });
+
+      expect(screen.getByText('Hello')).toBeInTheDocument();
+    });
+
+    it('keeps the conversation when a lost-event expand emits no show', async () => {
+      const base = invoke.getMockImplementation();
+      invoke.mockImplementation(
+        async (cmd: string, args?: Record<string, unknown>) => {
+          // The click-away is superseded by a summon: the shrink is refused
+          // and the `replay:false` expand emits no SHOW at all.
+          if (cmd === 'enter_minibar_size') return false;
+          return base?.(cmd, args);
+        },
+      );
+
+      render(<App />);
+      await act(async () => {});
+      await showOverlay();
+
+      const textarea = screen.getByPlaceholderText(
+        'Ask a question, or type / to see commands',
+      );
+      fireEvent.change(textarea, { target: { value: 'hi' } });
+      act(() => {
+        fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+      });
+      await act(async () => {});
+      act(() => {
+        getLastChannel()?.simulateMessage({ type: 'Token', data: 'Hello' });
+        getLastChannel()?.simulateMessage({ type: 'Done' });
+      });
+      await act(async () => {});
+      expect(screen.getByText('Hello')).toBeInTheDocument();
+
+      await act(async () => {
+        emitTauriEvent('quickai://minibar', 0);
+      });
+
+      expect(screen.getByText('Hello')).toBeInTheDocument();
+      expect(screen.queryByTitle(/click to restore/i)).not.toBeInTheDocument();
+    });
+
+    it('ignores a minibar event while the overlay is hidden', async () => {
+      render(<App />);
+      await act(async () => {});
+
+      await act(async () => {
+        emitTauriEvent('quickai://minibar', null);
+      });
+
+      expect(invoke).not.toHaveBeenCalledWith('enter_minibar_size');
+      expect(screen.queryByTitle(/click to restore/i)).not.toBeInTheDocument();
+    });
+
+    it('only moves an on-screen overlay into the minibar state', () => {
+      expect(minibarStateFrom('visible')).toBe('minibar');
+      expect(minibarStateFrom('hiding')).toBe('minibar');
+      // A shrink that resolves after a hide must not resurrect the minibar UI.
+      expect(minibarStateFrom('hidden')).toBe('hidden');
+      expect(minibarStateFrom('minibar')).toBe('minibar');
+    });
+
+    it('retries a failed ui-state mirror and gives up after three attempts', async () => {
+      vi.useFakeTimers();
+      try {
+        const base = invoke.getMockImplementation();
+        let mirrorCalls = 0;
+        invoke.mockImplementation(
+          async (cmd: string, args?: Record<string, unknown>) => {
+            if (cmd === 'set_overlay_ui_visible') {
+              mirrorCalls += 1;
+              throw new Error('ipc unavailable');
+            }
+            return base?.(cmd, args);
+          },
+        );
+
+        render(<App />);
+        await act(async () => {});
+        expect(mirrorCalls).toBe(1);
+
+        await act(async () => {
+          vi.advanceTimersByTime(100);
+        });
+        expect(mirrorCalls).toBe(2);
+
+        await act(async () => {
+          vi.advanceTimersByTime(100);
+        });
+        expect(mirrorCalls).toBe(3);
+
+        // The third failure is terminal: no unbounded retry loop.
+        await act(async () => {
+          vi.advanceTimersByTime(500);
+        });
+        expect(mirrorCalls).toBe(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('cancels a pending mirror retry when the state changes', async () => {
+      vi.useFakeTimers();
+      try {
+        const base = invoke.getMockImplementation();
+        let mirrorCalls = 0;
+        invoke.mockImplementation(
+          async (cmd: string, args?: Record<string, unknown>) => {
+            if (cmd === 'set_overlay_ui_visible') {
+              mirrorCalls += 1;
+              throw new Error('ipc unavailable');
+            }
+            return base?.(cmd, args);
+          },
+        );
+
+        render(<App />);
+        await act(async () => {});
+        expect(mirrorCalls).toBe(1);
+
+        await act(async () => {
+          emitTauriEvent('quickai://visibility', {
+            state: 'show',
+            selected_text: null,
+            window_x: null,
+            window_y: null,
+            screen_bottom_y: null,
+          });
+        });
+        // A new state sends its own value immediately.
+        expect(mirrorCalls).toBe(2);
+
+        await act(async () => {
+          vi.advanceTimersByTime(150);
+        });
+        // Only the new effect's retry ran; the pre-transition one was cancelled
+        // (otherwise this would be 4) so it cannot overwrite the newer value.
+        expect(mirrorCalls).toBe(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not retry a mirror send that rejects after the state changed', async () => {
+      const base = invoke.getMockImplementation();
+      const pending: Array<(error: Error) => void> = [];
+      invoke.mockImplementation(
+        (cmd: string, args?: Record<string, unknown>) => {
+          if (cmd === 'set_overlay_ui_visible') {
+            return new Promise<undefined>((_resolve, reject) => {
+              pending.push(reject);
+            });
+          }
+          return Promise.resolve(base?.(cmd, args));
+        },
+      );
+
+      render(<App />);
+      await act(async () => {});
+      expect(pending).toHaveLength(1);
+
+      await act(async () => {
+        emitTauriEvent('quickai://visibility', {
+          state: 'show',
+          selected_text: null,
+          window_x: null,
+          window_y: null,
+          screen_bottom_y: null,
+        });
+      });
+      expect(pending).toHaveLength(2);
+
+      // The pre-transition send rejects only after its effect was cleaned up;
+      // it must not arm a retry that would write the stale value.
+      await act(async () => {
+        pending[0](new Error('ipc unavailable'));
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+      expect(pending).toHaveLength(2);
     });
 
     it('restores the overlay when a desktop notification is clicked', async () => {
@@ -4963,6 +5519,8 @@ describe('App', () => {
       });
 
       fireEvent.click(screen.getByRole('button', { name: 'Minimize' }));
+
+      await act(async () => {});
 
       const minibar = screen.getByTitle(/click to restore/i);
       expect(minibar.querySelector('span.absolute')?.className).toContain(

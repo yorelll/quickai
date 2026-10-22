@@ -39,7 +39,7 @@ mod windows_lifecycle;
 #[cfg(target_os = "windows")]
 mod windows_screenshot;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(target_os = "windows")]
 use std::sync::Arc;
 
@@ -96,6 +96,112 @@ const ONBOARDING_LOGICAL_HEIGHT: f64 = 640.0;
 /// between the frontend exit animation and rapid activation toggles.
 static OVERLAY_INTENDED_VISIBLE: AtomicBool = AtomicBool::new(false);
 
+/// Monotonic token for "the overlay surface is meant to be shown" transitions.
+///
+/// Every show and every expand from the minibar bumps this. A minibar shrink
+/// carries the token that was current when the focus listener that produced it
+/// was installed, and is refused if a newer show/expand has happened since.
+/// This is the shrink-vs-expand counterpart of the hide commit gate: without it
+/// a delayed click-away (or a delayed `enter_minibar_size`) could shrink a
+/// window that had just been summoned, so the first double-tap looks dead and a
+/// second one is needed.
+static OVERLAY_SURFACE_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+/// Advances the surface epoch and returns the new value.
+fn bump_overlay_surface_epoch() -> u64 {
+    OVERLAY_SURFACE_EPOCH.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+/// Whether a shrink request carrying `token` may still be applied while the
+/// surface epoch is `current`.
+///
+/// `None` is the argument-less form (the in-app minimise button and older
+/// callers): with no token there is nothing to compare, so it is applied.
+/// A token older than the current epoch belongs to a click-away that has since
+/// been superseded by a show or expand and must be ignored.
+#[cfg(target_os = "windows")]
+fn shrink_is_current(token: Option<u64>, current: u64) -> bool {
+    match token {
+        Some(token) => token >= current,
+        None => true,
+    }
+}
+
+/// Whether the frontend is currently rendering the overlay's *visible* state.
+///
+/// Mirrored from the frontend on every `overlayState` change (`visible` is
+/// true; `minibar`, `hiding` and `hidden` are false). The native flags say what
+/// the backend asked for; this is the only signal of what the user is actually
+/// looking at, and it is what the summon path reconciles against when a
+/// fire-and-forget event was lost in one direction or the other. Without it:
+/// - a lost `quickai://minibar` leaves the frontend visible while
+///   `MINIBAR_ACTIVE` is true, and expanding emitted a show event that reset
+///   the conversation the user was reading;
+/// - a lost show leaves the frontend in the minibar while the native window
+///   looks visible, so `BringForward` never resized or re-showed it.
+static OVERLAY_UI_VISIBLE: AtomicBool = AtomicBool::new(false);
+
+/// Which real state an expand is recovering from, for the diagnostic line.
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExpandSource {
+    /// `MINIBAR_ACTIVE` with the minibar UI on screen: a normal click-away.
+    MinibarWithUi,
+    /// `MINIBAR_ACTIVE` but the frontend still shows the bar: the minibar
+    /// event never reached it, so the window was never shrunk.
+    MinibarWithoutUi,
+    /// No minibar flag, but the frontend is not showing the bar while the
+    /// native window looks visible: an expand's show event was lost.
+    UiHidden,
+}
+
+#[cfg(target_os = "windows")]
+impl ExpandSource {
+    fn label(self) -> &'static str {
+        match self {
+            ExpandSource::MinibarWithUi => "minibar-with-ui",
+            ExpandSource::MinibarWithoutUi => "minibar-without-ui",
+            ExpandSource::UiHidden => "ui-hidden",
+        }
+    }
+}
+
+/// Classifies the state an expand is recovering from.
+#[cfg(target_os = "windows")]
+fn expand_source(minibar_active: bool, ui_visible: bool) -> ExpandSource {
+    if minibar_active {
+        if ui_visible {
+            ExpandSource::MinibarWithoutUi
+        } else {
+            ExpandSource::MinibarWithUi
+        }
+    } else {
+        ExpandSource::UiHidden
+    }
+}
+
+/// Whether a summon must replay the frontend entrance animation.
+///
+/// Replaying resets the open conversation, so it is only correct when the
+/// frontend is not already showing the bar. **A summon must never discard the
+/// conversation the user is looking at.**
+#[cfg(target_os = "windows")]
+fn summon_replays_entrance(ui_visible: bool) -> bool {
+    !ui_visible
+}
+
+/// Whether `MINIBAR_ACTIVE` describes a state that cannot exist: the flag is
+/// set while the native window is hidden.
+///
+/// The flag can outlive the window when the user clicked away while the overlay
+/// was hidden (the focus listener survives Esc). Clearing it keeps the summon
+/// from taking the expand path for a bar that is not on screen, and keeps the
+/// `[minibar] expand entry` diagnostic from claiming a live minibar.
+#[cfg(target_os = "windows")]
+fn should_clear_stale_minibar(natively_visible: bool, minibar_active: bool) -> bool {
+    !natively_visible && minibar_active
+}
+
 /// True on first process launch; cleared when the frontend signals readiness.
 /// Used to show the overlay automatically on startup without a race condition:
 /// the frontend calls `notify_frontend_ready` after its event listener is
@@ -119,6 +225,11 @@ struct VisibilityPayload {
     /// `window_y` — comparing a physical bottom against a logical window
     /// position made the grow-up decision depend on the display scale.
     screen_bottom_y: Option<f64>,
+    /// Surface epoch of this transition (see [`OVERLAY_SURFACE_EPOCH`]). Every
+    /// show/expand carries the epoch it bumped to; hide requests carry 0 and
+    /// the frontend ignores it for them. The frontend keeps the newest value it
+    /// has seen and rejects minibar events stamped older than it.
+    transition_epoch: u64,
 }
 
 /// Emits a visibility transition to the frontend animation controller.
@@ -129,6 +240,7 @@ fn emit_overlay_visibility(
     window_x: Option<f64>,
     window_y: Option<f64>,
     screen_bottom_y: Option<f64>,
+    transition_epoch: u64,
 ) {
     let _ = app_handle.emit(
         OVERLAY_VISIBILITY_EVENT,
@@ -138,6 +250,7 @@ fn emit_overlay_visibility(
             window_x,
             window_y,
             screen_bottom_y,
+            transition_epoch,
         },
     );
 }
@@ -156,6 +269,9 @@ fn request_overlay_hide(app_handle: &tauri::AppHandle) {
             None,
             None,
             None,
+            // Hide requests carry no surface epoch: only a show/expand can
+            // supersede a pending minibar shrink.
+            0,
         );
     }
 }
@@ -210,6 +326,7 @@ fn show_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::ActivationCo
     if OVERLAY_INTENDED_VISIBLE.swap(true, Ordering::SeqCst) {
         return;
     }
+    let epoch = bump_overlay_surface_epoch();
 
     let selected_text = ctx.selected_text;
 
@@ -322,6 +439,17 @@ fn show_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::ActivationCo
     };
 
     if let Some(window) = app_handle.get_webview_window("main") {
+        // `Show` must not depend on the frontend for the initial native size.
+        // A window hidden while it was in the mini bar is still 48×48, and the
+        // frontend only resizes a frame after the show event; the placement
+        // math above already assumed the collapsed size. Resetting it here also
+        // restores a window that was minimised while hidden (`show()` alone
+        // does not unminimize).
+        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
+            OVERLAY_LOGICAL_WIDTH,
+            OVERLAY_LOGICAL_HEIGHT_COLLAPSED,
+        )));
+        let _ = window.unminimize();
         let _ = window.set_always_on_top(true);
         let _ = window.show();
         let _ = window.set_focus();
@@ -336,10 +464,15 @@ fn show_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::ActivationCo
             windows_focus::set_main_hwnd(hwnd);
             let _ = windows_focus::stop_focus_listener();
             let handle = app_handle.clone();
+            // The listener is stamped with this show's epoch. A foreground
+            // event that was already queued by a *previous* listener must not
+            // shrink the bar this show just put on screen.
             let _ = windows_focus::start_focus_listener(Arc::new(move |_hwnd| {
-                if windows_focus::should_enter_minibar_on_focus_loss() {
+                if windows_focus::should_enter_minibar_on_focus_loss()
+                    && OVERLAY_SURFACE_EPOCH.load(Ordering::SeqCst) == epoch
+                {
                     windows_focus::enter_minibar();
-                    let _ = handle.emit(MINIBAR_EVENT, ());
+                    let _ = handle.emit(MINIBAR_EVENT, epoch);
                 }
             }));
         }
@@ -351,6 +484,7 @@ fn show_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::ActivationCo
         window_x,
         window_y,
         screen_bottom_y,
+        epoch,
     );
 }
 
@@ -361,6 +495,7 @@ fn show_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::ActivationCo
     if OVERLAY_INTENDED_VISIBLE.swap(true, Ordering::SeqCst) {
         return;
     }
+    let epoch = bump_overlay_surface_epoch();
     if let Some(window) = app_handle.get_webview_window("main") {
         let _ = window.show();
         let _ = window.set_focus();
@@ -371,6 +506,7 @@ fn show_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::ActivationCo
             None,
             None,
             None,
+            epoch,
         );
     }
 }
@@ -488,8 +624,10 @@ async fn open_settings_window(app_handle: tauri::AppHandle) -> Result<(), String
     Ok(())
 }
 
-/// Restores the full overlay from minibar mode.
+/// Expands and raises the overlay, optionally replaying the frontend entrance.
 ///
+/// Used for a real minibar restore and for the two reconciliation states where
+/// the native surface and the frontend disagree (see [`ExpandSource`]).
 /// Shared by every summon path (the hotkey and the tray left click) so they
 /// cannot drift apart. Re-asserts the tool-window style because the resize/show
 /// path makes tao rewrite the extended style (item 4).
@@ -499,9 +637,32 @@ async fn open_settings_window(app_handle: tauri::AppHandle) -> Result<(), String
 /// transition). `set_size`/`set_focus` on a hidden window change nothing the
 /// user can see, so without the `show()` that case was a silent no-op and the
 /// next double-tap was the one that opened the bar.
+///
+/// `replay_show` must be false when the frontend is already showing the bar:
+/// a show event restarts the session, and a summon must never discard the
+/// conversation the user is looking at.
 #[cfg(target_os = "windows")]
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn restore_overlay_from_minibar(app_handle: &tauri::AppHandle) {
+fn expand_overlay(app_handle: &tauri::AppHandle, replay_show: bool) {
+    // Entry diagnostics: an expand produced by the minibar branch returns
+    // before the usual `[summon]` line, so without this it would be invisible
+    // in the log. `source` names the real state being recovered from, so a
+    // hidden window or a minibar flag without the minibar UI can never be read
+    // as a live minibar. Together with the `applied` line below this is what
+    // tells a real expand from one that was undone by a late shrink.
+    let minibar_active = windows_focus::is_minibar_active();
+    let ui_visible = OVERLAY_UI_VISIBLE.load(Ordering::SeqCst);
+    let source = expand_source(minibar_active, ui_visible);
+    eprintln!(
+        "quickai: [minibar] expand entry source={} minibar_active={minibar_active} ui_visible={ui_visible} intended_visible={} requested={}x{} replay={replay_show}",
+        source.label(),
+        OVERLAY_INTENDED_VISIBLE.load(Ordering::SeqCst),
+        OVERLAY_LOGICAL_WIDTH as i64,
+        OVERLAY_LOGICAL_HEIGHT_COLLAPSED as i64,
+    );
+    // An expand supersedes every click-away issued before it: bump first, so a
+    // shrink already in flight is refused by `enter_minibar_size`.
+    let epoch = bump_overlay_surface_epoch();
     windows_focus::exit_minibar();
     let handle = app_handle.clone();
     let _ = app_handle.run_on_main_thread(move || {
@@ -519,6 +680,11 @@ fn restore_overlay_from_minibar(app_handle: &tauri::AppHandle) {
             // window that may have been hidden underneath the minibar flag.
             let _ = window.show();
             let _ = window.set_focus();
+            eprintln!(
+                "quickai: [minibar] expand applied source={} natively_visible={} epoch={epoch} replay={replay_show}",
+                source.label(),
+                window.is_visible().unwrap_or(false),
+            );
             // The window is now open, so the intent flag must say so. Leaving
             // it false made the *next* summon take the `Show` path and reset a
             // session that was already on screen.
@@ -526,14 +692,29 @@ fn restore_overlay_from_minibar(app_handle: &tauri::AppHandle) {
             hide_from_taskbar(&window);
             let _ = windows_focus::stop_focus_listener();
             let h = handle.clone();
+            // Stamped with this expand's epoch, like the listener in
+            // `show_overlay`; a queued event from a superseded listener cannot
+            // shrink the restored overlay.
             let _ = windows_focus::start_focus_listener(Arc::new(move |_hwnd| {
-                if windows_focus::should_enter_minibar_on_focus_loss() {
+                if windows_focus::should_enter_minibar_on_focus_loss()
+                    && OVERLAY_SURFACE_EPOCH.load(Ordering::SeqCst) == epoch
+                {
                     windows_focus::enter_minibar();
-                    let _ = h.emit(MINIBAR_EVENT, ());
+                    let _ = h.emit(MINIBAR_EVENT, epoch);
                 }
             }));
         }
-        emit_overlay_visibility(&handle, OVERLAY_VISIBILITY_SHOW, None, None, None, None);
+        if replay_show {
+            emit_overlay_visibility(
+                &handle,
+                OVERLAY_VISIBILITY_SHOW,
+                None,
+                None,
+                None,
+                None,
+                epoch,
+            );
+        }
     });
 }
 
@@ -575,7 +756,7 @@ fn bring_overlay_forward(app_handle: &tauri::AppHandle) {
 ///
 /// The minibar row is handled in `open_or_raise_overlay` before this decision:
 /// it is a native *size* state, not a visibility state. `Expand` there means
-/// `restore_overlay_from_minibar`, which always calls `show()`.
+/// `expand_overlay`, which resizes and calls `show()`.
 ///
 /// The first three rows are `Show`, the fourth is the minibar `Expand`, and the
 /// last two are `BringForward`. Foreground is recorded for the diagnostic log
@@ -612,13 +793,65 @@ fn hotkey_action(intended_visible: bool, natively_visible: bool) -> HotkeyAction
     }
 }
 
+/// What a completed double-tap should actually execute.
+///
+/// This wraps [`hotkey_action`] with the reconciliation the two native flags
+/// cannot express, because they say what the backend asked for, not what the
+/// user is looking at. `hotkey_action` itself stays a two-row predicate.
+#[cfg(target_os = "windows")]
+#[derive(Debug, PartialEq, Eq)]
+enum SummonPlan {
+    /// Expand to full size (and leave the minibar size mode). `replay` says
+    /// whether the frontend entrance must be replayed — false when it is
+    /// already showing the bar, so the open conversation survives.
+    Expand { replay: bool },
+    /// On screen and showing: raise/focus with no show event.
+    Raise,
+    /// Nothing usable on screen: open a fresh session.
+    Show,
+}
+
+/// Pure decision for what a summon executes.
+///
+/// `minibar_active` is the native size mode (already cleared if stale),
+/// `ui_visible` is the frontend's mirrored "the bar is on screen". Three
+/// reconciliations live here, all around `hotkey_action` rather than inside it:
+///
+/// - **minibar flag, frontend visible** (a lost minibar event): expand without
+///   replaying, because emitting a show here resets the conversation the user
+///   is reading.
+/// - **BringForward, frontend not visible** (a lost show): a raise-only path
+///   never resizes or re-shows, so the frontend would stay in the minibar
+///   forever. Expand and replay instead.
+/// - everything else follows `hotkey_action` unchanged.
+#[cfg(target_os = "windows")]
+fn summon_plan(
+    intended_visible: bool,
+    natively_visible: bool,
+    minibar_active: bool,
+    ui_visible: bool,
+) -> SummonPlan {
+    if minibar_active {
+        return SummonPlan::Expand {
+            replay: summon_replays_entrance(ui_visible),
+        };
+    }
+    match hotkey_action(intended_visible, natively_visible) {
+        HotkeyAction::BringForward if !ui_visible => SummonPlan::Expand { replay: true },
+        HotkeyAction::BringForward => SummonPlan::Raise,
+        HotkeyAction::Show => SummonPlan::Show,
+    }
+}
+
 /// Summon the overlay: open it from anything the user cannot use, or raise it
 /// when it is already on screen. **Never hides.**
 ///
 /// Decides on the window's *native* state, not on the intent flag alone, so a
 /// drifted flag (visible while the native window is hidden) cannot swallow the
 /// summon. The minibar is expanded first because it is a distinct size state
-/// rather than a visibility state.
+/// rather than a visibility state, and the frontend's mirrored UI state is
+/// consulted so a lost event cannot turn a summon into a session reset or a
+/// no-op (see [`summon_plan`]).
 ///
 /// Shared by the summon hotkey and the tray icon's left click, so the two
 /// entry points cannot drift apart. Dismissal belongs to Esc, Ctrl+W and the
@@ -626,28 +859,39 @@ fn hotkey_action(intended_visible: bool, natively_visible: bool) -> HotkeyAction
 #[cfg(target_os = "windows")]
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn open_or_raise_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::ActivationContext) {
-    if windows_focus::is_minibar_active() {
-        eprintln!("quickai: [summon] minibar active -> expand");
-        restore_overlay_from_minibar(app_handle);
-        return;
-    }
-
     let intended_visible = OVERLAY_INTENDED_VISIBLE.load(Ordering::SeqCst);
     let natively_visible = app_handle
         .get_webview_window("main")
         .and_then(|window| window.is_visible().ok())
         .unwrap_or(false);
-    // Diagnostic only: both visible states raise, but knowing whether the user
-    // was already on the overlay tells "raised" from "raised invisibly".
+    let ui_visible = OVERLAY_UI_VISIBLE.load(Ordering::SeqCst);
+
+    // A minibar flag can outlive the window it described: clicking away while
+    // the overlay is hidden (the focus listener survives Esc) sets it with no
+    // minibar on screen. Clear it before deciding, so the summon cannot take
+    // the expand path for a bar that is not there and the diagnostic never
+    // reports a live minibar for a hidden window.
+    if should_clear_stale_minibar(natively_visible, windows_focus::is_minibar_active()) {
+        eprintln!("quickai: [summon] clearing stale minibar flag (native window hidden)");
+        windows_focus::exit_minibar();
+    }
+
+    // Diagnostic only: foreground tells "raised" from "raised invisibly".
     let foreground = windows_focus::is_overlay_foreground();
-    let action = hotkey_action(intended_visible, natively_visible);
+    let plan = summon_plan(
+        intended_visible,
+        natively_visible,
+        windows_focus::is_minibar_active(),
+        ui_visible,
+    );
     eprintln!(
-        "quickai: [summon] intended_visible={intended_visible} natively_visible={natively_visible} foreground={foreground} -> {action:?}"
+        "quickai: [summon] intended_visible={intended_visible} natively_visible={natively_visible} ui_visible={ui_visible} foreground={foreground} -> {plan:?}"
     );
 
-    match action {
-        HotkeyAction::BringForward => bring_overlay_forward(app_handle),
-        HotkeyAction::Show => {
+    match plan {
+        SummonPlan::Expand { replay } => expand_overlay(app_handle, replay),
+        SummonPlan::Raise => bring_overlay_forward(app_handle),
+        SummonPlan::Show => {
             // Clear a stale "visible" intent so `show_overlay`'s guard cannot
             // swallow the summon when the flag and the window have drifted.
             OVERLAY_INTENDED_VISIBLE.store(false, Ordering::SeqCst);
@@ -777,11 +1021,42 @@ fn open_in_browser(url: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Mirrors whether the frontend is rendering the overlay's visible state.
+///
+/// Sent on every `overlayState` change (`visible` → true; `minibar`, `hiding`
+/// and `hidden` → false). The summon path uses it to reconcile the two states
+/// the native flags cannot distinguish — see [`OVERLAY_UI_VISIBLE`].
+#[tauri::command]
+fn set_overlay_ui_visible(visible: bool) {
+    OVERLAY_UI_VISIBLE.store(visible, Ordering::SeqCst);
+}
+
 /// Resizes the window to minibar dimensions and enters minibar mode.
-/// Called from the frontend when it transitions to minibar state.
+///
+/// `epoch` is the surface epoch stamped on the `quickai://minibar` event that
+/// caused this shrink (see [`OVERLAY_SURFACE_EPOCH`]). If a show or expand has
+/// bumped the epoch since, the click-away is stale and the shrink is refused:
+/// applying it would shrink a window the user had just summoned, leaving the
+/// first double-tap looking dead until a second one repeated the expand.
+/// `None` is the in-app minimise button, which has no event and no token, and
+/// is always applied.
+///
+/// Returns whether the shrink was applied. The frontend uses the answer as the
+/// authority for entering the mini-bar UI: a delayed (throttled) click-away
+/// that a summon has already superseded is refused here, and the frontend must
+/// stay in the visible state rather than render a 48 px logo inside the window
+/// the summon just expanded.
 #[cfg(target_os = "windows")]
 #[tauri::command]
-fn enter_minibar_size(app_handle: tauri::AppHandle) {
+fn enter_minibar_size(app_handle: tauri::AppHandle, epoch: Option<u64>) -> bool {
+    let current = OVERLAY_SURFACE_EPOCH.load(Ordering::SeqCst);
+    if !shrink_is_current(epoch, current) {
+        eprintln!(
+            "quickai: [minibar] ignoring stale shrink epoch={} current={current}",
+            epoch.unwrap_or_default(),
+        );
+        return false;
+    }
     windows_focus::enter_minibar();
     let handle = app_handle.clone();
     let _ = app_handle.run_on_main_thread(move || {
@@ -792,6 +1067,7 @@ fn enter_minibar_size(app_handle: tauri::AppHandle) {
             )));
         }
     });
+    true
 }
 
 /// Resizes the window back to full overlay dimensions and exits minibar mode.
@@ -799,6 +1075,9 @@ fn enter_minibar_size(app_handle: tauri::AppHandle) {
 #[cfg(target_os = "windows")]
 #[tauri::command]
 fn exit_minibar_size(app_handle: tauri::AppHandle) {
+    // Restoring is authoritative: any click-away issued before this click is
+    // stale, so advance the epoch before the listener is replaced.
+    let epoch = bump_overlay_surface_epoch();
     windows_focus::exit_minibar();
     let handle = app_handle.clone();
     let _ = app_handle.run_on_main_thread(move || {
@@ -814,9 +1093,11 @@ fn exit_minibar_size(app_handle: tauri::AppHandle) {
             let _ = windows_focus::stop_focus_listener();
             let h = handle.clone();
             let _ = windows_focus::start_focus_listener(Arc::new(move |_hwnd| {
-                if windows_focus::should_enter_minibar_on_focus_loss() {
+                if windows_focus::should_enter_minibar_on_focus_loss()
+                    && OVERLAY_SURFACE_EPOCH.load(Ordering::SeqCst) == epoch
+                {
                     windows_focus::enter_minibar();
-                    let _ = h.emit(MINIBAR_EVENT, ());
+                    let _ = h.emit(MINIBAR_EVENT, epoch);
                 }
             }));
         }
@@ -1244,6 +1525,7 @@ pub fn run() {
             #[cfg(all(target_os = "windows", not(coverage)))]
             screenshot::capture_full_screen_command,
             notify_overlay_hidden,
+            set_overlay_ui_visible,
             notify_frontend_ready,
             set_window_frame,
             finish_onboarding,
@@ -1472,5 +1754,77 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A shrink is only applied if no show/expand has superseded the event
+    /// that requested it. The argument-less (in-app minimise) form always is.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn shrink_epoch_guard() {
+        // Current or newer than current: apply.
+        assert!(shrink_is_current(Some(7), 7));
+        assert!(shrink_is_current(Some(8), 7));
+        // Older than current: the click-away was superseded by a show/expand.
+        assert!(!shrink_is_current(Some(6), 7));
+        // No token (in-app minimise): nothing to compare, apply.
+        assert!(shrink_is_current(None, 7));
+    }
+
+    /// Scenario 2 (a lost minibar event): `MINIBAR_ACTIVE` is set while the
+    /// frontend still shows the bar. The summon must expand *without* a show
+    /// event — a replay calls `replayEntranceAnimation`, which resets the
+    /// conversation the user is looking at. A genuine minibar still reopens a
+    /// fresh session.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn summon_from_a_minibar_without_ui_keeps_the_conversation() {
+        assert_eq!(
+            summon_plan(true, true, true, true),
+            SummonPlan::Expand { replay: false }
+        );
+        assert_eq!(
+            summon_plan(true, true, true, false),
+            SummonPlan::Expand { replay: true }
+        );
+    }
+
+    /// Scenario 3 (a lost show): the frontend is in the minibar while the
+    /// native window looks visible, so `hotkey_action` says BringForward. A
+    /// raise never resizes or re-shows, which would stay stuck; the plan
+    /// expands and replays instead, ending in the visible state. A genuinely
+    /// visible overlay still only raises.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn summon_reconciles_a_lost_show_instead_of_raising() {
+        assert_eq!(
+            summon_plan(true, true, false, false),
+            SummonPlan::Expand { replay: true }
+        );
+        assert_eq!(summon_plan(true, true, false, true), SummonPlan::Raise);
+    }
+
+    /// Scenario 4: a minibar flag set while the native window is hidden does
+    /// not describe a live minibar and is cleared before the decision.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn stale_minibar_on_a_hidden_window_is_cleared() {
+        assert!(should_clear_stale_minibar(false, true));
+        assert!(!should_clear_stale_minibar(true, true));
+        assert!(!should_clear_stale_minibar(false, false));
+        assert!(!should_clear_stale_minibar(true, false));
+    }
+
+    /// The diagnostic names the real state being recovered from, so a hidden
+    /// window or a minibar flag without the minibar UI is never mistaken for a
+    /// live minibar.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn expand_source_names_every_recovery_state() {
+        assert_eq!(expand_source(true, false), ExpandSource::MinibarWithUi);
+        assert_eq!(expand_source(true, true), ExpandSource::MinibarWithoutUi);
+        assert_eq!(expand_source(false, false), ExpandSource::UiHidden);
+        assert_eq!(ExpandSource::MinibarWithUi.label(), "minibar-with-ui");
+        assert_eq!(ExpandSource::MinibarWithoutUi.label(), "minibar-without-ui");
+        assert_eq!(ExpandSource::UiHidden.label(), "ui-hidden");
     }
 }

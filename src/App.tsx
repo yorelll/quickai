@@ -300,9 +300,26 @@ type OverlayVisibilityPayload =
       window_x: number | null;
       window_y: number | null;
       screen_bottom_y: number | null;
+      /**
+       * Backend surface epoch of this show/expand. Every show carries a newer
+       * value; it is the token a later click-away is compared against. Optional
+       * only so tests and older payloads without it remain valid.
+       */
+      transition_epoch?: number;
     }
   | { state: 'hide-request' };
 type OverlayState = 'visible' | 'hidden' | 'hiding' | 'minibar';
+
+/**
+ * The state a shrink may move into.
+ *
+ * Only an overlay that is on screen (or still animating out) can enter the
+ * mini bar; anything else keeps its state, so a shrink that resolves after the
+ * overlay was hidden cannot resurrect the mini-bar UI over a hidden window.
+ */
+export function minibarStateFrom(prev: OverlayState): OverlayState {
+  return prev === 'visible' || prev === 'hiding' ? 'minibar' : prev;
+}
 
 /**
  * Main application orchestrator for QuickAI.
@@ -328,6 +345,17 @@ function App() {
    * lags behind a throttled render, so it alone cannot close that race).
    */
   const showEpochRef = useRef(0);
+  /**
+   * The backend's surface epoch of the most recent show/expand.
+   *
+   * The backend bumps it on every show and every expand, and stamps each
+   * `quickai://minibar` event with the epoch that was current when the focus
+   * listener producing it was installed. A click-away older than the newest
+   * show is therefore stale and must be ignored: applying it would shrink the
+   * window that was just summoned, so the first double-tap would look dead
+   * until a second one repeated the expand.
+   */
+  const surfaceEpochRef = useRef(0);
   /** Non-null when the backend signals onboarding is needed; holds the current stage. */
   const [onboardingStage, setOnboardingStage] =
     useState<OnboardingStage | null>(null);
@@ -563,9 +591,20 @@ function App() {
    * re-arms the correction; the native resize listener uses this to notice
    * that the CSS height it got differs from the CSS height it asked for.
    */
-  const lastRequestRef = useRef<{ height: number; corrected: boolean }>({
+  const lastRequestRef = useRef<{
+    height: number;
+    corrected: boolean;
+    /**
+     * The CSS viewport height when this request was issued. A genuine
+     * conversion mismatch is a *change* away from this value in response to
+     * the request; an observation that still equals it predates the request's
+     * layout (see `verifyNativeSize`).
+     */
+    fromHeight: number;
+  }>({
     height: 0,
     corrected: false,
+    fromHeight: 0,
   });
 
   /**
@@ -632,7 +671,11 @@ function App() {
     // correct.
     if (Math.abs(targetHeight - window.innerHeight) <= 1) return;
 
-    lastRequestRef.current = { height: targetHeight, corrected: false };
+    lastRequestRef.current = {
+      height: targetHeight,
+      corrected: false,
+      fromHeight: window.innerHeight,
+    };
 
     if (growsUpwardRef.current) {
       // Grow upward: pin the window bottom and expand the top edge.
@@ -657,9 +700,9 @@ function App() {
    * Compares the CSS height the window was asked for with the CSS height it
    * actually got, and applies **one** bounded correction.
    *
-   * Two distinct failure shapes are handled, both armed only after a native
-   * resize event (so an in-flight request is never misread as a failure) and
-   * both limited to one attempt per requested height:
+   * Two distinct failure shapes are handled, both armed only by a post-layout
+   * viewport observation (so an in-flight request is never misread as a
+   * failure) and both limited to one attempt per requested height:
    *
    * 1. The window was left at collapsed/minibar size after the content had
    *    already asked for a chat window — B's delayed `exit_minibar_size` case.
@@ -669,6 +712,16 @@ function App() {
    *    renders fewer CSS pixels — a logical→physical mismatch, e.g. a stale
    *    per-monitor scale. A multiplicative error does not converge under an
    *    additive retry, so the retry asks for `h² / actual`.
+   *
+   * Shape 2 must not treat a *stale* CSS height as a rendering mismatch. That
+   * is why the trigger is a ResizeObserver on the document element rather than
+   * `tauri://resize`: the native event arrives over a channel independent of
+   * the renderer's layout, so at that moment `window.innerHeight` can still be
+   * the pre-resize value. Applying the ratio to it asks for an arbitrary
+   * height, and the resulting resize re-arms verification — the loop this
+   * guard exists to break. A ResizeObserver callback runs after layout, so
+   * `actual` is settled; it is re-read after the async native probe as well,
+   * because a newer resize can land in between.
    *
    * This function does not react to a manual drag — that matches neither
    * shape. The window is nonetheless fit-to-content by design: a drag changes
@@ -692,8 +745,6 @@ function App() {
     const actual = window.innerHeight;
     if (actual <= 0 || Math.abs(actual - request.height) <= 1) return;
 
-    request.corrected = true;
-
     const apply = (height: number) => {
       logSizing('correct', morphingContainerNodeRef.current, height);
       if (growsUpwardRef.current) {
@@ -711,11 +762,13 @@ function App() {
 
     // Shape 1: the content already asked for a chat window but the native
     // window is still at collapsed/minibar size. A user drag cannot produce
-    // this (the content size is re-applied on the next frame anyway).
+    // this (the content size is re-applied on the next frame anyway). The
+    // observation is synchronous, so it cannot be stale.
     if (
       actual <= COLLAPSED_WINDOW_HEIGHT &&
       request.height > COLLAPSED_WINDOW_HEIGHT
     ) {
+      request.corrected = true;
       apply(request.height);
       return;
     }
@@ -733,8 +786,26 @@ function App() {
       return;
     void Promise.all([win.innerSize(), win.scaleFactor()])
       .then(([size, scale]) => {
+        // Re-check the state this observation was armed against. The probe is
+        // async, so a hide, a newer request, or a second observation that
+        // already spent the correction can all have happened meanwhile.
+        if (request.corrected) return;
+        if (overlayStateRef.current !== 'visible') return;
+        if (lastRequestRef.current !== request) return;
+        // `actual` is read by the viewport observer *after* layout, so it is
+        // the settled CSS height. If it has moved while the probe was in
+        // flight, another resize landed and its own observation will decide;
+        // applying this ratio would use a height that no longer exists.
+        if (window.innerHeight !== actual) return;
+        // A mid-animation request is issued from the layout that produced
+        // `actual`, so an observation at the request's own starting height is
+        // that layout — not the CSS answer to this request. Only a height the
+        // request has *moved away from* can be evidence of a conversion
+        // mismatch.
+        if (actual === request.fromHeight) return;
         const expected = Math.round(request.height * scale);
         if (Math.abs(size.height - expected) > 1) return;
+        request.corrected = true;
         apply(Math.round(request.height * (request.height / actual)));
       })
       .catch(() => {
@@ -744,27 +815,43 @@ function App() {
   }, []);
 
   /**
-   * Re-evaluates the size whenever the native window reports a resize, and
-   * resets the correction when the display scale changes.
+   * Re-evaluates the size when the **CSS viewport** changes, and resets the
+   * correction when the display scale changes.
    *
-   * This is what covers the gap the ResizeObserver cannot: a native resize
-   * that lands *after* the last layout change (a delayed minibar restore, a
-   * DPI conversion that yields a different CSS height) produces no container
-   * mutation, so nothing else would ever revisit the size. `verifyNativeSize`
+   * Deliberately driven by a `ResizeObserver` on the document element, not by
+   * `tauri://resize`. The native event is emitted over a different channel
+   * than the renderer's layout, so it can arrive while `window.innerHeight`
+   * still reports the previous size; an observation taken then is stale and
+   * the multiplicative correction would resize a window that is already
+   * correct. A ResizeObserver callback runs *after* layout, so the height it
+   * reads is the settled CSS height for that frame — the ordering that
+   * produced the correction loop cannot occur. A native resize that produces
+   * no CSS change needs no correction, so skipping the event loses nothing.
+   *
+   * This is what covers the gap the container ResizeObserver cannot: a native
+   * resize that lands *after* the last layout change (a delayed minibar
+   * restore, a DPI conversion that yields a different CSS height) produces no
+   * container mutation, but it does change the document's box. `verifyNativeSize`
    * is bounded, so this cannot become a resize loop.
    */
   useEffect(() => {
+    /* v8 ignore start -- ResizeObserver delivery requires a real layout */
+    const observer = new ResizeObserver(() => verifyNativeSize());
+    // Invariant: the document element's box must be viewport-sized, which the
+    // App root's `h-screen` (100vh) provides. If `h-screen` is removed, or
+    // `html`/`body` are given a content-derived height, the document element
+    // stops resizing with the native window: this callback never fires and
+    // native-size verification (both shapes) silently stops running, with no
+    // error. Keep the root viewport-filling, or observe a descendant that is.
+    observer.observe(document.documentElement);
+    return () => observer.disconnect();
+    /* v8 ignore stop */
+  }, [verifyNativeSize]);
+
+  /** Resets the one-shot correction when the display scale changes. */
+  useEffect(() => {
     /* v8 ignore start -- native window events */
-    let unlistenResize: (() => void) | undefined;
     let unlistenScale: (() => void) | undefined;
-    void listen('tauri://resize', () => verifyNativeSize())
-      .then((fn) => {
-        unlistenResize = fn;
-      })
-      .catch(() => {
-        // Event bridge unavailable (test env without the mock): the
-        // ResizeObserver and focus resync still cover the common path.
-      });
     void listen('tauri://scale-change', () => {
       lastRequestRef.current.corrected = false;
       syncWindowSize();
@@ -773,14 +860,14 @@ function App() {
         unlistenScale = fn;
       })
       .catch(() => {
-        // Same fallback as above.
+        // Event bridge unavailable (test env without the mock): the
+        // ResizeObserver and focus resync still cover the common path.
       });
     return () => {
-      unlistenResize?.();
       unlistenScale?.();
     };
     /* v8 ignore stop */
-  }, [syncWindowSize, verifyNativeSize]);
+  }, [syncWindowSize]);
 
   /**
    * Re-applies the window size when the window regains focus or becomes
@@ -882,12 +969,16 @@ function App() {
   }, [isGenerating]);
 
   /**
-   * Replays the entrance sequence by transitioning the overlay to the visible state.
-   * Clears conversation state for a fresh session each time the overlay appears.
+   * Shared prologue for every show, independent of session lifetime.
+   *
+   * Marks the show as delivered (so an in-flight hide commit is cancelled even
+   * before React re-renders), records the growth direction from the native
+   * placement, and resets the sizing high-water mark. It deliberately touches
+   * no conversation state: whether the session is kept is decided by the
+   * caller.
    */
-  const replayEntranceAnimation = useCallback(
+  const beginOverlayEntrance = useCallback(
     (
-      context: string | null,
       windowX: number | null,
       windowY: number | null,
       screenBottomY: number | null,
@@ -909,6 +1000,22 @@ function App() {
           bottomY: windowY + COLLAPSED_WINDOW_HEIGHT,
         };
       }
+    },
+    [],
+  );
+
+  /**
+   * Replays the entrance sequence for a fresh summon.
+   * Clears conversation state for a fresh session each time the overlay appears.
+   */
+  const replayEntranceAnimation = useCallback(
+    (
+      context: string | null,
+      windowX: number | null,
+      windowY: number | null,
+      screenBottomY: number | null,
+    ) => {
+      beginOverlayEntrance(windowX, windowY, screenBottomY);
       setSessionId((id) => id + 1);
       setQuery('');
       setSelectedContext(context);
@@ -942,7 +1049,28 @@ function App() {
       // reappear (mini-bar restore, notification click).
       setOverlayState('visible');
     },
-    [reset, resetHistory, stopAgentMode],
+    [beginOverlayEntrance, reset, resetHistory, stopAgentMode],
+  );
+
+  /**
+   * Reveals the session the mini bar was showing, without starting a new one.
+   *
+   * The mini bar is the same conversation collapsed, so an expand must not
+   * discard it — the same rule as clicking the mini bar itself. Only the view
+   * is restored: messages, typed input, attachments, pin and a running agent
+   * all survive. `replayEntranceAnimation` remains the fresh-session path used
+   * by a summon from hidden.
+   */
+  const revealOverlayFromMinibar = useCallback(
+    (
+      windowX: number | null,
+      windowY: number | null,
+      screenBottomY: number | null,
+    ) => {
+      beginOverlayEntrance(windowX, windowY, screenBottomY);
+      setOverlayState('visible');
+    },
+    [beginOverlayEntrance],
   );
 
   /**
@@ -972,6 +1100,46 @@ function App() {
       return 'hiding';
     });
   }, [cancel, stopAgentMode]);
+
+  /**
+   * Requests minibar mode and enters it only once the backend accepts.
+   *
+   * The command is the authority: it refuses a click-away whose surface epoch
+   * has been superseded by a show or expand. Gating the UI transition on that
+   * answer keeps a *delayed* (throttled) minibar event from putting a 48 px
+   * logo inside a window a summon has just expanded — the queued event is
+   * refused here and the bar stays on screen. `token` is the event's surface
+   * epoch, `undefined` for the in-app minimise button (which has no event).
+   */
+  const enterMinibar = useCallback(async (token: number | undefined) => {
+    const current = overlayStateRef.current;
+    if (current !== 'visible' && current !== 'hiding') return;
+    // A show delivered while the request is in flight owns the surface, even
+    // if the backend accepted the shrink before that show reached us.
+    const showEpochAtRequest = showEpochRef.current;
+    let applied: boolean | undefined;
+    try {
+      applied =
+        token === undefined
+          ? await invoke<boolean>('enter_minibar_size')
+          : await invoke<boolean>('enter_minibar_size', { epoch: token });
+    } catch {
+      // The IPC failed, so the native shrink did not happen: rendering the
+      // mini bar would leave it inside a full-size window. The overlay stays
+      // visible at the correct size. There is no automatic second attempt: the
+      // focus listener already set `MINIBAR_ACTIVE` before it emitted, and
+      // `should_enter_minibar` is false while that flag is set, so no further
+      // click-away fires. The next summon clears the stale flag (see scenario
+      // 4 in `open_or_raise_overlay`), which re-enables the transition.
+      return;
+    }
+    // `false` is the backend refusing a superseded click-away. `undefined`
+    // (a mock or an older backend) is treated as accepted.
+    if (applied === false || showEpochRef.current !== showEpochAtRequest) {
+      return;
+    }
+    setOverlayState(minibarStateFrom);
+  }, []);
 
   /** Ref attached to the chat-mode history dropdown for click-outside detection. */
   const historyDropdownRef = useRef<HTMLDivElement>(null);
@@ -1948,12 +2116,27 @@ function App() {
         OVERLAY_VISIBILITY_EVENT,
         ({ payload }) => {
           if (payload.state === 'show') {
-            replayEntranceAnimation(
-              payload.selected_text ?? null,
-              payload.window_x ?? null,
-              payload.window_y ?? null,
-              payload.screen_bottom_y ?? null,
-            );
+            if (payload.transition_epoch !== undefined) {
+              surfaceEpochRef.current = payload.transition_epoch;
+            }
+            // A SHOW that arrives while the mini bar is on screen is an
+            // expand of the session it was showing, not a new summon: reveal
+            // that session instead of resetting it. Every other SHOW (hidden,
+            // hiding, launch) starts a fresh session.
+            if (overlayStateRef.current === 'minibar') {
+              revealOverlayFromMinibar(
+                payload.window_x ?? null,
+                payload.window_y ?? null,
+                payload.screen_bottom_y ?? null,
+              );
+            } else {
+              replayEntranceAnimation(
+                payload.selected_text ?? null,
+                payload.window_x ?? null,
+                payload.window_y ?? null,
+                payload.screen_bottom_y ?? null,
+              );
+            }
             return;
           }
           requestHideOverlay();
@@ -1965,15 +2148,22 @@ function App() {
           setOnboardingStage(payload.stage);
         },
       );
-      unlistenMinibar = await listen('quickai://minibar', () => {
-        setOverlayState((prev) => {
-          if (prev === 'visible' || prev === 'hiding') {
-            void invoke('enter_minibar_size');
-            return 'minibar';
+      unlistenMinibar = await listen<number | null>(
+        'quickai://minibar',
+        ({ payload }) => {
+          // The event carries the surface epoch of the show/expand whose focus
+          // listener produced it. A token older than the newest show is stale
+          // and rejected here as a fast path; `enterMinibar` makes the final,
+          // authoritative check with the backend before changing the UI, which
+          // is what covers an event that was merely delayed rather than lost.
+          // Non-numeric payloads (tests, legacy emitters) carry no token.
+          const token = typeof payload === 'number' ? payload : undefined;
+          if (token !== undefined && token < surfaceEpochRef.current) {
+            return;
           }
-          return prev;
-        });
-      });
+          void enterMinibar(token);
+        },
+      );
       // Clicking a desktop notification restores the overlay from minibar/hidden.
       try {
         // Use Tauri notification plugin's onAction to detect notification clicks.
@@ -2000,7 +2190,12 @@ function App() {
       unlistenMinibar?.();
       unlistenNotification?.unregister();
     };
-  }, [replayEntranceAnimation, requestHideOverlay]);
+  }, [
+    replayEntranceAnimation,
+    revealOverlayFromMinibar,
+    requestHideOverlay,
+    enterMinibar,
+  ]);
 
   /**
    * Combined close handler shared by the keyboard shortcut (Esc/Ctrl+W)
@@ -2013,11 +2208,47 @@ function App() {
   }, [requestHideOverlay]);
 
   const handleMinimize = useCallback(() => {
-    // Instead of hiding, shrink to minibar mode (floating icon).
-    // The user can click the icon to restore the full overlay.
-    void invoke('enter_minibar_size');
-    setOverlayState('minibar');
-  }, []);
+    // Instead of hiding, shrink to minibar mode (floating icon). The UI
+    // transition happens only after the backend accepts the resize; an in-app
+    // minimise carries no event token and is applied unconditionally.
+    void enterMinibar(undefined);
+  }, [enterMinibar]);
+
+  /**
+   * Mirrors whether the overlay's visible UI is on screen into the backend.
+   *
+   * The native flags record what the backend asked for; this is the only
+   * signal of what the user is actually looking at. The summon path uses it to
+   * reconcile a lost minibar event (expand without replaying, so the open
+   * conversation survives) and a lost show (re-expand instead of a no-op
+   * raise). Sent on every state change, so `minibar`, `hiding` and `hidden` all
+   * read as "not visible".
+   *
+   * A failed send is retried (twice): a mirror stuck on the old value would
+   * make the next summon take the wrong reconciliation — e.g. a stale `true`
+   * expands without a show event and leaves the mini bar inside a full-size
+   * window. The cleanup cancels pending retries when the state changes again,
+   * so an old value can never overwrite a newer one.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const send = (attempt: number) => {
+      void invoke('set_overlay_ui_visible', {
+        visible: overlayState === 'visible',
+      }).catch(() => {
+        // A send that rejects after the state moved on must not schedule a
+        // retry carrying the old value; cleanup also clears one already armed.
+        if (cancelled || attempt >= 2) return;
+        retryTimer = setTimeout(() => send(attempt + 1), 100);
+      });
+    };
+    send(0);
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+    };
+  }, [overlayState]);
 
   /** Copy the last assistant response to the clipboard. */
   const handleCopyLastResponse = useCallback(() => {

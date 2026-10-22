@@ -73,8 +73,13 @@ interface ChatBubbleProps {
   role: 'user' | 'assistant';
   /** The message content to render. AI messages support markdown. */
   content: string;
-  /** Stagger index for orchestrated entrance choreography. */
-  index: number;
+  /**
+   * Whether to play the entrance animation. Defaults to `true`. A transcript
+   * that is being displayed — mounted, or replaced by a conversation switch —
+   * passes `false` so the bubbles render at rest instead of replaying the
+   * spring, which looked like the whole list falling into place.
+   */
+  entrance?: boolean;
   /** Selected text from the host app that was quoted alongside this message, if any. */
   quotedText?: string;
   /** Whether this bubble is actively streaming content from the LLM. */
@@ -123,13 +128,14 @@ const bubbleVariants = {
  * - **AI messages** — full-width plain text (no bubble), markdown-rendered, with
  *   an always-visible copy button below the text (left-aligned).
  *
- * Spring entrance animation is staggered by `index` to produce natural
- * choreography when multiple messages appear at once.
+ * Bubbles appended to the transcript play the spring entrance; bubbles that
+ * are present when the transcript is displayed (`entrance={false}`) render at
+ * rest, so opening or switching a conversation does not replay it.
  */
 export function ChatBubble({
   role,
   content,
-  index,
+  entrance = true,
   quotedText,
   isStreaming = false,
   imagePaths,
@@ -144,9 +150,8 @@ export function ChatBubble({
   return (
     <motion.div
       variants={bubbleVariants}
-      initial="hidden"
+      initial={entrance ? 'hidden' : false}
       animate="visible"
-      transition={{ delay: index * 0.06 }}
       className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'}`}
     >
       {isUser ? (
