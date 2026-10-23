@@ -65,8 +65,17 @@ const MINIBAR_PENDING_TIMEOUT_MS = 1000;
 
 /** Must match `OVERLAY_LOGICAL_WIDTH` in `src-tauri/src/lib.rs`. */
 const OVERLAY_WIDTH = 650;
-/** Total transparent padding around the morphing container: pt-2(8) + pb-6(24) + motion py-2(16). */
-const CONTAINER_VERTICAL_PADDING = 48;
+/**
+ * Total transparent padding around the morphing container: root `py-4`
+ * (16 above + 16 below) + the motion container's own `py-2` (8 + 8) = 48,
+ * i.e. 24 px of clearance above and below the container. The split is
+ * deliberately symmetric: the earlier 16-above/32-below arrangement was
+ * justified by a drop shadow, but the `--shadow-bar`/`--shadow-chat` tokens
+ * are no longer applied to the container, so the only effect was a visibly
+ * lopsided gap. Keeping the total at 48 also keeps the collapsed window
+ * height (`COLLAPSED_WINDOW_HEIGHT`) and the backend constants valid.
+ */
+export const CONTAINER_VERTICAL_PADDING = 48;
 /**
  * Max height of the reply box (the chat transcript area) — the morphing
  * container grows to fit this plus whatever the input bar needs. The window
@@ -708,8 +717,8 @@ function App() {
     const contentHeight =
       (isChatModeRef.current && measureChatContentHeight(node)) ||
       node.offsetHeight;
-    // Total vertical room: 8px (pt-2) + 24px (pb-6) + 16px (motion py-2) = 48px.
-    // This ensures the tightened drop shadows aren't clipped by the native window edge.
+    // Total vertical room: root py-4 (16 above + 16 below) + motion py-2
+    // (8 + 8) = 48px, i.e. 24 px of clearance on each side of the container.
     let targetHeight = contentHeight + CONTAINER_VERTICAL_PADDING;
 
     // During streaming, only allow the window to grow (never shrink) to
@@ -2625,14 +2634,16 @@ function App() {
   }
 
   return (
-    // Minimal padding (pt-2 pb-6) provides just enough physical clearance for the
-    // tightened drop shadow to render without clipping at the native window edge.
+    // Vertical padding is symmetric — root `py-4` plus the motion container's
+    // own `py-2` gives 24 px above and 24 px below — so the bar sits optically
+    // centred in its window instead of 16 above / 32 below. The total is still
+    // 48 px, which is what `COLLAPSED_WINDOW_HEIGHT` (113) budgets for.
     <div
       onMouseDown={handleDragStart}
       onDragOver={handleRootDragOver}
       onDragLeave={handleRootDragLeave}
       onDrop={handleRootDrop}
-      className={`flex flex-col items-center ${growsUpward ? 'justify-end' : 'justify-start'} h-screen w-screen px-3 pt-2 pb-6 bg-transparent overflow-clip`}
+      className={`flex flex-col items-center ${growsUpward ? 'justify-end' : 'justify-start'} h-screen w-screen px-3 py-4 bg-transparent overflow-clip`}
     >
       <AnimatePresence mode="wait">
         {shouldRenderOverlay ? (

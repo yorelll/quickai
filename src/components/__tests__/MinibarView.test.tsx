@@ -10,13 +10,25 @@ vi.mock('framer-motion', () => ({
   motion: {
     div: ({
       children,
+      initial,
       ...props
     }: React.HTMLAttributes<HTMLDivElement> & {
       initial?: unknown;
       animate?: unknown;
       exit?: unknown;
       transition?: unknown;
-    }) => React.createElement('div', props, children),
+    }) =>
+      React.createElement(
+        'div',
+        {
+          ...props,
+          // Exposed so a test can assert the entrance carries no positional
+          // offset (the animation itself is not run).
+          'data-initial':
+            initial === undefined ? undefined : JSON.stringify(initial),
+        },
+        children,
+      ),
   },
   AnimatePresence: ({ children }: { children: React.ReactNode }) =>
     React.createElement(React.Fragment, null, children),
@@ -44,6 +56,27 @@ describe('MinibarView', () => {
     render(<MinibarView status={null} onClick={() => {}} />);
     const img = screen.getByAltText('QuickAI');
     expect(img).toBeDefined();
+  });
+
+  it('anchors itself to the window frame instead of the root flex flow', () => {
+    render(<MinibarView status={null} onClick={() => {}} />);
+    const el = document.querySelector('.w-12.h-12') as HTMLElement;
+    // `fixed top-0 left-0` is what makes the circle the top-left 48×48 square
+    // of the viewport — the region the native shrink leaves visible — so the
+    // exiting overlay and a stale pre-shrink `100vh` cannot displace it.
+    expect(el.className).toContain('fixed');
+    expect(el.className).toContain('top-0');
+    expect(el.className).toContain('left-0');
+  });
+
+  it('has no positional offset in its entrance animation', () => {
+    render(<MinibarView status={null} onClick={() => {}} />);
+    const el = document.querySelector('.w-12.h-12') as HTMLElement;
+    const initial = JSON.parse(el.dataset.initial ?? '{}');
+    // Opacity and scale are centre-preserving. An `x`/`y`/`top`/`translateY`
+    // offset here is what used to make the mascot slide into place after the
+    // frame had already shrunk.
+    expect(initial).toEqual({ opacity: 0, scale: 0.8 });
   });
 
   it('should call onClick on pointer down + up without movement', () => {

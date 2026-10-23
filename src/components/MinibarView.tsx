@@ -68,7 +68,19 @@ export function MinibarView({ status, onClick }: MinibarViewProps) {
       exit={{ opacity: 0, scale: 0.8 }}
       transition={{ duration: 0.15 }}
       onPointerDown={handlePointerDown}
-      className="relative w-12 h-12 rounded-full bg-surface-base cursor-pointer select-none flex items-center justify-center"
+      // `fixed top-0 left-0` is load-bearing, not decoration. As an in-flow
+      // flex child of the app root, the circle's position depended on the
+      // root's `100vh` and on its 32 px of vertical padding: when the mini bar
+      // was painted before the CSS viewport had caught up with the native
+      // shrink, it landed 8 px low and then moved once layout settled (the
+      // "mascot settles late" report — reproduced in Chromium). The native
+      // shrink keeps the window's top-left corner fixed, so the visible 48×48
+      // frame is always the viewport's top-left square: anchoring here puts
+      // the logo in the centre of that square on the very first painted frame,
+      // whatever the current viewport height or siblings are. Being out of
+      // flow also stops the 48 px circle from being flex-shrunk into an oval
+      // by the root's padding (measured 48×28 before this change).
+      className="fixed top-0 left-0 w-12 h-12 rounded-full bg-surface-base cursor-pointer select-none flex items-center justify-center"
       title={t('minibar.title')}
     >
       <img

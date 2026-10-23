@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { onAction } from '@tauri-apps/plugin-notification';
 import App, {
   COLLAPSED_WINDOW_HEIGHT,
+  CONTAINER_VERTICAL_PADDING,
   extractSkillAdds,
   measureChatContentHeight,
   minibarStateFrom,
@@ -29,6 +30,22 @@ async function showOverlay(selectedText: string | null = null) {
       screen_bottom_y: null,
     });
   });
+}
+
+/**
+ * Vertical padding, in px, that a container's Tailwind classes contribute.
+ * Tailwind's spacing unit is 0.25rem = 4 px. `py-*` sets both sides; `pt-*` /
+ * `pb-*` override a single side. Used to derive the real padding budget from
+ * the rendered DOM rather than re-stating the class names.
+ */
+function verticalPaddingPx(el: Element): number {
+  const classes = el.className.split(/\s+/);
+  const steps = (prefix: string): number | null => {
+    const cls = classes.find((c) => c.startsWith(prefix));
+    return cls === undefined ? null : Number(cls.slice(prefix.length)) * 4;
+  };
+  const both = steps('py-') ?? 0;
+  return (steps('pt-') ?? both) + (steps('pb-') ?? both);
 }
 
 describe('App', () => {
@@ -573,6 +590,39 @@ describe('App', () => {
     const outer = document.querySelector('.justify-start');
     expect(outer).not.toBeNull();
     expect(document.querySelector('.justify-end')).toBeNull();
+  });
+
+  it('keeps the vertical padding symmetric while totalling 48 px', async () => {
+    render(<App />);
+    await act(async () => {});
+    await showOverlay();
+
+    // Root: a single `py-4` cannot be lopsided; the 16-above/32-below split
+    // came from `pt-2 pb-6`. The motion container contributes `py-2`, so the
+    // split is 24 above / 24 below and the total is still 48 px, keeping
+    // COLLAPSED_WINDOW_HEIGHT (113) and the backend constants valid.
+    const root = document.querySelector('.h-screen')!;
+    const rootClasses = root.className.split(/\s+/);
+    expect(rootClasses).toContain('py-4');
+    expect(rootClasses).not.toContain('pt-2');
+    expect(rootClasses).not.toContain('pb-6');
+    // Horizontal padding is deliberately unchanged.
+    expect(rootClasses).toContain('px-3');
+
+    const container = document.querySelector('.morphing-container')!;
+    // container → relative wrapper → the motion frame carrying `py-2`.
+    const motionFrame = container.parentElement!.parentElement!;
+    expect(motionFrame.className.split(/\s+/)).toContain('py-2');
+
+    // Pin the arithmetic, not just the class names: the 48 px total is what
+    // COLLAPSED_WINDOW_HEIGHT (113) and the backend's WINDOW_BOTTOM_PADDING
+    // (24) are built on. Deriving it from both rendered containers means a
+    // drift on either side fails here — `py-4`→`py-5` (20 each side) or
+    // `py-2`→`py-3` (12 each side) both break the budget.
+    expect(verticalPaddingPx(root) + verticalPaddingPx(motionFrame)).toBe(
+      CONTAINER_VERTICAL_PADDING,
+    );
+    expect(CONTAINER_VERTICAL_PADDING).toBe(48);
   });
 
   describe('ResizeObserver upward growth', () => {
