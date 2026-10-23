@@ -8,6 +8,100 @@ and the changelog follows the
 are written by hand as part of the manual release process (see
 [RELEASING.md](RELEASING.md)).
 
+## 0.0.8 (2026-10-23)
+
+Two layout mechanisms with **measured** root causes, and a summon-key mechanism
+that 0.0.7's log **located**. The first two are fixed against measurements taken
+during this release; the third is fixed against the traced mechanism, and
+whether it restores normal behaviour on a given machine is still for the next
+log to confirm — that distinction is kept throughout.
+
+### Features
+
+* **Diagnostics for what remains of the summon-key question.** The
+  `[activator]` trace gains four things: every summon-key press records the
+  **physical key state at that instant** (`physical=`), the silence since the
+  previous event (`idle=`), and the resulting decision (`decision=`, one of
+  `Fresh`, `StalePhysical`, `StaleTimeout`, `AutoRepeat`); the hook's
+  **install and removal** each log a line with the reason, handle and thread,
+  so a summon that silently unhooked the hook would be visible; and a
+  **filtered injected summon-key event** logs `injected=true ignored` instead
+  of being dropped silently. A negative-`nCode` skip now logs `hook skipped
+  code=…`. Format, location and the no-switch behaviour of the log are
+  unchanged.
+
+### Changed
+
+* **The `[activator]` key line carries more fields.** 0.0.7 logged
+  `vk=… down=… held=… gap=… fired=…`; this release appends `physical=`,
+  `idle=` and `decision=`. Old lines remain readable, but key lines from the
+  two versions cannot be compared field-for-field.
+* **The initial dialog's vertical padding split changed** — 16 top / 32 bottom
+  becomes 24 / 24, with the 48 px total unchanged. See Fixed, third item.
+
+### Fixed
+
+* **The summon key needing two double-taps — mechanism located from the
+  runtime log.** The 0.0.7 log shows that **after every firing press, that
+  press's key-up never reached the hook** (4 firings, 4 missing releases),
+  while **every press that did not fire had its release recorded** (7 of 7).
+  The internal `is_pressed` flag therefore stuck at `true`. The next gesture's
+  first press arrived with the flag still set, was taken for **auto-repeat**
+  and ignored, and **did not record `last_trigger`** — so the gesture was void
+  and the user needed four presses. Every key-down now **checks the key's real
+  physical state against the system** (`GetAsyncKeyState`). A low-level
+  keyboard hook's callback runs **before** the asynchronous key state is
+  updated — Microsoft documents this — so the query returns the **pre-event**
+  state: a true auto-repeat reads *down*, and the first genuine press after a
+  lost release reads *up*. A pure decision function classifies the press as
+  `Fresh`, `StalePhysical`, `StaleTimeout` or `AutoRepeat`; the first three
+  **record the press as the first tap of a new sequence** instead of
+  swallowing it. A **1200 ms timeout** is the second, physical-state-
+  independent heal: a held key auto-repeats every few tens of milliseconds and
+  Windows' initial repeat delay is at most 1 s, so a flag with no event for
+  1200 ms cannot describe a held key. **This item is not claimed "completely
+  solved":** the mechanism is located and the code is fixed against it, and
+  the next log decides. **Runtime check:** see the decision table in the
+  release notes — a healed press logs `decision=StalePhysical` (or
+  `StaleTimeout`) with `fired=false`, and the next press logs
+  `decision=Fresh fired=true`, summoning in one gesture.
+* **The mini bar's mascot sat low and then corrected itself.** The mascot was
+  an **in-flow flex child of the app root**, positioned relative to the root's
+  `h-screen` (100vh) and its padding; the native window shrink is
+  **asynchronous**, so its **first paint happened while the viewport was still
+  the pre-shrink 113 px** and it landed 8 px low, then moved up roughly 10 px
+  once layout settled — the visible "adjustment". The same measurement showed
+  the circle squeezed to 48×28 by the root's padding. It is now **anchored to
+  the viewport's top-left corner** (`fixed top-0 left-0`), which is the 48×48
+  region the native shrink leaves visible: it is centred on the first painted
+  frame (measured centre (24,24)) and out of flow, so padding cannot distort
+  it. **Runtime check:** click outside to collapse, and confirm the mascot is
+  centred the first time you see it.
+* **The initial dialog's vertical padding was lopsided (16 top / 32 bottom).**
+  The split was hard-coded. Its stated justification — the extra bottom space
+  belonging to a drop shadow — **does not hold**: the `--shadow-bar` and
+  `--shadow-chat` custom properties are **referenced nowhere** and are absent
+  from the build output. The split is now **24 / 24**; the 48 px total is
+  unchanged, so `COLLAPSED_WINDOW_HEIGHT` (113) still holds. The backend's
+  `WINDOW_BOTTOM_PADDING`, which positions the bar above a selection, changed
+  from 32 to 24 in step — otherwise the overlay would sit 8 px too high in
+  that case. **Runtime check:** the gap above and below the bar looks the
+  same.
+
+### Known limitations
+
+* If a key-up is swallowed by **an earlier-installed low-level hook**, no line
+  emitted from inside QuickAI's own hook can **distinguish** that from "the OS
+  never delivered it". This is a capability boundary, not a pending fix.
+* A single **hook-callback timeout skipped by the system** is invisible in the
+  current log, because the hook is never called: the log can prove a release
+  was missed, but not why. Its signature is a trace that stops after a
+  `fired=true` with no subsequent `hook uninstalled` line.
+* Below roughly 146 px the chat header and input overlap; normal use cannot
+  reach that height.
+* A native resize that produces no CSS viewport change can be neither observed
+  nor corrected — recorded since 0.0.6, unchanged.
+
 ## 0.0.7 (2026-10-23)
 
 Two **provable** sizing mechanisms are fixed, a file-backed diagnostic log and
@@ -15,6 +109,13 @@ single-instance protection are added — and the summon-key symptom is **not**
 claimed fixed. It has now survived four attempts, so this release stops
 asserting a fifth fix: it rules out the two sizing mechanisms it can prove,
 and makes the next failure diagnosable.
+
+*Correction (0.0.8): the log added here **located the mechanism**. After every
+firing press its key-up never reached the hook (4 of 4), while every press that
+did not fire had its release recorded (7 of 7), leaving the internal "held"
+flag stuck at `true`; the next gesture's first press was then taken for
+auto-repeat and the gesture voided. 0.0.8 heals the flag against the key's
+physical state and a 1200 ms silence timeout. See 0.0.8.*
 
 ### Features
 
@@ -93,6 +194,9 @@ and makes the next failure diagnosable.
   space belongs to the shadow), not a layout bug. When the window is taller
   than its content, the surplus lands entirely at the bottom, so "the bottom
   gap grew" is a symptom of an over-tall window.
+  *Correction (0.0.8): the shadow rationale was wrong — `--shadow-bar` and
+  `--shadow-chat` are referenced nowhere and are absent from the build output.
+  The split is now 24 / 24 with the 48 px total unchanged. See 0.0.8.*
 * A native resize that produces no CSS viewport change can be neither observed
   nor corrected — recorded since 0.0.6, unchanged.
 
