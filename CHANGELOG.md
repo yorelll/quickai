@@ -8,6 +8,94 @@ and the changelog follows the
 are written by hand as part of the manual release process (see
 [RELEASING.md](RELEASING.md)).
 
+## 0.0.7 (2026-10-23)
+
+Two **provable** sizing mechanisms are fixed, a file-backed diagnostic log and
+single-instance protection are added — and the summon-key symptom is **not**
+claimed fixed. It has now survived four attempts, so this release stops
+asserting a fifth fix: it rules out the two sizing mechanisms it can prove,
+and makes the next failure diagnosable.
+
+### Features
+
+* **A diagnostic log file** at `%APPDATA%\com.yorelll.quickai\quickai.log`,
+  next to `config.toml` and `skills.toml`. Lines carry UTC ISO-8601 timestamps
+  with milliseconds; the live file rotates to `quickai.log.1` when the next
+  line would take it past 1 MiB (one previous generation kept). Writes are
+  queued through a bounded channel and drained by one writer thread, so no
+  producer — in particular the low-level keyboard hook — ever waits on disk;
+  a full queue, an unwritable directory or a missing writer drops the line
+  silently. The startup trace records the version, the single-instance
+  decision, the hotkey's **actual virtual-key pair**, and the main window's
+  native state; `[activator]` records whether the hook was installed, and
+  `[summon]`, `[minibar]` and config-loading events follow. None of these need
+  a switch to be enabled. The frontend's `[quickai:size]` trace is
+  development-only (behind a frontend debug flag) and absent from release
+  builds; when present it is accepted only under that prefix, one line per
+  call, so the webview cannot forge an entry in a file users are asked to
+  send.
+* **Corrupt-config recovery is recorded.** A `config.toml` parse failure still
+  renames the file and reseeds defaults — which resets `[general].hotkey` to
+  the default key — but the parse error itself previously went to stderr, which
+  a GUI build has nowhere to show. It is now a timestamped log entry. (The
+  Settings window already reported that defaults were active; it does not say
+  the hotkey was among them.)
+* **Single-instance protection.** Launching QuickAI while it is already
+  running now forwards an activation to the running instance and exits, before
+  any Tauri app exists, so a second copy registers no keyboard hook, no tray
+  icon and no window. A session-scoped named mutex is the lock and a named
+  auto-reset event is the hand-over channel; the mutex handle is deliberately
+  never closed, so a crash cannot leave a stale lock. This is **hardening, not
+  an explanation** of the hotkey problem.
+
+### Changed
+
+* **Diagnostics no longer go to stderr.** Startup, hotkey-hook, summon/mini-bar
+  and config-loading diagnostics now write to the log file; window-sizing events
+  are newly recorded there. A GUI-subsystem process has no console, and a
+  redirected stderr file is not reliable on Windows, so the old lines were
+  effectively lost.
+
+### Fixed
+
+* **The mini bar shrank its icon but not its window.** The native resize to
+  48×48 completes before React commits the mini-bar state, so both
+  `ResizeObserver`s — the container's and the document's — fired while the
+  overlay still looked visible and re-applied the content size. The result was
+  a small icon drawn inside a full-size window. The shrink request now marks
+  the interval as *pending* synchronously, before the IPC call, and both
+  observers stand down while it is set; a 1 s timeout bounds the suppression so
+  a lost reply cannot leave fit-to-content disabled. After applying the resize
+  the backend **reads the size back**, accepts one physical pixel of DPI
+  rounding, retries once when the window did not reach 48×48, and logs both
+  outcomes. **Runtime check:** click outside the overlay and confirm the
+  window itself is 48×48.
+* **Collapsing history in chat mode kept the drawer's height.** Chat mode's
+  container is `h-full`, so clearing the dropdown's inline `minHeight` changed
+  no box: the container observer never fired, nothing re-measured, and the
+  window kept the height the dropdown had reserved. Both clearing branches —
+  non-chat mode and chat mode with history closed — now call the size sync
+  explicitly. **Runtime check:** in chat mode, open and close history and
+  confirm the window height returns.
+
+### Known limitations
+
+* Two overlapping shrink requests (a click-away and the in-app minimise inside
+  one round trip) share one pending flag, so the earlier reply can end the
+  later request's suppression early; both requests still shrink or both
+  restore.
+* A reply that arrives after the timeout still enters the mini bar, now inside
+  the window the timeout re-expanded; the next summon recovers. Recorded, not
+  hidden.
+* The ask-bar drawer's history-collapse case was **not reproduced** during
+  investigation and awaits a real-machine log.
+* The vertical padding is **16 top / 32 bottom on purpose** (the extra bottom
+  space belongs to the shadow), not a layout bug. When the window is taller
+  than its content, the surplus lands entirely at the bottom, so "the bottom
+  gap grew" is a symptom of an over-tall window.
+* A native resize that produces no CSS viewport change can be neither observed
+  nor corrected — recorded since 0.0.6, unchanged.
+
 ## 0.0.6 (2026-10-22)
 
 Fixes for the history/scroll symptoms and the summon-key state drift — both
@@ -59,6 +147,10 @@ and event timing that tests cannot reproduce.
   still never dismisses; that remains deliberate. **Runtime check:** double-tap
   once right after launch and once after clicking elsewhere to dismiss, and
   confirm one gesture is enough each time.
+  *Correction (0.0.7): the symptom persisted. 0.0.7 does not claim it fixed;
+  the hotkey predicate and the overlay state machine are unchanged, and that
+  release instead rules out two provable sizing mechanisms and adds a
+  diagnostic log with which to classify the next failure. See 0.0.7.*
 
 ### Known limitations
 
