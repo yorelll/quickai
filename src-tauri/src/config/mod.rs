@@ -177,15 +177,19 @@ pub fn show_fatal_dialog_and_exit(err: &ConfigError) -> ! {
     unsafe {
         let _ = MessageBoxW(None, &message_h, &title, MB_ICONERROR | MB_OK);
     }
-    eprintln!("quickai: [config] fatal: {err}");
+    crate::diag!("quickai: [config] fatal: {err}");
+    // `exit` skips destructors; the writer thread would otherwise lose the
+    // line that explains why the app refused to start.
+    crate::diagnostics::flush();
     std::process::exit(1);
 }
 
-/// Fallback for non-Windows platforms: prints to stderr and exits.
+/// Fallback for non-Windows platforms: logs to the diagnostic file and exits.
 #[cfg(not(target_os = "windows"))]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub fn show_fatal_dialog_and_exit(err: &ConfigError) -> ! {
-    eprintln!("quickai: [config] fatal: {err}");
+    crate::diag!("quickai: [config] fatal: {err}");
+    crate::diagnostics::flush();
     std::process::exit(1);
 }
 

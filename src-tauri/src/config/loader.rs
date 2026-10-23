@@ -46,7 +46,7 @@ pub fn load_from_path(path: &Path) -> Result<AppConfig, ConfigError> {
             // to in-memory defaults rather than refusing to start. Only a
             // *missing* file that cannot be seeded is fatal (see the module
             // doc).
-            eprintln!(
+            crate::diag!(
                 "quickai: [config] cannot read {}: {source}. using in-memory defaults",
                 path.display()
             );
@@ -64,7 +64,7 @@ fn load_from_contents(path: &Path, contents: &str) -> Result<AppConfig, ConfigEr
             Ok(config)
         }
         Err(parse_err) => {
-            eprintln!(
+            crate::diag!(
                 "quickai: [config] parse error at {}: {parse_err}. renaming and reseeding defaults",
                 path.display()
             );
@@ -121,7 +121,7 @@ pub(crate) fn try_rename_corrupt(path: &Path, target: &Path) -> bool {
     match std::fs::rename(path, target) {
         Ok(()) => true,
         Err(e) => {
-            eprintln!(
+            crate::diag!(
                 "quickai: [config] could not rename corrupt file {}: {e}",
                 path.display()
             );
@@ -136,7 +136,7 @@ pub(crate) fn write_corrupt_marker(parent: &Path, target: &Path, ts: u64) {
     let marker_path = parent.join(super::CORRUPT_MARKER_FILE_NAME);
     let payload = format!("{}\n{ts}\n", target.display());
     if let Err(e) = std::fs::write(&marker_path, payload) {
-        eprintln!(
+        crate::diag!(
             "quickai: [config] could not write corrupt marker at {}: {e}",
             marker_path.display()
         );
@@ -222,7 +222,7 @@ pub fn compose_system_prompt(base: &str, appendix: &str) -> String {
 
 fn clamp_f64(value: &mut f64, bounds: (f64, f64), default: f64, field: &str) {
     if !value.is_finite() || !(bounds.0..=bounds.1).contains(value) {
-        eprintln!(
+        crate::diag!(
             "quickai: [config] {field}={value} out of bounds [{min}, {max}]; using default {default}",
             min = bounds.0,
             max = bounds.1,
@@ -234,7 +234,7 @@ fn clamp_f64(value: &mut f64, bounds: (f64, f64), default: f64, field: &str) {
 
 fn clamp_u32(value: &mut u32, bounds: (u32, u32), default: u32, field: &str) {
     if !(bounds.0..=bounds.1).contains(value) {
-        eprintln!(
+        crate::diag!(
             "quickai: [config] {field}={value} out of bounds [{min}, {max}]; using default {default}",
             min = bounds.0,
             max = bounds.1,

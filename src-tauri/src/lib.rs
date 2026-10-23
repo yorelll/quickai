@@ -12,6 +12,7 @@ pub mod commands;
 pub mod config;
 pub mod connection_test;
 pub mod database;
+pub mod diagnostics;
 pub mod history;
 pub mod images;
 pub mod onboarding;
@@ -31,6 +32,9 @@ mod windows_activator;
 
 #[cfg(target_os = "windows")]
 mod windows_focus;
+
+#[cfg(target_os = "windows")]
+mod single_instance;
 
 pub mod context;
 
@@ -324,6 +328,10 @@ fn to_logical(physical: f64, scale_factor: f64) -> f64 {
 #[cfg(target_os = "windows")]
 fn show_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::ActivationContext) {
     if OVERLAY_INTENDED_VISIBLE.swap(true, Ordering::SeqCst) {
+        // Diagnostic (batch 7): the summon chose `Show` but nothing below runs.
+        // `open_or_raise_overlay` clears the flag immediately before this call,
+        // so seeing this line means another thread set it in between.
+        crate::diag!("quickai: [summon] show swallowed: OVERLAY_INTENDED_VISIBLE was already set");
         return;
     }
     let epoch = bump_overlay_surface_epoch();
@@ -458,6 +466,16 @@ fn show_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::ActivationCo
         // and restores `WS_EX_APPWINDOW` — the reappearing-taskbar-button bug.
         // Re-asserting it here is what makes the fix durable (item 4).
         hide_from_taskbar(&window);
+
+        // Diagnostic (batch 7): the first evidence that a `Show` actually
+        // reached the native window, and at what size and position. A summon
+        // line with no matching `show applied` did not get here.
+        crate::diag!(
+            "quickai: [summon] show applied natively_visible={} pos={:?} size={:?} epoch={epoch}",
+            window.is_visible().unwrap_or(false),
+            window.outer_position().map(|p| (p.x, p.y)).ok(),
+            window.inner_size().map(|s| (s.width, s.height)).ok(),
+        );
 
         // Store the main window HWND for the focus listener and start listening.
         if let Ok(hwnd) = window.hwnd() {
@@ -653,7 +671,7 @@ fn expand_overlay(app_handle: &tauri::AppHandle, replay_show: bool) {
     let minibar_active = windows_focus::is_minibar_active();
     let ui_visible = OVERLAY_UI_VISIBLE.load(Ordering::SeqCst);
     let source = expand_source(minibar_active, ui_visible);
-    eprintln!(
+    crate::diag!(
         "quickai: [minibar] expand entry source={} minibar_active={minibar_active} ui_visible={ui_visible} intended_visible={} requested={}x{} replay={replay_show}",
         source.label(),
         OVERLAY_INTENDED_VISIBLE.load(Ordering::SeqCst),
@@ -680,10 +698,11 @@ fn expand_overlay(app_handle: &tauri::AppHandle, replay_show: bool) {
             // window that may have been hidden underneath the minibar flag.
             let _ = window.show();
             let _ = window.set_focus();
-            eprintln!(
-                "quickai: [minibar] expand applied source={} natively_visible={} epoch={epoch} replay={replay_show}",
+            crate::diag!(
+                "quickai: [minibar] expand applied source={} natively_visible={} size={:?} epoch={epoch} replay={replay_show}",
                 source.label(),
                 window.is_visible().unwrap_or(false),
+                window.inner_size().map(|s| (s.width, s.height)).ok(),
             );
             // The window is now open, so the intent flag must say so. Leaving
             // it false made the *next* summon take the `Show` path and reset a
@@ -735,6 +754,14 @@ fn bring_overlay_forward(app_handle: &tauri::AppHandle) {
         let _ = window.set_focus();
         // Last: tao's flag rewrites would otherwise drop the tool-window style.
         hide_from_taskbar(&window);
+        // Diagnostic (batch 7): `Raise` never resizes, so the size here is what
+        // the user would actually see. A raise at 48×48 is a clipped mini bar.
+        crate::diag!(
+            "quickai: [summon] raise applied natively_visible={} pos={:?} size={:?}",
+            window.is_visible().unwrap_or(false),
+            window.outer_position().map(|p| (p.x, p.y)).ok(),
+            window.inner_size().map(|s| (s.width, s.height)).ok(),
+        );
     }
 }
 
@@ -872,7 +899,7 @@ fn open_or_raise_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::Act
     // the expand path for a bar that is not there and the diagnostic never
     // reports a live minibar for a hidden window.
     if should_clear_stale_minibar(natively_visible, windows_focus::is_minibar_active()) {
-        eprintln!("quickai: [summon] clearing stale minibar flag (native window hidden)");
+        crate::diag!("quickai: [summon] clearing stale minibar flag (native window hidden)");
         windows_focus::exit_minibar();
     }
 
@@ -884,7 +911,7 @@ fn open_or_raise_overlay(app_handle: &tauri::AppHandle, ctx: crate::context::Act
         windows_focus::is_minibar_active(),
         ui_visible,
     );
-    eprintln!(
+    crate::diag!(
         "quickai: [summon] intended_visible={intended_visible} natively_visible={natively_visible} ui_visible={ui_visible} foreground={foreground} -> {plan:?}"
     );
 
@@ -954,7 +981,11 @@ fn apply_hide_commit(commit: Option<bool>) -> bool {
 /// they keep the "start of exit" behaviour.
 #[tauri::command]
 fn notify_overlay_hidden(app_handle: tauri::AppHandle, commit: Option<bool>) {
-    if !apply_hide_commit(commit) {
+    let committed = apply_hide_commit(commit);
+    // Diagnostic (batch 7): shows whether a hide the frontend requested was
+    // refused because a summon had already claimed the surface.
+    crate::diag!("quickai: [summon] hide commit={commit:?} applied={committed}");
+    if !committed {
         return;
     }
     if let Some(window) = app_handle.get_webview_window("main") {
@@ -1028,7 +1059,43 @@ fn open_in_browser(url: &str) -> Result<(), String> {
 /// the native flags cannot distinguish — see [`OVERLAY_UI_VISIBLE`].
 #[tauri::command]
 fn set_overlay_ui_visible(visible: bool) {
+    // Diagnostic (batch 7): the only mirror of what the frontend is actually
+    // rendering. Its position relative to the `[summon]` and `[minibar]` lines
+    // is what separates a stale mirror from a lost event.
+    crate::diag!("quickai: [ui] frontend overlay visible={visible}");
     OVERLAY_UI_VISIBLE.store(visible, Ordering::SeqCst);
+}
+
+/// Whether a reported physical inner size is the logical mini-bar size at
+/// `scale`.
+///
+/// Tauri converts a logical request to physical pixels with the monitor scale
+/// and Windows rounds, so one pixel of slack absorbs the rounding without
+/// accepting a window that never moved.
+#[cfg(target_os = "windows")]
+fn reached_minibar_size(actual: (u32, u32), scale: f64) -> bool {
+    let expected_width = (OVERLAY_LOGICAL_WIDTH_MINIBAR * scale).round() as u32;
+    let expected_height = (OVERLAY_LOGICAL_HEIGHT_MINIBAR * scale).round() as u32;
+    actual.0.abs_diff(expected_width) <= 1 && actual.1.abs_diff(expected_height) <= 1
+}
+
+/// Applies the mini-bar size and returns the inner size the window reports
+/// afterwards, or `None` when the size cannot be read.
+///
+/// `set_size` reports whether the request was *dispatched*, not whether the
+/// window reached it: a minimised or clamped window silently keeps its old
+/// size. Reading it back is the only evidence, and it is cheap here because
+/// this runs on the main thread, where Tauri applies the resize inline.
+#[cfg(target_os = "windows")]
+fn apply_minibar_size(window: &tauri::WebviewWindow) -> Option<(u32, u32)> {
+    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
+        OVERLAY_LOGICAL_WIDTH_MINIBAR,
+        OVERLAY_LOGICAL_HEIGHT_MINIBAR,
+    )));
+    window
+        .inner_size()
+        .ok()
+        .map(|size| (size.width, size.height))
 }
 
 /// Resizes the window to minibar dimensions and enters minibar mode.
@@ -1051,7 +1118,7 @@ fn set_overlay_ui_visible(visible: bool) {
 fn enter_minibar_size(app_handle: tauri::AppHandle, epoch: Option<u64>) -> bool {
     let current = OVERLAY_SURFACE_EPOCH.load(Ordering::SeqCst);
     if !shrink_is_current(epoch, current) {
-        eprintln!(
+        crate::diag!(
             "quickai: [minibar] ignoring stale shrink epoch={} current={current}",
             epoch.unwrap_or_default(),
         );
@@ -1061,10 +1128,37 @@ fn enter_minibar_size(app_handle: tauri::AppHandle, epoch: Option<u64>) -> bool 
     let handle = app_handle.clone();
     let _ = app_handle.run_on_main_thread(move || {
         if let Some(window) = handle.get_webview_window("main") {
-            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
-                OVERLAY_LOGICAL_WIDTH_MINIBAR,
-                OVERLAY_LOGICAL_HEIGHT_MINIBAR,
-            )));
+            let scale = window.scale_factor().unwrap_or(1.0);
+            let applied = apply_minibar_size(&window);
+            let reached = applied.map(|size| reached_minibar_size(size, scale));
+            // Diagnostic (batch 7): a shrink that lands *after* an expand is
+            // the one way a completed summon can be undone on screen. Its
+            // position in the log relative to `[minibar] expand applied` is
+            // the evidence; `epoch` is the token it carried. `expected` says
+            // whether the window reached the size, not merely accepted it.
+            crate::diag!(
+                "quickai: [minibar] shrink applied epoch={epoch:?} size={applied:?} expected={reached:?} scale={scale}",
+            );
+            if matches!(reached, Some(true)) {
+                return;
+            }
+            // `set_size` only reports that the request was dispatched; one
+            // retry covers a resize dropped while the window was transitioning
+            // (minimised, a pending show). Deliberately the only retry: a
+            // window that cannot resize logs a failure instead of looping and
+            // claiming a size it never reached.
+            let retried = apply_minibar_size(&window);
+            let retried_reached = retried.map(|size| reached_minibar_size(size, scale));
+            crate::diag!(
+                "quickai: [minibar] shrink retry epoch={epoch:?} size={retried:?} expected={retried_reached:?} scale={scale}",
+            );
+            if !matches!(retried_reached, Some(true)) {
+                crate::diag!(
+                    "quickai: [minibar] shrink failed epoch={epoch:?}: window cannot reach {}x{} logical (last size {retried:?}, scale {scale})",
+                    OVERLAY_LOGICAL_WIDTH_MINIBAR as i64,
+                    OVERLAY_LOGICAL_HEIGHT_MINIBAR as i64,
+                );
+            }
         }
     });
     true
@@ -1313,12 +1407,60 @@ struct TrayMenuLabels {
 /// Panics if the Tauri runtime fails to initialise.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // ── Diagnostics ───────────────────────────────────────────────────
+    // The file log starts before anything else so the very first lines prove
+    // which build and which instance decision produced the trace. See
+    // `diagnostics` for the path, the rotation policy and the drop-on-failure
+    // contract. It also works from the keyboard-hook thread.
+    diagnostics::init();
+    crate::diag!(
+        "quickai: [startup] version={} pid={}",
+        env!("CARGO_PKG_VERSION"),
+        std::process::id()
+    );
+
+    // ── Single instance ───────────────────────────────────────────────
+    // This must happen before the builder: `build()` creates the windows
+    // declared in `tauri.conf.json`, and `setup` registers the tray icon and
+    // the global keyboard hook. A second copy must do none of those, so a
+    // dual-instance environment cannot silently double every gesture.
+    #[cfg(target_os = "windows")]
+    let instance = single_instance::acquire();
+    #[cfg(target_os = "windows")]
+    let Some(instance) = instance
+    else {
+        // `acquire` already signalled the running instance to open or raise
+        // its overlay. This process has nothing left to do — but the log
+        // writer is a detached thread, and returning ends the process, so the
+        // decision line must be flushed first.
+        diagnostics::flush();
+        return;
+    };
+
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init());
 
     builder
-        .setup(|app| {
+        .setup(move |app| {
+            // ── Forwarded launches ────────────────────────────────────
+            // A second process launch signals the named activation event and
+            // exits. Serve it through the very same `open_or_raise_overlay`
+            // path as the summon hotkey and the tray left click, so all three
+            // entry points cannot drift apart. There is no activation context
+            // to capture — a process launch is not a text selection — so this
+            // matches the tray click's empty context.
+            #[cfg(target_os = "windows")]
+            {
+                let handle = app.handle().clone();
+                instance.listen(move || {
+                    let target = handle.clone();
+                    let _ = handle.run_on_main_thread(move || {
+                        open_or_raise_overlay(&target, crate::context::ActivationContext::empty());
+                    });
+                });
+            }
+
             // ── System tray icon + menu ───────────────────────────────────
             // Left-click opens or raises the overlay directly (it never hides);
             // the menu is shown on right-click only (`show_menu_on_left_click(false)`).
@@ -1365,6 +1507,9 @@ pub fn run() {
                     }
                     "quit" => {
                         app.state::<crate::commands::GenerationState>().cancel();
+                        // `exit` terminates the process without running
+                        // destructors; flush the queued diagnostics first.
+                        diagnostics::flush();
                         app.exit(0);
                     }
                     _ => {}
@@ -1392,6 +1537,14 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // The authoritative config-directory path, as Tauri resolves it.
+            // The file log derives the same place from `%APPDATA%`; recording
+            // both makes a mismatch visible instead of silently splitting the
+            // log from `skills.toml`.
+            if let Ok(dir) = app.path().app_config_dir() {
+                crate::diag!("quickai: [startup] app_config_dir={}", dir.display());
+            }
+
             // ── Durable taskbar hiding for the overlay ────────────────
             // The main window is created from `tauri.conf.json` before this
             // runs. Apply the tool-window style here, once, so no show path —
@@ -1412,6 +1565,14 @@ pub fn run() {
                     let _ = window.set_icon(icon);
                 }
                 hide_from_taskbar(&window);
+                // Startup banner: the native state of the overlay before any
+                // summon, so a trace proves the build and the initial window.
+                crate::diag!(
+                    "quickai: [startup] window=main natively_visible={} pos={:?} size={:?}",
+                    window.is_visible().unwrap_or(false),
+                    window.outer_position().map(|p| (p.x, p.y)).ok(),
+                    window.inner_size().map(|s| (s.width, s.height)).ok(),
+                );
             }
 
             // ── Activation listener (Windows) ─────────────────────────
@@ -1445,7 +1606,18 @@ pub fn run() {
             // configured key here — after the hook thread was started above —
             // takes effect immediately.
             #[cfg(target_os = "windows")]
-            windows_activator::apply_hotkey(app_config.general.hotkey);
+            {
+                windows_activator::apply_hotkey(app_config.general.hotkey);
+                // Log both the configured name and the virtual-key pair the
+                // hook is actually matching, so they can be compared with the
+                // `vk=` values in `[activator]` lines. A config reset that
+                // changed the hotkey is visible here rather than inferred.
+                let (vk_left, vk_right) = windows_activator::active_hotkey_vk_codes();
+                crate::diag!(
+                    "quickai: [startup] hotkey={:?} vk_left=0x{vk_left:02X} vk_right=0x{vk_right:02X}",
+                    app_config.general.hotkey
+                );
+            }
             // The data directory is resolved once, at startup; a change to
             // `[general].data_dir` requires a relaunch (the Settings UI says
             // so).
@@ -1461,7 +1633,7 @@ pub fn run() {
                 .asset_protocol_scope()
                 .allow_directory(&images_root, true)
             {
-                eprintln!(
+                crate::diag!(
                     "quickai: [config] could not extend the asset scope to {}: {e}",
                     images_root.display()
                 );
@@ -1526,6 +1698,7 @@ pub fn run() {
             screenshot::capture_full_screen_command,
             notify_overlay_hidden,
             set_overlay_ui_visible,
+            diagnostics::log_frontend_diagnostic,
             notify_frontend_ready,
             set_window_frame,
             finish_onboarding,
@@ -1826,5 +1999,22 @@ mod tests {
         assert_eq!(ExpandSource::MinibarWithUi.label(), "minibar-with-ui");
         assert_eq!(ExpandSource::MinibarWithoutUi.label(), "minibar-without-ui");
         assert_eq!(ExpandSource::UiHidden.label(), "ui-hidden");
+    }
+
+    /// The shrink verification is the only check that the window actually
+    /// reached 48×48; it must accept DPI rounding but not a window that never
+    /// moved.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn reached_minibar_size_accepts_rounding_only() {
+        assert!(reached_minibar_size((48, 48), 1.0));
+        assert!(reached_minibar_size((60, 60), 1.25));
+        assert!(reached_minibar_size((72, 72), 1.5));
+        // One pixel of physical rounding is still the same logical size.
+        assert!(reached_minibar_size((47, 49), 1.0));
+        // A window that kept a content size did not reach it.
+        assert!(!reached_minibar_size((650, 113), 1.0));
+        assert!(!reached_minibar_size((48, 113), 1.0));
+        assert!(!reached_minibar_size((50, 50), 1.0));
     }
 }

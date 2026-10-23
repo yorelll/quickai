@@ -12,5 +12,13 @@ pub fn quit_and_relaunch(app_handle: tauri::AppHandle, db: tauri::State<crate::h
     if let Ok(conn) = db.0.lock() {
         let _ = crate::onboarding::set_stage(&conn, &crate::onboarding::OnboardingStage::Intro);
     }
+    // The replacement process starts while this one still holds the
+    // single-instance mutex and is about to exit. Mark the hand-over so the
+    // child takes the kernel objects over instead of forwarding to — and
+    // exiting behind — the dying parent.
+    crate::single_instance::mark_relaunch();
+    // `restart` exits without running destructors; flush first so the trace
+    // ends with the relaunch instead of losing the tail.
+    crate::diagnostics::flush();
     app_handle.restart();
 }

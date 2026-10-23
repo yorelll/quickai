@@ -1287,6 +1287,407 @@ describe('App', () => {
         expect.objectContaining({ height: 713 }),
       );
     });
+
+    /**
+     * Fires the morphing container's observer — the trigger `syncWindowSize`
+     * runs from. Used to model the observation a native resize produces while
+     * a mini-bar shrink is still in flight.
+     */
+    function fireContainerResize(
+      callbacks: Map<Element, ResizeObserverCallback>,
+      container: Element,
+    ) {
+      const callback = callbacks.get(container);
+      expect(callback).toBeDefined();
+      callback!(
+        [{ target: container } as unknown as ResizeObserverEntry],
+        {} as ResizeObserver,
+      );
+    }
+
+    /**
+     * Renders the overlay in chat mode with a 713 px content requirement
+     * (600 container, 1200 transcript content) and returns the observer map
+     * plus the morphing container. The requirement is far from any collapsed
+     * window, so a re-applied content size is unmistakable.
+     */
+    async function setupChatSizing() {
+      const callbacks = captureResizeObservers();
+      render(<App />);
+      await act(async () => {});
+      await showDownward();
+      await enterChatMode();
+
+      const container = document.querySelector('.morphing-container')!;
+      const chat = document.querySelector('[data-chat-area]')!;
+      const content = document.querySelector('[data-chat-content]')!;
+      const scroller = content.parentElement as HTMLElement;
+      scroller.style.paddingTop = '16px';
+      scroller.style.paddingBottom = '16px';
+      defineBox(container, 600);
+      defineBox(chat, 535);
+      defineBox(scroller, 501);
+      defineBox(content, 1200);
+      defineBox(container.lastElementChild, 65);
+      return { callbacks, container };
+    }
+
+    /**
+     * Makes `enter_minibar_size` hang, modelling a native resize that lands or
+     * a reply that arrives later than the observation that follows it.
+     * Returns the resolver for the command's answer.
+     */
+    function pendingShrink() {
+      const base = invoke.getMockImplementation();
+      let resolveShrink!: (applied: boolean) => void;
+      invoke.mockImplementation(
+        async (cmd: string, args?: Record<string, unknown>) => {
+          if (cmd === 'enter_minibar_size') {
+            return new Promise<boolean>((resolve) => {
+              resolveShrink = resolve;
+            });
+          }
+          return base?.(cmd, args);
+        },
+      );
+      return (applied: boolean) => resolveShrink(applied);
+    }
+
+    it('does not re-apply the content size while a mini-bar shrink is pending', async () => {
+      // The backend resizes the window to 48×48 on its main thread, which can
+      // finish before the IPC reply reaches React. Both observers see the
+      // shrunken viewport while `overlayStateRef` still reads `visible`; if
+      // either re-applied the content size the logo would render inside a
+      // full-size window (the user's "the frame did not shrink" report).
+      const { callbacks, container } = await setupChatSizing();
+
+      // A content request is outstanding, so `verifyNativeSize` has a height
+      // it could wrongly re-apply.
+      act(() => {
+        fireContainerResize(callbacks, container);
+      });
+
+      const resolveShrink = pendingShrink();
+      await act(async () => {
+        emitTauriEvent('quickai://minibar', null);
+      });
+
+      // The native shrink lands before the reply resolves.
+      Object.defineProperty(window, 'innerHeight', {
+        value: 48,
+        configurable: true,
+      });
+      __mockWindow.setSize.mockClear();
+      act(() => {
+        fireViewportResize(callbacks);
+      });
+      act(() => {
+        fireContainerResize(callbacks, container);
+      });
+      expect(__mockWindow.setSize).not.toHaveBeenCalled();
+
+      // The reply resolves and the UI enters the mini bar; the suppressed
+      // observations left the window alone.
+      await act(async () => {
+        resolveShrink(true);
+      });
+      expect(screen.getByTitle(/click to restore/i)).toBeInTheDocument();
+      expect(__mockWindow.setSize).not.toHaveBeenCalled();
+    });
+
+    // ── Each pending-shrink guard is pinned by its own test, so dropping one
+    //    guard fails exactly one test rather than being masked by another.
+
+    it('pins the syncWindowSize guard: the container observer is ignored while pending', async () => {
+      const { callbacks, container } = await setupChatSizing();
+      act(() => {
+        fireContainerResize(callbacks, container);
+      });
+
+      const resolveShrink = pendingShrink();
+      await act(async () => {
+        emitTauriEvent('quickai://minibar', null);
+      });
+      Object.defineProperty(window, 'innerHeight', {
+        value: 48,
+        configurable: true,
+      });
+      __mockWindow.setSize.mockClear();
+
+      // Only the container observer (the `syncWindowSize` site) fires.
+      act(() => {
+        fireContainerResize(callbacks, container);
+      });
+      expect(__mockWindow.setSize).not.toHaveBeenCalled();
+
+      await act(async () => {
+        resolveShrink(true);
+      });
+    });
+
+    it('pins the verifyNativeSize entry guard: the viewport observer is ignored while pending', async () => {
+      const { callbacks, container } = await setupChatSizing();
+      act(() => {
+        fireContainerResize(callbacks, container);
+      });
+
+      const resolveShrink = pendingShrink();
+      await act(async () => {
+        emitTauriEvent('quickai://minibar', null);
+      });
+      Object.defineProperty(window, 'innerHeight', {
+        value: 48,
+        configurable: true,
+      });
+      __mockWindow.setSize.mockClear();
+
+      // Only the document observer (the `verifyNativeSize` entry site) fires.
+      // Without that guard its collapsed-window recovery re-applies 713.
+      act(() => {
+        fireViewportResize(callbacks);
+      });
+      expect(__mockWindow.setSize).not.toHaveBeenCalled();
+
+      await act(async () => {
+        resolveShrink(true);
+      });
+    });
+
+    it('pins the verifyNativeSize async re-check: a shrink starting mid-probe is respected', async () => {
+      const { callbacks, container } = await setupChatSizing();
+      Object.defineProperty(window, 'innerHeight', {
+        value: 400,
+        configurable: true,
+      });
+      act(() => {
+        fireContainerResize(callbacks, container);
+      });
+      // The settled viewport has moved away from the request's starting
+      // height, which is what arms the multiplicative correction.
+      Object.defineProperty(window, 'innerHeight', {
+        value: 500,
+        configurable: true,
+      });
+
+      let resolveProbe!: () => void;
+      const innerSize = vi.fn(
+        () =>
+          new Promise<{ width: number; height: number }>((resolve) => {
+            resolveProbe = () => resolve({ width: 650, height: 713 });
+          }),
+      );
+      const scaleFactor = vi.fn(async () => 1);
+      Object.assign(__mockWindow, { innerSize, scaleFactor });
+      try {
+        // The observation starts, and the probe is held open.
+        act(() => {
+          fireViewportResize(callbacks);
+        });
+        // The shrink is requested while the probe is in flight.
+        const resolveShrink = pendingShrink();
+        await act(async () => {
+          emitTauriEvent('quickai://minibar', null);
+        });
+
+        __mockWindow.setSize.mockClear();
+        await act(async () => {
+          resolveProbe();
+        });
+        expect(__mockWindow.setSize).not.toHaveBeenCalled();
+
+        await act(async () => {
+          resolveShrink(true);
+        });
+      } finally {
+        delete (__mockWindow as Record<string, unknown>).innerSize;
+        delete (__mockWindow as Record<string, unknown>).scaleFactor;
+      }
+    });
+
+    it('releases sizing when a shrink reply never arrives', async () => {
+      // A lost IPC (or a wedged main thread) must not leave the overlay
+      // visible with fit-to-content disabled: typing would clip the input.
+      const { callbacks, container } = await setupChatSizing();
+      const resolveShrink = pendingShrink();
+      await act(async () => {
+        emitTauriEvent('quickai://minibar', null);
+      });
+      Object.defineProperty(window, 'innerHeight', {
+        value: 48,
+        configurable: true,
+      });
+      __mockWindow.setSize.mockClear();
+      act(() => {
+        fireContainerResize(callbacks, container);
+      });
+      expect(__mockWindow.setSize).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 1100));
+      });
+
+      // The pending state expired and re-applied the content size by itself.
+      expect(__mockWindow.setSize).toHaveBeenCalledWith(
+        expect.objectContaining({ height: 713 }),
+      );
+      // A reply that arrives after the timeout still enters the mini bar —
+      // over the window the timeout just re-grew to the content size. Sizing
+      // is then suppressed by the state (not the pending flag), so that frame
+      // stays wrong until a summon. Recorded residual, not a regression.
+      await act(async () => {
+        resolveShrink(true);
+      });
+      expect(screen.getByTitle(/click to restore/i)).toBeInTheDocument();
+    });
+
+    it('restores sizing when the backend refuses a pending shrink', async () => {
+      const callbacks = captureResizeObservers();
+      render(<App />);
+      await act(async () => {});
+      await showDownward();
+      await enterChatMode();
+
+      const container = document.querySelector('.morphing-container')!;
+      const chat = document.querySelector('[data-chat-area]')!;
+      const content = document.querySelector('[data-chat-content]')!;
+      const scroller = content.parentElement as HTMLElement;
+      scroller.style.paddingTop = '16px';
+      scroller.style.paddingBottom = '16px';
+      defineBox(container, 600);
+      defineBox(chat, 535);
+      defineBox(scroller, 501);
+      defineBox(content, 1200);
+      defineBox(container.lastElementChild, 65);
+
+      const base = invoke.getMockImplementation();
+      invoke.mockImplementation(
+        async (cmd: string, args?: Record<string, unknown>) => {
+          if (cmd === 'enter_minibar_size') return false;
+          return base?.(cmd, args);
+        },
+      );
+      Object.defineProperty(window, 'innerHeight', {
+        value: 300,
+        configurable: true,
+      });
+      __mockWindow.setSize.mockClear();
+
+      await act(async () => {
+        emitTauriEvent('quickai://minibar', null);
+      });
+
+      // The refusal cleared the pending flag and re-applied the content size,
+      // so the overlay cannot be left visible with sizing suppressed.
+      expect(screen.queryByTitle(/click to restore/i)).not.toBeInTheDocument();
+      expect(__mockWindow.setSize).toHaveBeenCalledWith(
+        expect.objectContaining({ height: 713 }),
+      );
+      // A later observation still sizes normally.
+      __mockWindow.setSize.mockClear();
+      act(() => {
+        fireContainerResize(callbacks, container);
+      });
+      expect(__mockWindow.setSize).toHaveBeenCalled();
+    });
+
+    it('clears the pending shrink when a show supersedes it', async () => {
+      const callbacks = captureResizeObservers();
+      render(<App />);
+      await act(async () => {});
+      await showDownward();
+      await enterChatMode();
+
+      const container = document.querySelector('.morphing-container')!;
+      defineBox(container, 65);
+
+      const base = invoke.getMockImplementation();
+      invoke.mockImplementation(
+        async (cmd: string, args?: Record<string, unknown>) => {
+          if (cmd === 'enter_minibar_size') {
+            // The summon's show reaches the webview before the reply does.
+            emitTauriEvent('quickai://visibility', {
+              state: 'show',
+              selected_text: null,
+              window_x: null,
+              window_y: null,
+              screen_bottom_y: null,
+            });
+            return true;
+          }
+          return base?.(cmd, args);
+        },
+      );
+
+      await act(async () => {
+        emitTauriEvent('quickai://minibar', null);
+      });
+      expect(screen.queryByTitle(/click to restore/i)).not.toBeInTheDocument();
+
+      // The show cleared the flag: a fresh observation must size the window
+      // again rather than remaining suppressed forever. A show remounts the
+      // overlay (new session key), so the box is defined on the new node.
+      const shownContainer = document.querySelector('.morphing-container')!;
+      defineBox(shownContainer, 65);
+      Object.defineProperty(window, 'innerHeight', {
+        value: 300,
+        configurable: true,
+      });
+      __mockWindow.setSize.mockClear();
+      act(() => {
+        fireContainerResize(callbacks, shownContainer);
+      });
+      expect(__mockWindow.setSize).toHaveBeenCalledWith(
+        expect.objectContaining({ height: 113 }),
+      );
+    });
+
+    it('re-measures the content when the chat history dropdown closes', async () => {
+      // In chat mode the container is `h-full`, so releasing the dropdown's
+      // inline min-height changes no box: the container observer never fires
+      // and the window keeps the dropdown's reserved height. Measured before
+      // the fix: 423 px retained where the content needs 313.
+      const callbacks = captureResizeObservers();
+      render(<App />);
+      await act(async () => {});
+      await showDownward();
+      await enterChatMode();
+
+      const container = document.querySelector(
+        '.morphing-container',
+      ) as HTMLElement;
+      const chat = document.querySelector('[data-chat-area]')!;
+      const content = document.querySelector('[data-chat-content]')!;
+      const scroller = content.parentElement as HTMLElement;
+      defineBox(container, 265);
+      defineBox(chat, 200);
+      defineBox(scroller, 166);
+      defineBox(content, 166);
+      defineBox(container.lastElementChild, 65);
+      Object.defineProperty(window, 'innerHeight', {
+        value: 423,
+        configurable: true,
+      });
+
+      // Open: the effect reserves room for the dropdown.
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Open history' }));
+      });
+      expect(container.style.minHeight).not.toBe('');
+
+      __mockWindow.setSize.mockClear();
+      // Close: the reservation is released and the window must return to the
+      // content requirement (265 + 48), not keep 423.
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Open history' }));
+      });
+
+      expect(container.style.minHeight).toBe('');
+      expect(__mockWindow.setSize).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 650, height: 313 }),
+      );
+      // The container observer was not needed for this: the effect measured.
+      expect(callbacks.get(container)).toBeDefined();
+    });
   });
 
   it('requestHideOverlay is a no-op when already hidden', async () => {

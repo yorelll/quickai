@@ -52,6 +52,17 @@ const ONBOARDING_EVENT = 'quickai://onboarding';
  */
 const HIDE_COMMIT_DELAY_MS = 350;
 
+/**
+ * Upper bound on how long a requested mini-bar shrink may suppress sizing.
+ *
+ * The command answers in milliseconds; a reply that never arrives (a lost
+ * IPC, a wedged main thread) would otherwise leave the overlay *visible*
+ * with fit-to-content disabled until the next summon, so typing would clip
+ * the input — the symptom class this guard exists to prevent. On expiry the
+ * pending state ends and the content size is re-applied.
+ */
+const MINIBAR_PENDING_TIMEOUT_MS = 1000;
+
 /** Must match `OVERLAY_LOGICAL_WIDTH` in `src-tauri/src/lib.rs`. */
 const OVERLAY_WIDTH = 650;
 /** Total transparent padding around the morphing container: pt-2(8) + pb-6(24) + motion py-2(16). */
@@ -178,16 +189,28 @@ function logSizing(
     innerSize?: () => Promise<{ width: number; height: number }>;
     scaleFactor?: () => Promise<number>;
   };
+  // The webview cannot write the diagnostic file itself, so it hands the
+  // finished line to Rust, which appends it under the same `[quickai:size]`
+  // prefix. A failed send is ignored: diagnostics must never affect the UI.
+  const report = (innerSize: string, scale: number | null): void => {
+    const line =
+      `${sync} innerSize=${innerSize} scale=${scale ?? 'n/a'} ` +
+      `innerHeight=${window.innerHeight} ` +
+      `devicePixelRatio=${window.devicePixelRatio} ` +
+      `scaleFactor=${scale ?? 'n/a'} ` +
+      `document.body.scrollTop=${document.body.scrollTop}`;
+    console.debug(line);
+    void invoke('log_frontend_diagnostic', { line }).catch(() => {});
+  };
   void Promise.all([
     typeof win.innerSize === 'function' ? win.innerSize() : null,
     typeof win.scaleFactor === 'function' ? win.scaleFactor() : null,
   ])
     .then(([size, scale]) => {
-      const inner = size ? `${size.width}x${size.height}` : 'n/a';
-      console.debug(`${sync} innerSize=${inner} scale=${scale ?? 'n/a'}`);
+      report(size ? `${size.width}x${size.height}` : 'n/a', scale ?? null);
     })
     .catch(() => {
-      console.debug(`${sync} innerSize=n/a scale=n/a`);
+      report('n/a', null);
     });
 }
 /* v8 ignore stop */
@@ -345,6 +368,34 @@ function App() {
    * lags behind a throttled render, so it alone cannot close that race).
    */
   const showEpochRef = useRef(0);
+  /**
+   * True from the moment the frontend asks the backend to shrink to the mini
+   * bar until that request is refused, superseded, or the overlay is brought
+   * back.
+   *
+   * The native resize runs on the backend's main thread and can complete
+   * *before* `setOverlayState('minibar')` commits. Two observers run inside
+   * that gap and both read the still-`visible` mirror above:
+   * `verifyNativeSize` (its collapsed-window recovery re-applies the last
+   * content height) and `syncWindowSize` (the container observer fires on the
+   * width change alone). Either would undo the shrink and leave the 48 px logo
+   * inside a full-size window. Suppressing sizing from the request itself
+   * closes the gap in both orderings, because the flag is set synchronously
+   * and is not cleared when the promise resolves — only by the state commit's
+   * consumers (see `beginOverlayEntrance` and the visible-state effect).
+   *
+   * Residual: the pending state is **bounded** at
+   * `MINIBAR_PENDING_TIMEOUT_MS`. A command that never resolves would
+   * otherwise leave the overlay visible with fit-to-content disabled until the
+   * next summon — typing in that window would clip the input. On expiry the
+   * flag clears and the content size is re-applied, so a lost reply costs at
+   * most one second of stale sizing.
+   */
+  const minibarPendingRef = useRef(false);
+  /** The pending state's expiry timer; cleared by every terminal path. */
+  const minibarPendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   /**
    * The backend's surface epoch of the most recent show/expand.
    *
@@ -642,8 +693,15 @@ function App() {
     // Only size while the overlay is actually on screen: the ResizeObserver, the
     // focus resync and `onAnimationComplete` can all fire during the exit
     // transition, when the container is detached (offsetHeight 0) — sizing then
-    // would shrink the window mid-exit.
-    if (!node || overlayStateRef.current !== 'visible') return;
+    // would shrink the window mid-exit. A requested mini-bar shrink suppresses
+    // sizing too: the native window can be 48 px wide before React commits the
+    // mini-bar state, and this observer fires on that width change.
+    if (
+      !node ||
+      overlayStateRef.current !== 'visible' ||
+      minibarPendingRef.current
+    )
+      return;
 
     // Chat mode: content requirement (window-independent). Ask-bar mode: the
     // container is content-sized, so its own layout box is the requirement.
@@ -697,6 +755,27 @@ function App() {
   }, []);
 
   /**
+   * Ends a requested mini-bar shrink, optionally re-applying the content size.
+   *
+   * Every terminal path funnels through here — refusal, IPC failure, a show
+   * that supersedes the shrink, a return to the visible state, and the
+   * pending-state timeout — so the flag, its expiry timer and the resize they
+   * suppress can never drift apart. Clearing a timer that already fired (or
+   * was never armed) is harmless; the timeout itself nulls the handle first.
+   */
+  const endMinibarPending = useCallback(
+    (resync: boolean) => {
+      minibarPendingRef.current = false;
+      if (minibarPendingTimerRef.current !== null) {
+        clearTimeout(minibarPendingTimerRef.current);
+        minibarPendingTimerRef.current = null;
+      }
+      if (resync) syncWindowSize();
+    },
+    [syncWindowSize],
+  );
+
+  /**
    * Compares the CSS height the window was asked for with the CSS height it
    * actually got, and applies **one** bounded correction.
    *
@@ -740,7 +819,8 @@ function App() {
     /* v8 ignore start -- needs a native window resize */
     const request = lastRequestRef.current;
     if (!request.height || request.corrected) return;
-    if (overlayStateRef.current !== 'visible') return;
+    if (overlayStateRef.current !== 'visible' || minibarPendingRef.current)
+      return;
 
     const actual = window.innerHeight;
     if (actual <= 0 || Math.abs(actual - request.height) <= 1) return;
@@ -790,7 +870,8 @@ function App() {
         // async, so a hide, a newer request, or a second observation that
         // already spent the correction can all have happened meanwhile.
         if (request.corrected) return;
-        if (overlayStateRef.current !== 'visible') return;
+        if (overlayStateRef.current !== 'visible' || minibarPendingRef.current)
+          return;
         if (lastRequestRef.current !== request) return;
         // `actual` is read by the viewport observer *after* layout, so it is
         // the settled CSS height. If it has moved while the probe was in
@@ -987,6 +1068,11 @@ function App() {
       // show must be able to observe that a show has already been delivered,
       // even if the webview is throttled and React has not re-rendered yet.
       showEpochRef.current += 1;
+      // A show or expand supersedes any click-away shrink, so sizing is
+      // allowed again. This is one of the terminal paths for a pending
+      // mini-bar request; the visible-state effect covers restores that do not
+      // come through a show event, and the timeout bounds a lost reply.
+      endMinibarPending(false);
       const shouldGrowUp =
         windowY !== null &&
         screenBottomY !== null &&
@@ -1001,7 +1087,7 @@ function App() {
         };
       }
     },
-    [],
+    [endMinibarPending],
   );
 
   /**
@@ -1110,36 +1196,70 @@ function App() {
    * logo inside a window a summon has just expanded — the queued event is
    * refused here and the bar stays on screen. `token` is the event's surface
    * epoch, `undefined` for the in-app minimise button (which has no event).
+   *
+   * Known narrow residual: two overlapping requests (a click-away and the
+   * in-app minimise inside one round trip) share one pending flag, so the
+   * earlier reply can end the later request's suppression a little early. Only
+   * a generation token could attribute a late answer to its own request; the
+   * window that reaches this is a single IPC round trip on a human gesture, so
+   * the token is not worth the extra state. Both requests still shrink or both
+   * restore — the error is at most one early re-measure.
    */
-  const enterMinibar = useCallback(async (token: number | undefined) => {
-    const current = overlayStateRef.current;
-    if (current !== 'visible' && current !== 'hiding') return;
-    // A show delivered while the request is in flight owns the surface, even
-    // if the backend accepted the shrink before that show reached us.
-    const showEpochAtRequest = showEpochRef.current;
-    let applied: boolean | undefined;
-    try {
-      applied =
-        token === undefined
-          ? await invoke<boolean>('enter_minibar_size')
-          : await invoke<boolean>('enter_minibar_size', { epoch: token });
-    } catch {
-      // The IPC failed, so the native shrink did not happen: rendering the
-      // mini bar would leave it inside a full-size window. The overlay stays
-      // visible at the correct size. There is no automatic second attempt: the
-      // focus listener already set `MINIBAR_ACTIVE` before it emitted, and
-      // `should_enter_minibar` is false while that flag is set, so no further
-      // click-away fires. The next summon clears the stale flag (see scenario
-      // 4 in `open_or_raise_overlay`), which re-enables the transition.
-      return;
-    }
-    // `false` is the backend refusing a superseded click-away. `undefined`
-    // (a mock or an older backend) is treated as accepted.
-    if (applied === false || showEpochRef.current !== showEpochAtRequest) {
-      return;
-    }
-    setOverlayState(minibarStateFrom);
-  }, []);
+  const enterMinibar = useCallback(
+    async (token: number | undefined) => {
+      const current = overlayStateRef.current;
+      if (current !== 'visible' && current !== 'hiding') return;
+      // A show delivered while the request is in flight owns the surface, even
+      // if the backend accepted the shrink before that show reached us.
+      const showEpochAtRequest = showEpochRef.current;
+      // Synchronous, before the await: the native resize can land before the
+      // IPC reply resolves, and any size observation taken in that gap must
+      // not re-apply the content height over it. Deliberately *not* cleared
+      // when the promise resolves — the shrink is still in effect until the
+      // mini-bar state commits, so the flag outlives the reply.
+      endMinibarPending(false);
+      minibarPendingRef.current = true;
+      // Bound the suppression: a reply that never arrives must not leave the
+      // overlay visible with fit-to-content disabled (typing would clip the
+      // input). The callback only acts while this request is still the
+      // pending one; every other exit clears the timer first.
+      minibarPendingTimerRef.current = setTimeout(() => {
+        minibarPendingTimerRef.current = null;
+        /* v8 ignore next -- defensive: every clear path cancels this timer,
+           so a firing callback is always the current request's. */
+        if (!minibarPendingRef.current) return;
+        endMinibarPending(true);
+      }, MINIBAR_PENDING_TIMEOUT_MS);
+      let applied: boolean | undefined;
+      try {
+        applied =
+          token === undefined
+            ? await invoke<boolean>('enter_minibar_size')
+            : await invoke<boolean>('enter_minibar_size', { epoch: token });
+      } catch {
+        // The IPC failed, so the native shrink did not happen: rendering the
+        // mini bar would leave it inside a full-size window. The overlay stays
+        // visible at the correct size. There is no automatic second attempt: the
+        // focus listener already set `MINIBAR_ACTIVE` before it emitted, and
+        // `should_enter_minibar` is false while that flag is set, so no further
+        // click-away fires. The next summon clears the stale flag (see scenario
+        // 4 in `open_or_raise_overlay`), which re-enables the transition.
+        endMinibarPending(true);
+        return;
+      }
+      // `false` is the backend refusing a superseded click-away. `undefined`
+      // (a mock or an older backend) is treated as accepted.
+      if (applied === false || showEpochRef.current !== showEpochAtRequest) {
+        // Either refused or a show has taken the surface. Sizing was suppressed
+        // for the whole round trip; re-apply it so a visible overlay cannot be
+        // left at whatever size the window happened to have.
+        endMinibarPending(true);
+        return;
+      }
+      setOverlayState(minibarStateFrom);
+    },
+    [endMinibarPending],
+  );
 
   /** Ref attached to the chat-mode history dropdown for click-outside detection. */
   const historyDropdownRef = useRef<HTMLDivElement>(null);
@@ -1276,6 +1396,9 @@ function App() {
         'min-height 0.25s cubic-bezier(0.16, 1, 0.3, 1)';
       container.style.height = '';
       container.style.minHeight = '';
+      // Releasing a reservation is a style change, not always a box change, so
+      // it cannot be relied on to wake the container observer.
+      syncWindowSize();
       return;
     }
 
@@ -1283,6 +1406,12 @@ function App() {
       container.style.transition =
         'min-height 0.25s cubic-bezier(0.16, 1, 0.3, 1)';
       container.style.minHeight = '';
+      // The container fills the viewport in chat mode (`h-full`), so clearing a
+      // min-height that merely equalled its filled height changes no box: the
+      // container observer never fires and the window keeps the dropdown's
+      // reserved height. Measured: 423 px retained where the content needs
+      // 313. Re-measure explicitly after the clear.
+      syncWindowSize();
       return;
     }
 
@@ -1302,7 +1431,7 @@ function App() {
     ro.observe(dropdown);
     return () => ro.disconnect();
     /* v8 ignore stop */
-  }, [isChatMode, isHistoryOpen]);
+  }, [isChatMode, isHistoryOpen, syncWindowSize]);
 
   /**
    * Toggles the save state of the current conversation.
@@ -2373,6 +2502,12 @@ function App() {
    */
   useEffect(() => {
     if (overlayState === 'visible') {
+      // Every path back to a usable overlay ends a pending mini-bar request:
+      // a show or expand already cleared it in `beginOverlayEntrance`, but the
+      // mini-bar icon and a notification click restore by setting the state
+      // directly. Clearing here (not in the rAF below) is what lets that rAF
+      // re-apply the content size instead of being suppressed.
+      endMinibarPending(false);
       void refreshSkills();
       const raf = requestAnimationFrame(() => {
         // Re-assert the size on the first frame after the overlay becomes
@@ -2385,7 +2520,13 @@ function App() {
       });
       return () => cancelAnimationFrame(raf);
     }
-  }, [overlayState, sessionId, refreshSkills, syncWindowSize]);
+  }, [
+    overlayState,
+    sessionId,
+    refreshSkills,
+    syncWindowSize,
+    endMinibarPending,
+  ]);
 
   /**
    * Commits the native window hide after a fixed deadline from the start of

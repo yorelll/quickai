@@ -73,6 +73,16 @@ pub fn apply_hotkey(hotkey: Hotkey) {
     *GLOBAL_HOTKEY_VKS.lock().unwrap() = hotkey_vk_codes(hotkey);
 }
 
+/// The virtual-key pair the hook is currently matching.
+///
+/// Diagnostics only: the startup banner logs this so it can be compared with
+/// the `vk=` values in the `[activator]` lines. A mismatch (e.g. after a
+/// config reset, or if `apply_hotkey` never ran) is then visible instead of
+/// being inferred from missing log lines.
+pub fn active_hotkey_vk_codes() -> (i32, i32) {
+    *GLOBAL_HOTKEY_VKS.lock().unwrap()
+}
+
 // ─── Global Hook State ─────────────────────────────────────────────────────────
 
 /// Left/right virtual-key pair that triggers activation (default: Ctrl).
@@ -184,7 +194,7 @@ fn run_hook_loop(is_active: Arc<AtomicBool>) {
 
     match hook {
         Ok(hook_handle) => {
-            eprintln!(
+            crate::diag!(
                 "quickai: [activator] keyboard hook installed — listening for the double-tap summon key"
             );
 
@@ -199,7 +209,7 @@ fn run_hook_loop(is_active: Arc<AtomicBool>) {
             let _ = unsafe { UnhookWindowsHookEx(hook_handle) };
         }
         Err(_) => {
-            eprintln!("quickai: [activator] failed to install keyboard hook");
+            crate::diag!("quickai: [activator] failed to install keyboard hook");
         }
     }
 
@@ -210,7 +220,7 @@ fn run_hook_loop(is_active: Arc<AtomicBool>) {
         *cb = None;
     }
 
-    eprintln!("quickai: [activator] keyboard hook removed");
+    crate::diag!("quickai: [activator] keyboard hook removed");
 }
 
 unsafe extern "system" fn keyboard_hook_callback(
@@ -243,7 +253,19 @@ unsafe extern "system" fn keyboard_hook_callback(
         let key_down = is_press && !is_release;
 
         let mut s = GLOBAL_ACTIVATION_STATE.lock().unwrap();
-        if evaluate_activation(&mut s, key_down) {
+        // Diagnostic (batch 7): proves whether the hook saw the gesture at all
+        // and, when it did, why the pair did not complete. `gap` is the time
+        // since the sequence's first tap — the value the 400 ms window is
+        // compared against. `held` is a key-down while the key is still marked
+        // pressed (auto-repeat, or a key-up that never arrived). This only
+        // observes; it does not change the predicate.
+        let held = s.is_pressed;
+        let gap = s.last_trigger.map(|first| first.elapsed());
+        let fired = evaluate_activation(&mut s, key_down);
+        crate::diag!(
+            "quickai: [activator] key vk=0x{vk_code:02X} down={key_down} held={held} gap={gap:?} fired={fired}"
+        );
+        if fired {
             let cb = GLOBAL_ON_ACTIVATION.lock().unwrap();
             if let Some(ref callback) = *cb {
                 callback();
@@ -457,6 +479,8 @@ mod tests {
     fn apply_hotkey_updates_global_pair() {
         apply_hotkey(Hotkey::Alt);
         assert_eq!(*GLOBAL_HOTKEY_VKS.lock().unwrap(), (VK_LMENU, VK_RMENU));
+        // The diagnostic accessor reads the same pair the hook uses.
+        assert_eq!(active_hotkey_vk_codes(), (VK_LMENU, VK_RMENU));
 
         // Restore the default so later tests observe the documented default.
         apply_hotkey(Hotkey::Ctrl);
@@ -464,6 +488,7 @@ mod tests {
             *GLOBAL_HOTKEY_VKS.lock().unwrap(),
             (VK_LCONTROL, VK_RCONTROL)
         );
+        assert_eq!(active_hotkey_vk_codes(), (VK_LCONTROL, VK_RCONTROL));
     }
 
     #[test]
