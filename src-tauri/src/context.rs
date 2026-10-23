@@ -73,11 +73,12 @@ pub fn capture_activation_context(overlay_is_visible: bool) -> ActivationContext
 const ANCHOR_OFFSET_X: f64 = 8.0;
 /// Distance (logical pts) above the anchor bottom edge for the bar top.
 const ANCHOR_OFFSET_Y: f64 = 2.0;
-/// Bottom padding of the overlay window in logical pts (pb-6 = 24 pt + motion py-2
-/// bottom = 8 pt). Added when positioning the bar **above** a selection so the
-/// bar's visible content bottom — not the transparent window edge — aligns with
-/// the selection boundary.
-const WINDOW_BOTTOM_PADDING: f64 = 32.0;
+/// Bottom clearance of the overlay window in logical pts (root `py-4` = 16 pt
+/// below + motion `py-2` bottom = 8 pt; the padding split is symmetric, 24 pt
+/// above and below). Added when positioning the bar **above** a selection so
+/// the bar's visible content bottom — not the transparent window edge — aligns
+/// with the selection boundary.
+const WINDOW_BOTTOM_PADDING: f64 = 24.0;
 /// Minimum distance from any screen edge (logical pts).
 pub(crate) const SCREEN_MARGIN: f64 = 16.0;
 /// Menu bar height offset (logical pts). Always 0 on Windows (no system menu bar).
@@ -313,10 +314,10 @@ mod tests {
     #[test]
     fn y_flips_above_when_selection_near_screen_bottom() {
         // Selection: y=870, h=20. below_y=888. 888+80=968 > (SH - SCREEN_MARGIN) → flip above.
-        // fixed_bottom = min(870-2+32, 900) = 900. y = (900-80).max(y_min) = 820.
+        // fixed_bottom = min(870-2+24, 900) = 892. y = (892-80).max(y_min) = 812.
         let ctx = ctx_with_bounds(100.0, 870.0, 80.0, 20.0);
         let p = calculate_window_position(&ctx, SW, SH, WW, WH);
-        assert_eq!(p.y, 820.0);
+        assert_eq!(p.y, 812.0);
     }
 
     #[test]
